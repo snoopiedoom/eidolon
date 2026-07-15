@@ -1,0 +1,45 @@
+/build/
+/out/
+/.cache/
+/.clangd/
+compile_commands.json
+
+# Local/editor state
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.user
+*.log
+
+# Source-asset archives are local inputs, not repository history.
+*.zip
+
+# SDL_shadercross host-tool build and downloaded compiler payloads.
+/lib/SDL_shadercross/build-host/
+/lib/SDL_shadercross/dxc_*-build/
+/lib/SDL_shadercross/dxc_*-subbuild/
+/lib/SDL_shadercross/external/DirectXShaderCompiler-binaries/
+
+# Vendored libraries keep the source Eidolon consumes, not upstream CI/test corpora.
+/lib/cgltf/.github/
+/lib/cgltf/fuzz/
+/lib/cgltf/test/
+/lib/ufbx/.github/
+/lib/ufbx/bindgen/
+/lib/ufbx/data/
+/lib/ufbx/examples/
+/lib/ufbx/extra/
+/lib/ufbx/misc/
+/lib/ufbx/test/
+/lib/SDL_shadercross/.github/
+/lib/SDL_shadercross/.vscode/
+/lib/SDL_shadercross/test/
+/lib/SDL_shadercross/VisualC-GDK/
+/lib/SDL_shadercross/external/SPIRV-Cross/.github/
+/lib/SDL_shadercross/external/SPIRV-Cross/.reuse/
+/lib/SDL_shadercross/external/SPIRV-Cross/gn/
+/lib/SDL_shadercross/external/SPIRV-Cross/reference/
+/lib/SDL_shadercross/external/SPIRV-Cross/samples/
+/lib/SDL_shadercross/external/SPIRV-Cross/shaders*/
+/lib/SDL_shadercross/external/SPIRV-Cross/tests-other/

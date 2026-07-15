@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-15T00:00:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"older output"}],"phase":"final"}}
+{"timestamp":"2026-07-15T00:00:01Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"hello\nworld"}}

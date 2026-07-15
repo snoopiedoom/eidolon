@@ -1,0 +1,77 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook idle",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook idle",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook waiting",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook waiting",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook running",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook review",
+            "commandWindows": "\"C:\\dev\\eidolon\\build\\windows\\eidolon.exe\" --hook review",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
+  }
+}
