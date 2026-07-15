@@ -11,6 +11,8 @@ Thumbs.db
 *.swo
 *.user
 *.log
+__pycache__/
+*.py[cod]
 
 # Source-asset archives are local inputs, not repository history.
 *.zip
