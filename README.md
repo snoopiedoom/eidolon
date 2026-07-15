@@ -167,6 +167,39 @@ presenting an alpha GPU surface directly. Per-pixel hit testing continues to con
 composited alpha channel, so transparent model pixels pass clicks through exactly like transparent
 sprite pixels.
 
+### Planned semantic motion controller
+
+Eidolon will generate primary motion procedurally instead of depending on authored idle clips. The
+control pipeline keeps semantic decisions slow and inspectable while pose solving and physical
+response run at animation rate:
+
+```text
+language/session state
+        ↓
+behavior intent, 1–5 Hz
+        ↓
+procedural pose goals
+        ↓
+IK + joint limits, 60 Hz
+        ↓
+secondary physics, 60 Hz
+        ↓
+bone matrices → GPU skinning
+        ↓
+asynchronous transparent-frame readback
+```
+
+Behavior intent describes affect, attention, engagement, intensity, and movement quality; it never
+drives individual joints. The pose layer composes **semantic motifs** such as stance, arm posture,
+spine attitude, gaze, and timing. Motifs are not hard-coded emotions: crossed arms may express
+confrontation, concentration, or self-comfort, while hands behind the back may read as confidence,
+curiosity, playfulness, or formality. Intent, personality, and context select and weight them.
+
+The first controller milestone is a neutral standing idle with planted feet, relaxed arms, balance
+and weight shifting, breathing, stochastic blinking, eye-then-head attention shifts, and spring
+motion on the hair chains. Later states reuse the same solver by changing goals and motif weights
+rather than switching canned animation files.
+
 ## Debug log
 
 The renderer and every short-lived hook client append lifecycle, transcript extraction, and IPC
