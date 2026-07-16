@@ -3,10 +3,14 @@
 A local visual embodiment for agents. Eidolon renders animated companions and their activity
 surface without owning the agent's persona or conversation runtime.
 
-The project is intentionally split into three layers:
+The current implementation state, sharp edges, and new-session continuation notes live in
+[`docs/development-state.md`](docs/development-state.md).
+
+The project is intentionally split into four layers:
 
 - `app`: state, input, timing, and composition
 - `animation`: provider-independent v2 sprite atlas playback
+- `motion`: procedural pose goals and skeleton evaluation
 - `platform`: the smallest possible native overlay boundary
 
 SDL owns rendering and input. Platform code only handles behavior SDL cannot express uniformly.
@@ -19,7 +23,8 @@ Requirements:
 - LLVM/Clang
 - SDL3 development files
 - the vendored `cgltf` source at `lib/cgltf`
-- the `shadercross` CLI when shader sources need to be rebuilt
+- the Windows SDK's `fxc.exe` for native D3D11 shader builds on Windows
+- the `shadercross` CLI when rebuilding the legacy SDL_GPU shaders on Linux
 
 Windows (the Makefile defaults to `C:/dev/SDL3`):
 
@@ -32,12 +37,15 @@ Override `SDL3_ROOT` if the SDK lives elsewhere. It must contain `include/SDL3`,
 `lib/x64/SDL3.lib`, and preferably
 `lib/x64/SDL3.dll`. The DLL is copied beside Eidolon when present.
 
-Shaders are authored once in HLSL and baked offline to SPIR-V and DXIL with
-`make shaders`. On Windows the default host-tool path is
-`.cache/shadercross/bin/shadercross.exe`; override it with
-`SHADERCROSS=/path/to/shadercross` when needed. `SDL_shadercross`, DXC, and SPIRV-Cross are build
-tools only and are not linked into or shipped beside `eidolon.exe`. Their source snapshots are
-vendored under `lib/`; generated host-tool builds and downloaded compiler payloads remain local.
+Shaders are authored once in HLSL. On Windows, `make shaders` discovers the newest x64 `fxc.exe`
+under the installed Windows SDK and bakes Shader Model 5.0 DXBC for D3D11. The compiler is a build
+tool only and is not linked into or shipped beside `eidolon.exe`; use `FXC=/path/to/fxc.exe` to
+override discovery. Debug and release objects, tests, and shader blobs use separate build
+directories, so changing `MODE` cannot silently reuse the other mode's output. Mode-specific
+binaries live under `build/windows/bin/<mode>`; each `make` copies the selected one to the stable
+`build/windows/eidolon.exe` launch path. The legacy Linux SDL_GPU path still uses `shadercross` for
+SPIR-V/DXIL; override it with `SHADERCROSS=/path/to/shadercross` when needed. `SDL_shadercross`,
+DXC, and SPIRV-Cross source snapshots remain under `lib/` for that path.
 
 Linux:
 
@@ -49,6 +57,12 @@ make
 Linux discovers SDL3 through `pkg-config`. Use `make MODE=release` for an optimized build and
 `make check` for the small state and animation tests.
 
+Windows forces SDL's `direct3d11` renderer. Rio and SDL composition share that renderer's D3D11
+device, avoiding the descriptor-heap failures previously seen in the separate D3D12 path. If
+D3D11 model initialization fails, Eidolon keeps the SDL renderer alive and falls back to the sprite.
+Render-target resets reacquire SDL's native texture view before drawing again; device reset/loss is
+logged and exits cleanly so the process can be restarted against a valid device.
+
 ## Prototype controls
 
 - drag the pet with the left mouse button
@@ -58,13 +72,41 @@ Linux discovers SDL3 through `pkg-config`. Use `make MODE=release` for an optimi
 - `4`: ready/review
 - `5`: failed
 - `Space`: cycle states
-- `Escape`: quit
+- middle-mouse drag on the model: rotate yaw and pitch
+- `Shift` + middle-mouse drag: rotate roll
+- double middle-click: reset model rotation
+- `F1`: toggle the debug panel; choose and calibrate semantic poses while keeping Rio visible
+- `F5`: force a reload of `config/motion.cfg`
+- `C` while a semantic pose is selected: copy its complete C initializer to the clipboard
+- `Escape`: close the debug panel, then quit
+
+Window and rendering dimensions follow SDL's per-display content scale, so `1.0x` remains physically
+consistent on high-DPI displays. The model scale control is an additional `0.75x..4.0x` multiplier.
+Scale changes Rio's presentation size without silently changing the 3D render target. The adjacent
+resolution selector chooses a bounded `512`, `1024`, `1536`, or `2048` square target; `1024` is the
+Windows default. This makes the quality/cost tradeoff explicit and prevents a large desktop scale
+from accidentally multiplying render work. On Windows the selected target remains GPU-resident from
+skinning through SDL composition; changing its resolution does not create a per-frame CPU transfer.
 
 Render a deterministic QA frame without leaving the overlay running:
 
 ```powershell
 ./build/windows/eidolon.exe --snapshot build/eidolon-snapshot.png
 ```
+
+Use `--snapshot-debug` to capture the open debug panel and semantic-pose menu, or
+`--snapshot-debug-resolution` to capture the resolution menu. Pose regressions can be captured
+without manual input:
+
+```powershell
+./build/windows/eidolon.exe --snapshot-pose 1 build/relaxed.png
+./build/windows/eidolon.exe --snapshot-debug-pose 1 build/relaxed-debug.png
+./build/windows/eidolon.exe --snapshot-resolution 2048 build/resolution-2048.png
+```
+
+Pose indices follow the order shown in the F1 selector. Snapshot commands create a hidden window,
+skip overlay configuration, IPC, and session watching, render one frame to disk, and exit. They do
+not take focus or require desktop input.
 
 ## Codex state bridge
 
@@ -85,10 +127,11 @@ Microsoft Store app, where locally configured command hooks may be reported as a
 external command being launched. The watcher establishes a baseline at startup and displays each
 new final agent message; it does not replay an old response when Eidolon starts.
 
-On Windows, the overlay rebuilds its native hit region from the rendered alpha channel whenever
-the sprite frame or bubble geometry changes. Fully transparent pixels are outside the Win32 window
-region and pass clicks to applications underneath; any visible sprite, bubble, or shadow pixel
-remains interactive and draggable.
+On Windows, the overlay rebuilds its native hit mask from the rendered alpha channel when visible
+geometry changes. Fully transparent pixels pass clicks to applications underneath; any visible
+sprite, bubble, or shadow pixel remains interactive and draggable. During model rotation or a
+debug-slider drag, the mask is temporarily suspended and readback is deferred; one fresh mask is
+built when the interaction ends.
 
 To connect Codex on Windows, copy `hooks/codex-hooks.windows.json` to
 `~/.codex/hooks.json`, then review and trust it through `/hooks`. Both command fields use the
@@ -150,26 +193,32 @@ several coplanar face layers; ordinary glTF blending sorts them incorrectly and 
 red discs. `make model-preview-glb` round-trips the GLB through Blender and renders
 `build/model-audit/rio-glb-preview.png` to catch that class of error.
 
-At runtime, `cgltf` decodes the GLB and SDL GPU renders its seven material draws with depth testing,
-embedded PNG textures, and alpha cutout. One HLSL shader pair is baked to SPIR-V for Vulkan and DXIL
-for D3D12. The Windows path is verified on the D3D12 backend.
+At runtime, `cgltf` decodes the GLB and native D3D11 renders its seven material draws with depth
+testing, embedded PNG textures, and alpha cutout. The HLSL pair is baked to Shader Model 5.0 DXBC.
+The runtime copies the 132-node hierarchy and 127-joint skin from the GLB, evaluates procedural local
+transforms, and uploads a linear-blend skinning palette at 30 fps. The source contains no animation
+clips; primary motion is generated by Eidolon's controller instead. Ordinary nodes such as the halo
+retain their exported world transform.
 
-SDL's GPU renderer explicitly rejects `SDL_WINDOW_TRANSPARENT`, so 3D and desktop composition have
-separate owners for now. SDL GPU renders Rio into a 256x256 offscreen texture, reads the static
-bind-pose result back once, and the existing transparent `SDL_Renderer` composites that texture with
-dialogue. This is a runtime 3D load and render, not a generated sprite asset, but it is not yet a
-live animation path. The source GLB has no animation clips, and GPU skinning is not implemented;
-skinned meshes therefore use their bind-pose vertex coordinates while ordinary nodes such as the
-halo retain their world transform.
+SDL owns the transparent D3D11 renderer, device, context, and swapchain. Rio renders into an
+SDL-owned target texture through the renderer's native device; `SDL_RenderTexture` then samples that
+same allocation while composing dialogue and debug UI. A scoped D3D11 state save/restore protects
+SDL's persistent 2D pipeline state around the native 3D pass. There is no fence, staging map,
+full-frame memcpy, or upload in the animated model path.
 
-Live bone animation needs either a pipelined offscreen readback or a platform compositor capable of
-presenting an alpha GPU surface directly. Per-pixel hit testing continues to consume the final
-composited alpha channel, so transparent model pixels pass clicks through exactly like transparent
-sprite pixels.
+Per-pixel hit testing reads the final composited alpha channel only for structural invalidations:
+initialization, window or model scale changes, state/bubble geometry changes, and completed manual
+pose or rotation edits. Ordinary breathing and sway reuse the conservative mask instead of forcing
+a synchronous full-window GPU readback twice per second. Windows keeps the exact alpha mask for
+`WM_NCHITTEST`, while `SetWindowRgn` receives a coarse 16-pixel envelope with far fewer rectangles;
+click-through remains pixel-exact without making DWM composite thousands of one-scan-line regions.
+The app presents at an explicit 30 Hz—the model's actual update rate—even when driver VSync is
+unsupported, preventing a transparent swapchain from flooding DWM. Hidden snapshots do not
+initialize the overlay hit-test path at all.
 
-### Planned semantic motion controller
+### Semantic motion controller
 
-Eidolon will generate primary motion procedurally instead of depending on authored idle clips. The
+Eidolon generates primary motion procedurally instead of depending on authored idle clips. The
 control pipeline keeps semantic decisions slow and inspectable while pose solving and physical
 response run at animation rate:
 
@@ -186,7 +235,7 @@ secondary physics, 60 Hz
         ↓
 bone matrices → GPU skinning
         ↓
-asynchronous transparent-frame readback
+shared GPU texture → transparent SDL composition
 ```
 
 Behavior intent describes affect, attention, engagement, intensity, and movement quality; it never
@@ -195,10 +244,57 @@ spine attitude, gaze, and timing. Motifs are not hard-coded emotions: crossed ar
 confrontation, concentration, or self-comfort, while hands behind the back may read as confidence,
 curiosity, playfulness, or formality. Intent, personality, and context select and weight them.
 
-The first controller milestone is a neutral standing idle with planted feet, relaxed arms, balance
-and weight shifting, breathing, stochastic blinking, eye-then-head attention shifts, and spring
-motion on the hair chains. Later states reuse the same solver by changing goals and motif weights
+The runtime now builds a VRM-like humanoid profile from semantic bone roles rather than letting pose
+code know Rio's exported joint names. Rio aliases and common humanoid names map into the same hips,
+torso, head, arm, hand, leg, and foot roles. The profile validates hierarchy, derives an orthonormal
+body frame, and measures limb lengths from the bind pose. A replaceable C solver boundary then runs
+an analytic two-bone arm solve with a pole target, reach clamping, and soft extension. Malformed or
+non-finite goals are rejected transactionally, so one failed arm cannot leave half a pose applied.
+
+Semantic arm goals are normalized by the character's measured arm length and expressed relative to
+each shoulder as **outward, up, forward**. The same values therefore mirror correctly across left and
+right arms and survive proportion changes without retuning raw bone angles. Slow weight sway and
+breathing still run first through the spine, neck, and head; target-space posing runs afterward and
+feeds the existing GPU skinning palette. The legacy **Arm lower** and **Elbow add** controls remain in
+Custom/file mode as a bind-axis diagnostic, not as the semantic-pose representation.
+
+The F1 selector is the visual calibration loop. Its initial entries are deliberately reviewable
+guesses: bind reference, relaxed/open, attentive, reserved/guarded, and playful/open. Selecting one
+installs a mutable runtime copy. Six sliders expose symmetric hand and elbow-pole coordinates; an
+asterisk beside the pose name marks edits while keeping the source preset identifiable. Press `C`
+to copy the exact two-arm initializer and paste it into review, then promote the corrected values to
+`src/pose.c`. File reload or either legacy neutral slider explicitly exits semantic mode, so the IK
+layer never silently overrides the control being edited.
+
+This first target-space slice owns arm position and elbow plane. Wrist orientation, shoulder and
+forearm twist limits, independent left/right editing, planted-foot IK, stochastic blinking,
+eye-then-head attention shifts, pose transitions, and spring motion on the hair chains remain the
+next controller layers. Later states reuse the same solver by changing goals and motif weights
 rather than switching canned animation files.
+
+Rio's chest is a prominent, heavy secondary-motion mass. Its response should be driven by torso
+acceleration through a damped spring with visible inertia, soft settling, anatomical limits, and
+subtle left/right variation. It must inherit breathing and abrupt pose changes without becoming a
+constant periodic bounce. Keep these parameters character-specific and runtime-tunable alongside
+the hair and clothing physics.
+
+### Live motion tuning
+
+Edit `config/motion.cfg` while Eidolon is running. The overlay hashes the file every 250 ms and
+applies a complete valid edit without restarting the current animation phase. The format is a
+strict, versioned `key = value` list with units in each key. Unknown, duplicate, missing, malformed,
+or out-of-range values reject the entire edit; the last-good configuration stays active while the
+debug panel shows the error. Compiled defaults remain available if the file cannot be loaded.
+
+The legacy neutral and idle sliders update the same active file-backed configuration. A `*` beside
+the debug-panel revision means one of those sliders has made an unsaved runtime-only change; the next
+valid file reload replaces it. Semantic target edits use a separate asterisk beside the pose name
+and can be copied as a source initializer. `F5` forces a reload even when the contents have not
+changed. The `seed` is reserved now so later blink and motif scheduling can remain reproducible.
+
+The neutral controls intentionally have broad calibration ranges: `arm_lower_deg` accepts
+`-45..90`, and `elbow_add_deg` accepts `-90..90`. Idle rotation amplitudes accept `-15..15`; negative
+values invert the direction. Rejected values report their allowed range in the debug panel and log.
 
 ## Debug log
 

@@ -2,16 +2,24 @@ CC := clang
 MODE ?= debug
 BLENDER ?= blender
 PYTHON ?= python
+FXC ?=
 
 COMMON_SOURCES := \
 	src/animation.c \
 	src/app.c \
 	src/dialogue.c \
+	src/debug_ui.c \
 	src/draw.c \
 	src/hook_output.c \
+	src/humanoid.c \
+	src/ik.c \
 	src/log.c \
 	src/main.c \
 	src/model.c \
+	src/motion.c \
+	src/motion_config.c \
+	src/pose.c \
+	src/pose_solver.c \
 	src/session_watch.c \
 	src/state.c
 
@@ -24,12 +32,15 @@ PLATFORM_SOURCES := src/platform/windows_ipc.c src/platform/windows_overlay.c \
 	src/platform/windows_session_files.c
 CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include"
 LDFLAGS += -L"$(SDL3_ROOT)/lib/x64"
-LDLIBS += -lSDL3 -ldwmapi -luser32 -lgdi32
+LDLIBS += -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11
 define make-dir
 @powershell.exe -NoProfile -Command "New-Item -ItemType Directory -Force '$(subst /,\,$(dir $@))' | Out-Null"
 endef
 define copy-runtime
 @powershell.exe -NoProfile -Command "if (Test-Path '$(SDL3_ROOT)/lib/x64/SDL3.dll') { Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)' }"
+endef
+define copy-output
+@powershell.exe -NoProfile -Command "Copy-Item -Force '$(subst /,\,$<)' '$(subst /,\,$@)'"
 endef
 define remove-build
 @powershell.exe -NoProfile -Command "if (Test-Path '$(BUILD_ROOT)') { Remove-Item -Recurse -Force '$(BUILD_ROOT)' }"
@@ -48,27 +59,41 @@ define make-dir
 endef
 define copy-runtime
 endef
+define copy-output
+@cp -f "$<" "$@"
+endef
 define remove-build
 @rm -rf "$(BUILD_ROOT)"
 endef
 endif
 
 BUILD_ROOT := build/$(PLATFORM)
-OBJ_DIR := $(BUILD_ROOT)/obj
+OBJ_DIR := $(BUILD_ROOT)/obj/$(MODE)
+BIN_DIR := $(BUILD_ROOT)/bin/$(MODE)
+MODE_TARGET := $(BIN_DIR)/eidolon$(EXE)
 TARGET := $(BUILD_ROOT)/eidolon$(EXE)
 SHADER_SOURCE_DIR := shaders
-SHADER_BUILD_DIR := $(BUILD_ROOT)/shaders
+SHADER_BUILD_DIR := $(BUILD_ROOT)/shaders/$(MODE)
 SHADER_NAMES := model.vert model.frag
 SPIRV_SHADERS := $(addprefix $(SHADER_BUILD_DIR)/SPIRV/,$(addsuffix .spv,$(SHADER_NAMES)))
 DXIL_SHADERS := $(addprefix $(SHADER_BUILD_DIR)/DXIL/,$(addsuffix .dxil,$(SHADER_NAMES)))
+DXBC_VERTEX_SHADER := $(SHADER_BUILD_DIR)/DXBC/model.vert.cso
+DXBC_FRAGMENT_SHADER := $(SHADER_BUILD_DIR)/DXBC/model.frag.cso
+DXBC_SHADERS := $(DXBC_VERTEX_SHADER) $(DXBC_FRAGMENT_SHADER)
+ifeq ($(OS),Windows_NT)
+SHADER_OUTPUTS := $(DXBC_SHADERS)
+else
 SHADER_OUTPUTS := $(SPIRV_SHADERS) $(DXIL_SHADERS)
+endif
 RUNTIME_MODEL := $(CURDIR)/assets/model/rio.glb
+MOTION_CONFIG := $(CURDIR)/config/motion.cfg
 SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
 DEPS := $(OBJECTS:.o=.d)
 
 CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_MODEL_PATH=\"$(RUNTIME_MODEL)\" \
+	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
 	-DEIDOLON_SHADER_DIR=\"$(abspath $(SHADER_BUILD_DIR))\"
 CFLAGS += -std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -MMD -MP
 
@@ -82,21 +107,39 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all clean check shaders model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check shaders model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help
 
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS) | shaders
+force-output:
+
+$(TARGET): $(MODE_TARGET) force-output
+	$(make-dir)
+	$(copy-output)
+	$(copy-runtime)
+
+$(MODE_TARGET): $(OBJECTS) | shaders
 	$(make-dir)
 	$(CC) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
-	$(copy-runtime)
 
 $(OBJ_DIR)/%.o: %.c
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 shaders: $(SHADER_OUTPUTS)
+
+$(DXBC_VERTEX_SHADER): $(SHADER_SOURCE_DIR)/model.vert.hlsl tools/compile_d3d11_shader.ps1
+	$(make-dir)
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/compile_d3d11_shader.ps1" \
+		-SourcePath "$(CURDIR)/$<" -Target vs_5_0 -OutputPath "$(CURDIR)/$@" -Mode $(MODE) \
+		-FxcPath "$(FXC)"
+
+$(DXBC_FRAGMENT_SHADER): $(SHADER_SOURCE_DIR)/model.frag.hlsl tools/compile_d3d11_shader.ps1
+	$(make-dir)
+	@powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/compile_d3d11_shader.ps1" \
+		-SourcePath "$(CURDIR)/$<" -Target ps_5_0 -OutputPath "$(CURDIR)/$@" -Mode $(MODE) \
+		-FxcPath "$(FXC)"
 
 $(SHADER_BUILD_DIR)/SPIRV/%.spv: $(SHADER_SOURCE_DIR)/%.hlsl
 	$(make-dir)
@@ -106,33 +149,81 @@ $(SHADER_BUILD_DIR)/DXIL/%.dxil: $(SHADER_SOURCE_DIR)/%.hlsl
 	$(make-dir)
 	"$(SHADERCROSS)" "$<" -o "$@"
 
-ANIMATION_TEST := $(BUILD_ROOT)/tests/animation_test$(EXE)
-STATE_TEST := $(BUILD_ROOT)/tests/state_test$(EXE)
-DIALOGUE_TEST := $(BUILD_ROOT)/tests/dialogue_test$(EXE)
-HOOK_OUTPUT_TEST := $(BUILD_ROOT)/tests/hook_output_test$(EXE)
+TEST_DIR := $(BUILD_ROOT)/tests/$(MODE)
+ANIMATION_TEST := $(TEST_DIR)/animation_test$(EXE)
+STATE_TEST := $(TEST_DIR)/state_test$(EXE)
+DIALOGUE_TEST := $(TEST_DIR)/dialogue_test$(EXE)
+HOOK_OUTPUT_TEST := $(TEST_DIR)/hook_output_test$(EXE)
+MOTION_TEST := $(TEST_DIR)/motion_test$(EXE)
+MOTION_CONFIG_TEST := $(TEST_DIR)/motion_config_test$(EXE)
+POSE_TEST := $(TEST_DIR)/pose_test$(EXE)
+IK_TEST := $(TEST_DIR)/ik_test$(EXE)
+HUMANOID_TEST := $(TEST_DIR)/humanoid_test$(EXE)
+POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
 
-$(ANIMATION_TEST): tests/animation_test.c src/animation.c
+ifeq ($(OS),Windows_NT)
+TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
+
+$(TEST_RUNTIME): $(SDL3_ROOT)/lib/x64/SDL3.dll
+	$(make-dir)
+	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$@'"
+else
+TEST_RUNTIME :=
+endif
+
+$(ANIMATION_TEST): tests/animation_test.c src/animation.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(STATE_TEST): tests/state_test.c src/state.c
+$(STATE_TEST): tests/state_test.c src/state.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c
+$(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(HOOK_OUTPUT_TEST): tests/hook_output_test.c src/hook_output.c src/log.c
+$(HOOK_OUTPUT_TEST): tests/hook_output_test.c src/hook_output.c src/log.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) -DEIDOLON_TEST_TRANSCRIPT=\"$(abspath tests/fixtures/transcript.jsonl)\" \
 		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST)
+$(MOTION_TEST): tests/motion_test.c src/motion.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(MOTION_CONFIG_TEST): tests/motion_config_test.c src/motion_config.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(POSE_TEST): tests/pose_test.c src/pose.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(IK_TEST): tests/ik_test.c src/ik.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(HUMANOID_TEST): tests/humanoid_test.c src/humanoid.c src/motion.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(POSE_SOLVER_TEST): tests/pose_solver_test.c src/pose_solver.c src/humanoid.c src/motion.c src/ik.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
+	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
 	$(HOOK_OUTPUT_TEST)
+	$(MOTION_TEST)
+	$(MOTION_CONFIG_TEST)
+	$(POSE_TEST)
+	$(IK_TEST)
+	$(HUMANOID_TEST)
+	$(POSE_SOLVER_TEST)
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json

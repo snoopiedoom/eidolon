@@ -1,6 +1,8 @@
 #include "draw.h"
 
 #include "animation.h"
+#include "debug_ui.h"
+#include "log.h"
 #include "platform/overlay.h"
 
 static void fill_rounded_rect(SDL_Renderer *renderer, const SDL_FRect *rect, float radius,
@@ -116,8 +118,7 @@ static void draw_dialogue_text(EidolonApp *app) {
     size_t line_length = 0;
     float y = 59.0F;
 
-    for (size_t index = 0; index < app->dialogue.revealed &&
-                           app->dialogue.page[index] != '\0';
+    for (size_t index = 0; index < app->dialogue.revealed && app->dialogue.page[index] != '\0';
          ++index) {
         const char character = app->dialogue.page[index];
         if (character == '\n') {
@@ -156,8 +157,8 @@ static void draw_dialogue_bubble(EidolonApp *app) {
     draw_dialogue_text(app);
 
     if (eidolon_dialogue_has_next_page(&app->dialogue)) {
-        fill_triangle(app->renderer, (SDL_FPoint){350.0F, 128.0F},
-                      (SDL_FPoint){360.0F, 128.0F}, (SDL_FPoint){355.0F, 135.0F}, accent);
+        fill_triangle(app->renderer, (SDL_FPoint){350.0F, 128.0F}, (SDL_FPoint){360.0F, 128.0F},
+                      (SDL_FPoint){355.0F, 135.0F}, accent);
     }
 }
 
@@ -165,8 +166,7 @@ static void draw_scene(EidolonApp *app) {
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0);
     SDL_RenderClear(app->renderer);
 
-    if (app->state == EIDOLON_STATE_REVIEW &&
-        eidolon_dialogue_is_active(&app->dialogue)) {
+    if (app->state == EIDOLON_STATE_REVIEW && eidolon_dialogue_is_active(&app->dialogue)) {
         draw_dialogue_bubble(app);
     } else if (app->state != EIDOLON_STATE_IDLE) {
         draw_state_bubble(app);
@@ -174,14 +174,34 @@ static void draw_scene(EidolonApp *app) {
 
     SDL_Texture *model_texture = eidolon_model_texture(app->model);
     if (model_texture != NULL) {
-        const SDL_FRect destination = {264.0F, 104.0F, 256.0F, 256.0F};
-        SDL_RenderTexture(app->renderer, model_texture, NULL, &destination);
+        const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * app->model_scale;
+        const SDL_FRect destination = {
+            (float)app->window_width - model_size,
+            (float)app->window_height - model_size,
+            model_size,
+            model_size,
+        };
+        const bool rendered = SDL_RenderTexture(app->renderer, model_texture, NULL, &destination);
+        static bool model_draw_reported = false;
+        if (!rendered && !model_draw_reported) {
+            eidolon_log_write("renderer", "model texture draw success=%s error=%s",
+                              rendered ? "yes" : "no", SDL_GetError());
+            model_draw_reported = true;
+        }
     } else {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
-        const SDL_FRect destination = {310.0F, 128.0F, EIDOLON_CELL_WIDTH,
-                                       EIDOLON_CELL_HEIGHT};
+        const float width = (float)EIDOLON_CELL_WIDTH * app->model_scale;
+        const float height = (float)EIDOLON_CELL_HEIGHT * app->model_scale;
+        const SDL_FRect destination = {
+            (float)app->window_width - 18.0F - width,
+            (float)app->window_height - 24.0F - height,
+            width,
+            height,
+        };
         SDL_RenderTexture(app->renderer, app->atlas, &source, &destination);
     }
+
+    eidolon_debug_ui_draw(app);
 }
 
 static int hit_test_mode(const EidolonApp *app) {
@@ -193,9 +213,23 @@ static int hit_test_mode(const EidolonApp *app) {
 
 static void update_hit_test_if_needed(EidolonApp *app) {
     const int mode = hit_test_mode(app);
-    if (app->hit_test_initialized && app->hit_test_row == app->animation.row &&
-        app->hit_test_frame == app->animation.frame && app->hit_test_mode == mode) {
-        return;
+    const uint64_t model_transform_revision =
+        eidolon_model_presented_transform_revision(app->model);
+    const bool model_active = eidolon_model_texture(app->model) != NULL;
+    const bool interaction_active =
+        app->model_rotation_dragging || app->debug_drag_control != EIDOLON_DEBUG_CONTROL_NONE;
+    const bool model_transform_changed =
+        app->hit_test_model_transform_revision != model_transform_revision;
+    const bool sprite_unchanged =
+        app->hit_test_row == app->animation.row && app->hit_test_frame == app->animation.frame;
+    if (app->hit_test_initialized && app->hit_test_mode == mode) {
+        if (model_active) {
+            if (interaction_active || !model_transform_changed) {
+                return;
+            }
+        } else if (sprite_unchanged && !model_transform_changed) {
+            return;
+        }
     }
 
     if (eidolon_platform_update_hit_test(app->window, app->renderer)) {
@@ -203,6 +237,7 @@ static void update_hit_test_if_needed(EidolonApp *app) {
         app->hit_test_row = app->animation.row;
         app->hit_test_frame = app->animation.frame;
         app->hit_test_mode = mode;
+        app->hit_test_model_transform_revision = model_transform_revision;
     }
 }
 
@@ -213,12 +248,37 @@ void eidolon_draw_frame(EidolonApp *app) {
 }
 
 bool eidolon_draw_snapshot(EidolonApp *app, const char *path) {
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetCurrentRenderOutputSize(app->renderer, &width, &height)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not query snapshot size: %s",
+                     SDL_GetError());
+        return false;
+    }
+
+    SDL_Texture *previous_target = SDL_GetRenderTarget(app->renderer);
+    SDL_Texture *snapshot_target = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ABGR8888,
+                                                     SDL_TEXTUREACCESS_TARGET, width, height);
+    if (snapshot_target == NULL || !SDL_SetRenderTarget(app->renderer, snapshot_target)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not create snapshot target: %s",
+                     SDL_GetError());
+        SDL_DestroyTexture(snapshot_target);
+        return false;
+    }
     draw_scene(app);
 
-    SDL_Surface *surface = SDL_RenderReadPixels(app->renderer, NULL);
+    SDL_Surface *surface = eidolon_platform_read_pixels(app->renderer);
+    const bool restored = SDL_SetRenderTarget(app->renderer, previous_target);
+    SDL_DestroyTexture(snapshot_target);
     if (surface == NULL) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not read snapshot pixels: %s",
                      SDL_GetError());
+        return false;
+    }
+    if (!restored) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not restore render target: %s",
+                     SDL_GetError());
+        SDL_DestroySurface(surface);
         return false;
     }
 
