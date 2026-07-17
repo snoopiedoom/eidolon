@@ -43,6 +43,23 @@ static bool parse_resolution(const char *text, int *resolution) {
     return true;
 }
 
+static bool parse_portrait_motion(const char *expression_text, const char *elapsed_text,
+                                  size_t expression_count, int *expression,
+                                  unsigned int *elapsed_ms) {
+    char *expression_end = NULL;
+    char *elapsed_end = NULL;
+    const long parsed_expression = strtol(expression_text, &expression_end, 10);
+    const unsigned long parsed_elapsed = strtoul(elapsed_text, &elapsed_end, 10);
+    if (expression_end == expression_text || *expression_end != '\0' ||
+        elapsed_end == elapsed_text || *elapsed_end != '\0' || parsed_expression < 0 ||
+        (size_t)parsed_expression >= expression_count || parsed_elapsed > 2000UL) {
+        return false;
+    }
+    *expression = (int)parsed_expression;
+    *elapsed_ms = (unsigned int)parsed_elapsed;
+    return true;
+}
+
 static bool is_snapshot_command(int argc, char **argv) {
     if (argc < 2) {
         return false;
@@ -51,7 +68,10 @@ static bool is_snapshot_command(int argc, char **argv) {
            strcmp(argv[1], "--snapshot-debug-resolution") == 0 ||
            strcmp(argv[1], "--snapshot-dialogue") == 0 || strcmp(argv[1], "--snapshot-pose") == 0 ||
            strcmp(argv[1], "--snapshot-debug-pose") == 0 ||
-           strcmp(argv[1], "--snapshot-resolution") == 0;
+           strcmp(argv[1], "--snapshot-resolution") == 0 ||
+           strcmp(argv[1], "--snapshot-sessions") == 0 ||
+           strcmp(argv[1], "--snapshot-face") == 0 ||
+           strcmp(argv[1], "--snapshot-portrait-motion") == 0;
 }
 
 static void log_usage(void) {
@@ -59,6 +79,9 @@ static void log_usage(void) {
                  "Usage: eidolon [--snapshot <output.png>] [--snapshot-debug <output.png>] "
                  "[--snapshot-debug-resolution <output.png>] "
                  "[--snapshot-dialogue <output.png> <text>] "
+                 "[--snapshot-face <output.png>] "
+                 "[--snapshot-sessions <output.png>] "
+                 "[--snapshot-portrait-motion <expression> <elapsed-ms> <output.png>] "
                  "[--snapshot-pose <index> <output.png>] "
                  "[--snapshot-debug-pose <index> <output.png>] "
                  "[--snapshot-resolution <side> <output.png>] [--hook <state>]");
@@ -103,9 +126,19 @@ int main(int argc, char **argv) {
         return saved ? 0 : 1;
     }
 
+    if (argc == 3 && strcmp(argv[1], "--snapshot-face") == 0) {
+        eidolon_portrait_set_face_mode(app.portrait, true);
+        eidolon_app_set_model_scale(&app, app.model_scale);
+        eidolon_app_set_state(&app, EIDOLON_STATE_WAITING);
+        const bool saved = eidolon_draw_snapshot(&app, argv[2]);
+        eidolon_app_destroy(&app);
+        return saved ? 0 : 1;
+    }
+
     if (argc == 3 && strcmp(argv[1], "--snapshot-debug") == 0) {
         app.debug_visible = true;
         app.debug_pose_dropdown_open = true;
+        app.debug_portrait_dropdown_open = true;
         const bool saved = eidolon_draw_snapshot(&app, argv[2]);
         eidolon_app_destroy(&app);
         return saved ? 0 : 1;
@@ -122,8 +155,52 @@ int main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[1], "--snapshot-dialogue") == 0) {
         eidolon_app_set_state(&app, EIDOLON_STATE_REVIEW);
         eidolon_dialogue_set(&app.dialogue, argv[3], SDL_GetTicks());
+        eidolon_dialogue_configure(&app.dialogue, app.dialogue_movement, app.dialogue_hold_ms);
         eidolon_dialogue_advance(&app.dialogue, SDL_GetTicks());
         const bool saved = eidolon_draw_snapshot(&app, argv[2]);
+        eidolon_app_destroy(&app);
+        return saved ? 0 : 1;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "--snapshot-sessions") == 0) {
+        static const char *const titles[4] = {"eidolon", "Fix authentication tests",
+                                               "Review shader pipeline", "Plan release notes"};
+        static const char *const messages[4] = {
+            "multiple session registry is alive. each bubble owns its own dialogue state.",
+            "three tests remain. the transaction boundary is the suspicious part.",
+            "the texture coordinates are correct now; material alpha still needs review.",
+            "release notes drafted. this bubble scrolls its own dialogue independently.",
+        };
+        for (int slot = 0; slot < 4; ++slot) {
+            EidolonSessionEntry *entry = &app.session_registry.entries[slot];
+            entry->occupied = true;
+            entry->visible = true;
+            entry->layout_slot = slot;
+            SDL_strlcpy(entry->title, titles[slot], sizeof(entry->title));
+            eidolon_dialogue_set(&entry->dialogue, messages[slot], SDL_GetTicks());
+            eidolon_dialogue_configure(&entry->dialogue, app.dialogue_movement,
+                                       app.dialogue_hold_ms);
+            eidolon_dialogue_advance(&entry->dialogue, SDL_GetTicks());
+        }
+        eidolon_app_set_model_scale(&app, app.model_scale);
+        const bool saved = eidolon_draw_snapshot(&app, argv[2]);
+        eidolon_app_destroy(&app);
+        return saved ? 0 : 1;
+    }
+
+    if (argc == 5 && strcmp(argv[1], "--snapshot-portrait-motion") == 0) {
+        int expression = 0;
+        unsigned int elapsed_ms = 0U;
+        if (!parse_portrait_motion(argv[2], argv[3],
+                                   eidolon_portrait_expression_count(app.portrait), &expression,
+                                   &elapsed_ms)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid portrait motion sample");
+            eidolon_app_destroy(&app);
+            return 2;
+        }
+        eidolon_app_select_portrait(&app, expression);
+        SDL_Delay(elapsed_ms);
+        const bool saved = eidolon_draw_snapshot(&app, argv[4]);
         eidolon_app_destroy(&app);
         return saved ? 0 : 1;
     }

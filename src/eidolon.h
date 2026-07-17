@@ -7,13 +7,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "affect.h"
+#include "affect_client.h"
 #include "dialogue.h"
 #include "model.h"
 #include "motion_config.h"
 #include "platform/ipc.h"
+#include "portrait.h"
 #include "pose.h"
-#include "session_watch.h"
+#include "session_registry.h"
 #include "state.h"
+#include "text_renderer.h"
 
 #define EIDOLON_WINDOW_WIDTH 520
 #define EIDOLON_WINDOW_HEIGHT 360
@@ -54,12 +58,19 @@ typedef struct EidolonApp {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *atlas;
+    EidolonTextRenderer *text_renderer;
     EidolonModelRenderer *model;
+    EidolonPortraitRenderer *portrait;
+    EidolonDialogueTheme dialogue_theme;
+    EidolonDialogueMovement dialogue_movement;
+    unsigned int dialogue_hold_ms;
     EidolonState state;
     EidolonAnimation animation;
     EidolonDialogue dialogue;
+    EidolonAffectController affect;
+    EidolonAffectClient *affect_client;
     EidolonIpcServer ipc;
-    EidolonSessionWatch session_watch;
+    EidolonSessionRegistry session_registry;
     EidolonMotionConfig motion_config;
     EidolonMotionConfigWatch motion_config_watch;
     bool running;
@@ -70,14 +81,17 @@ typedef struct EidolonApp {
     float drag_global_y;
     int drag_window_x;
     int drag_window_y;
+    int drag_session_slot;
     int hit_test_row;
     int hit_test_frame;
     int hit_test_mode;
     uint64_t hit_test_model_transform_revision;
+    uint64_t hit_test_portrait_revision;
     bool hit_test_initialized;
     bool debug_visible;
     bool debug_pose_dropdown_open;
     bool debug_resolution_dropdown_open;
+    bool debug_portrait_dropdown_open;
     bool model_rotation_dragging;
     bool model_rotation_roll_dragging;
     EidolonDebugControl debug_drag_control;

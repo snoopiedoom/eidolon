@@ -1,0 +1,125 @@
+#include "text_renderer.h"
+
+#include "log.h"
+
+#include <SDL3_ttf/SDL_ttf.h>
+
+#include <string.h>
+
+#define TEXT_CACHE_CAPACITY 4096U
+#define FALLBACK_FONT_CAPACITY 3U
+
+typedef struct TextSlot {
+    TTF_Text *text;
+    char content[TEXT_CACHE_CAPACITY];
+    size_t length;
+    int wrap_width;
+    SDL_Color color;
+    bool initialized;
+} TextSlot;
+
+struct EidolonTextRenderer {
+    TTF_TextEngine *engine;
+    TTF_Font *font;
+    TTF_Font *fallbacks[FALLBACK_FONT_CAPACITY];
+    TextSlot slots[EIDOLON_TEXT_SLOT_COUNT];
+};
+
+static void add_fallback(EidolonTextRenderer *text_renderer, size_t slot, const char *path,
+                         float point_size) {
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path, &info) || info.type != SDL_PATHTYPE_FILE) {
+        return;
+    }
+    TTF_Font *fallback = TTF_OpenFont(path, point_size);
+    if (fallback == NULL || !TTF_AddFallbackFont(text_renderer->font, fallback)) {
+        eidolon_log_write("text", "could not add fallback %s: %s", path, SDL_GetError());
+        TTF_CloseFont(fallback);
+        return;
+    }
+    text_renderer->fallbacks[slot] = fallback;
+    eidolon_log_write("text", "fallback loaded: %s", path);
+}
+
+EidolonTextRenderer *eidolon_text_renderer_create(SDL_Renderer *renderer, const char *font_path,
+                                                  float point_size) {
+    if (renderer == NULL || font_path == NULL || !TTF_Init()) {
+        return NULL;
+    }
+    EidolonTextRenderer *text_renderer = SDL_calloc(1U, sizeof(*text_renderer));
+    if (text_renderer == NULL) {
+        TTF_Quit();
+        return NULL;
+    }
+    text_renderer->engine = TTF_CreateRendererTextEngine(renderer);
+    text_renderer->font = TTF_OpenFont(font_path, point_size);
+    if (text_renderer->engine == NULL || text_renderer->font == NULL) {
+        eidolon_text_renderer_destroy(text_renderer);
+        return NULL;
+    }
+#if defined(_WIN32)
+    add_fallback(text_renderer, 0U, "C:/Windows/Fonts/msyh.ttc", point_size);
+    add_fallback(text_renderer, 1U, "C:/Windows/Fonts/malgun.ttf", point_size);
+    add_fallback(text_renderer, 2U, "C:/Windows/Fonts/seguiemj.ttf", point_size);
+#endif
+    eidolon_log_write("text", "primary font loaded: %s %.1fpt", font_path, point_size);
+    return text_renderer;
+}
+
+void eidolon_text_renderer_destroy(EidolonTextRenderer *text_renderer) {
+    if (text_renderer == NULL) {
+        return;
+    }
+    for (size_t index = 0U; index < EIDOLON_TEXT_SLOT_COUNT; ++index) {
+        TTF_DestroyText(text_renderer->slots[index].text);
+    }
+    if (text_renderer->font != NULL) {
+        TTF_ClearFallbackFonts(text_renderer->font);
+    }
+    for (size_t index = 0U; index < FALLBACK_FONT_CAPACITY; ++index) {
+        TTF_CloseFont(text_renderer->fallbacks[index]);
+    }
+    TTF_CloseFont(text_renderer->font);
+    TTF_DestroyRendererTextEngine(text_renderer->engine);
+    SDL_free(text_renderer);
+    TTF_Quit();
+}
+
+bool eidolon_text_renderer_draw(EidolonTextRenderer *text_renderer, size_t slot_index,
+                                const char *text, size_t length, float x, float y, int wrap_width,
+                                SDL_Color color) {
+    if (text_renderer == NULL || slot_index >= EIDOLON_TEXT_SLOT_COUNT || text == NULL ||
+        length >= TEXT_CACHE_CAPACITY) {
+        return false;
+    }
+    TextSlot *slot = &text_renderer->slots[slot_index];
+    if (slot->text == NULL) {
+        slot->text = TTF_CreateText(text_renderer->engine, text_renderer->font, "", 0U);
+        if (slot->text == NULL) {
+            return false;
+        }
+    }
+    if (!slot->initialized || slot->length != length || memcmp(slot->content, text, length) != 0) {
+        if (!TTF_SetTextString(slot->text, text, length)) {
+            return false;
+        }
+        SDL_memcpy(slot->content, text, length);
+        slot->content[length] = '\0';
+        slot->length = length;
+    }
+    if (!slot->initialized || slot->wrap_width != wrap_width) {
+        if (!TTF_SetTextWrapWidth(slot->text, wrap_width)) {
+            return false;
+        }
+        slot->wrap_width = wrap_width;
+    }
+    if (!slot->initialized || slot->color.r != color.r || slot->color.g != color.g ||
+        slot->color.b != color.b || slot->color.a != color.a) {
+        if (!TTF_SetTextColor(slot->text, color.r, color.g, color.b, color.a)) {
+            return false;
+        }
+        slot->color = color;
+    }
+    slot->initialized = true;
+    return TTF_DrawRendererText(slot->text, x, y);
+}

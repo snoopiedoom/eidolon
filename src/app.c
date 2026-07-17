@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "animation.h"
+#include "bubble_layout.h"
 #include "debug_ui.h"
 #include "draw.h"
 #include "log.h"
@@ -10,6 +11,16 @@
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
 #define PRESENTATION_RATE_HZ 30U
 #define PRESENTATION_INTERVAL_NS ((Uint64)SDL_NS_PER_SECOND / PRESENTATION_RATE_HZ)
+
+static float session_attention_direction(const EidolonSessionEntry *entry) {
+    return entry != NULL && (entry->layout_slot & 1) != 0 ? 1.0F : -1.0F;
+}
+
+static uint64_t begin_affect_text(EidolonApp *app, const char *text) {
+    const uint64_t sequence = eidolon_affect_controller_begin_text(&app->affect);
+    (void)eidolon_affect_client_submit(app->affect_client, sequence, text);
+    return sequence;
+}
 
 static Sint32 presentation_wait_ms(Uint64 now_ns, Uint64 deadline_ns) {
     if (now_ns >= deadline_ns) {
@@ -55,6 +66,7 @@ static void apply_motion_config(EidolonApp *app) {
 
 static void clear_semantic_pose(EidolonApp *app) {
     app->semantic_pose_index = EIDOLON_SEMANTIC_POSE_CUSTOM;
+    app->drag_session_slot = -1;
     app->semantic_pose_dirty = false;
     eidolon_model_clear_semantic_pose(app->model);
 }
@@ -157,6 +169,9 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     app->window_coordinate_scale = 1.0F;
     app->window_width = EIDOLON_WINDOW_WIDTH;
     app->window_height = EIDOLON_WINDOW_HEIGHT;
+    app->dialogue_theme = EIDOLON_DIALOGUE_THEME_CLASSIC;
+    app->dialogue_movement = EIDOLON_DIALOGUE_MOVEMENT_FOLLOW;
+    app->dialogue_hold_ms = EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS;
     app->semantic_pose_index = EIDOLON_SEMANTIC_POSE_CUSTOM;
     eidolon_motion_config_defaults(&app->motion_config);
     eidolon_motion_config_watch_init(&app->motion_config_watch);
@@ -195,6 +210,13 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
     eidolon_log_write("renderer", "SDL backend=%s", SDL_GetRendererName(app->renderer));
 
+    app->text_renderer = eidolon_text_renderer_create(app->renderer, EIDOLON_FONT_PATH, 12.0F);
+    if (app->text_renderer == NULL) {
+        eidolon_log_write("text", "Unicode renderer unavailable; debug text fallback active: %s",
+                          SDL_GetError());
+        SDL_ClearError();
+    }
+
     if (!SDL_SetRenderVSync(app->renderer, app->snapshot_mode ? 0 : 1)) {
         eidolon_log_write("renderer", "vsync request failed; explicit %u Hz cap remains active: %s",
                           PRESENTATION_RATE_HZ, SDL_GetError());
@@ -202,25 +224,39 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
     if (!app->snapshot_mode) {
         update_display_metrics(app);
-        eidolon_app_set_model_scale(app, app->model_scale);
+    }
+
+    app->portrait =
+        eidolon_portrait_create(app->renderer, EIDOLON_CHARACTER_CONFIG_PATH, EIDOLON_ASSET_DIR);
+    if (app->portrait == NULL) {
+        eidolon_log_write("portrait", "initialization failed; trying legacy renderers: %s",
+                          SDL_GetError());
+        SDL_ClearError();
+        if (!load_atlas(app)) {
+            return false;
+        }
+        app->model = eidolon_model_create(app->renderer, EIDOLON_MODEL_PATH, EIDOLON_SHADER_DIR,
+                                          neutral_pose_from_config(&app->motion_config),
+                                          idle_tuning_from_config(&app->motion_config));
+        if (app->model == NULL) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Rio 3D renderer unavailable; using sprite fallback: %s", SDL_GetError());
+            eidolon_log_write("model", "initialization failed; sprite fallback active: %s",
+                              SDL_GetError());
+        }
+    } else {
+        eidolon_log_write("renderer", "portrait active; 3D initialization skipped");
+        app->dialogue_theme = eidolon_portrait_dialogue_theme(app->portrait);
+        app->dialogue_movement = eidolon_portrait_dialogue_movement(app->portrait);
+        app->dialogue_hold_ms = eidolon_portrait_dialogue_hold_ms(app->portrait);
+    }
+
+    eidolon_app_set_model_scale(app, app->model_scale);
+    if (!app->snapshot_mode) {
         if (!eidolon_platform_configure_overlay(app->window)) {
             return false;
         }
         set_initial_position(app->window);
-    }
-
-    if (!load_atlas(app)) {
-        return false;
-    }
-
-    app->model = eidolon_model_create(app->renderer, EIDOLON_MODEL_PATH, EIDOLON_SHADER_DIR,
-                                      neutral_pose_from_config(&app->motion_config),
-                                      idle_tuning_from_config(&app->motion_config));
-    if (app->model == NULL) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Rio 3D renderer unavailable; using sprite fallback: %s", SDL_GetError());
-        eidolon_log_write("model", "initialization failed; sprite fallback active: %s",
-                          SDL_GetError());
     }
 
     if (!app->snapshot_mode) {
@@ -230,10 +266,19 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
             return false;
         }
         eidolon_log_write("renderer", "ipc server ready");
+        if (!eidolon_session_registry_init(&app->session_registry)) {
+            eidolon_log_write("session", "background discovery unavailable: %s", SDL_GetError());
+        }
+        eidolon_session_registry_configure_dialogue(
+            &app->session_registry, app->dialogue_movement, app->dialogue_hold_ms);
     }
 
     app->running = true;
     app->state = EIDOLON_STATE_IDLE;
+    eidolon_affect_controller_init(&app->affect, app->state, SDL_GetTicks());
+    if (!app->snapshot_mode) {
+        app->affect_client = eidolon_affect_client_create(EIDOLON_AFFECT_WORKER_PATH);
+    }
     eidolon_animation_set_state(&app->animation, app->state, SDL_GetTicks());
     if (!app->snapshot_mode) {
         eidolon_app_log_presentation_metrics(app);
@@ -246,18 +291,40 @@ void eidolon_app_set_state(EidolonApp *app, EidolonState state) {
         return;
     }
     app->state = state;
+    eidolon_affect_controller_set_state(&app->affect, state, SDL_GetTicks());
     eidolon_animation_set_state(&app->animation, app->state, SDL_GetTicks());
+    eidolon_portrait_set_state(app->portrait, state, SDL_GetTicks());
+}
+
+void eidolon_app_select_portrait(EidolonApp *app, int expression) {
+    eidolon_portrait_set_override(app->portrait, expression, SDL_GetTicks());
+    app->hit_test_initialized = false;
 }
 
 void eidolon_app_set_model_scale(EidolonApp *app, float scale) {
     const float clamped = SDL_clamp(scale, EIDOLON_MODEL_SCALE_MIN, EIDOLON_MODEL_SCALE_MAX);
-    const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * clamped;
-    const int logical_width =
-        SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf((float)EIDOLON_WINDOW_WIDTH -
-                                                     EIDOLON_MODEL_DISPLAY_SIZE + model_size));
-    const int logical_height =
-        SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf((float)EIDOLON_WINDOW_HEIGHT -
-                                                      EIDOLON_MODEL_DISPLAY_SIZE + model_size));
+    int logical_width = 0;
+    int logical_height = 0;
+    if (eidolon_portrait_ready(app->portrait)) {
+        const float portrait_width = eidolon_portrait_display_width(app->portrait) * clamped;
+        const float portrait_height = eidolon_portrait_display_height(app->portrait) * clamped;
+        logical_width = SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf(portrait_width + 24.0F));
+        logical_height = SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf(portrait_height + 24.0F));
+        size_t visible = eidolon_session_registry_visible_count(&app->session_registry);
+        if (visible == 0U && eidolon_portrait_face_mode(app->portrait)) {
+            visible = 1U;
+        }
+        eidolon_bubble_layout_canvas(portrait_width, portrait_height, visible, &logical_width,
+                                     &logical_height);
+    } else {
+        const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * clamped;
+        logical_width =
+            SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf((float)EIDOLON_WINDOW_WIDTH -
+                                                         EIDOLON_MODEL_DISPLAY_SIZE + model_size));
+        logical_height =
+            SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf((float)EIDOLON_WINDOW_HEIGHT -
+                                                          EIDOLON_MODEL_DISPLAY_SIZE + model_size));
+    }
     const int native_width =
         SDL_max(1, (int)SDL_ceilf((float)logical_width * app->window_coordinate_scale));
     const int native_height =
@@ -423,6 +490,42 @@ bool eidolon_app_copy_semantic_pose(EidolonApp *app) {
     return true;
 }
 
+static SDL_FRect portrait_character_rect(const EidolonApp *app) {
+    const float width = eidolon_portrait_display_width(app->portrait) * app->model_scale;
+    const float height = eidolon_portrait_display_height(app->portrait) * app->model_scale;
+    const size_t visible = eidolon_session_registry_visible_count(&app->session_registry);
+    return eidolon_bubble_layout_character(app->window_width, app->window_height, width, height,
+                                           visible);
+}
+
+static void toggle_portrait_framing(EidolonApp *app) {
+    if (!eidolon_portrait_ready(app->portrait)) {
+        return;
+    }
+    int old_window_x = 0;
+    int old_window_y = 0;
+    SDL_GetWindowPosition(app->window, &old_window_x, &old_window_y);
+    const SDL_FRect old_character = portrait_character_rect(app);
+    const float old_center_x = (float)old_window_x + (old_character.x + old_character.w * 0.5F) *
+                                                         app->window_coordinate_scale;
+    const float old_center_y = (float)old_window_y + (old_character.y + old_character.h * 0.5F) *
+                                                         app->window_coordinate_scale;
+
+    eidolon_portrait_set_face_mode(app->portrait, !eidolon_portrait_face_mode(app->portrait));
+    eidolon_app_set_model_scale(app, app->model_scale);
+
+    const SDL_FRect new_character = portrait_character_rect(app);
+    const int new_window_x = (int)SDL_roundf(
+        old_center_x - (new_character.x + new_character.w * 0.5F) * app->window_coordinate_scale);
+    const int new_window_y = (int)SDL_roundf(
+        old_center_y - (new_character.y + new_character.h * 0.5F) * app->window_coordinate_scale);
+    if (!SDL_SetWindowPosition(app->window, new_window_x, new_window_y)) {
+        eidolon_log_write("portrait", "could not preserve character center while reframing: %s",
+                          SDL_GetError());
+    }
+    app->hit_test_initialized = false;
+}
+
 static void handle_key(EidolonApp *app, SDL_Keycode key) {
     switch (key) {
     case SDLK_ESCAPE:
@@ -430,6 +533,7 @@ static void handle_key(EidolonApp *app, SDL_Keycode key) {
             app->debug_visible = false;
             app->debug_pose_dropdown_open = false;
             app->debug_resolution_dropdown_open = false;
+            app->debug_portrait_dropdown_open = false;
             app->debug_drag_control = EIDOLON_DEBUG_CONTROL_NONE;
             app->hit_test_initialized = false;
         } else {
@@ -440,11 +544,21 @@ static void handle_key(EidolonApp *app, SDL_Keycode key) {
         app->debug_visible = !app->debug_visible;
         app->debug_pose_dropdown_open = false;
         app->debug_resolution_dropdown_open = false;
+        app->debug_portrait_dropdown_open = false;
         app->debug_drag_control = EIDOLON_DEBUG_CONTROL_NONE;
         app->hit_test_initialized = false;
         break;
     case SDLK_F5:
         eidolon_motion_config_watch_force_reload(&app->motion_config_watch);
+        eidolon_portrait_force_reload(app->portrait);
+        break;
+    case SDLK_P:
+        toggle_portrait_framing(app);
+        break;
+    case SDLK_T:
+        app->dialogue_theme = (EidolonDialogueTheme)(
+            ((int)app->dialogue_theme + 1) % (int)EIDOLON_DIALOGUE_THEME_COUNT);
+        app->hit_test_initialized = false;
         break;
     case SDLK_C:
         if (app->debug_visible) {
@@ -474,9 +588,23 @@ static void handle_key(EidolonApp *app, SDL_Keycode key) {
     }
 }
 
-static void begin_drag(EidolonApp *app) {
+static void begin_drag(EidolonApp *app, const SDL_MouseButtonEvent *button) {
     app->dragging = true;
     app->drag_moved = false;
+    const size_t visible = eidolon_session_registry_visible_count(&app->session_registry);
+    app->drag_session_slot = -1;
+    for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+        if (eidolon_session_registry_at_slot(&app->session_registry, slot) == NULL) {
+            continue;
+        }
+        const SDL_FRect bubble =
+            eidolon_bubble_layout_rect(app->window_width, app->window_height, slot, visible);
+        if (button->x >= bubble.x && button->x < bubble.x + bubble.w && button->y >= bubble.y &&
+            button->y < bubble.y + bubble.h) {
+            app->drag_session_slot = slot;
+            break;
+        }
+    }
     SDL_GetGlobalMouseState(&app->drag_global_x, &app->drag_global_y);
     SDL_GetWindowPosition(app->window, &app->drag_window_x, &app->drag_window_y);
 }
@@ -588,17 +716,29 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         if (event->button.button == SDL_BUTTON_LEFT) {
-            begin_drag(app);
+            begin_drag(app, &event->button);
         } else if (event->button.button == SDL_BUTTON_MIDDLE) {
             begin_model_rotation_drag(app, &event->button);
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
         if (event->button.button == SDL_BUTTON_LEFT) {
-            if (app->dragging && !app->drag_moved && app->state == EIDOLON_STATE_REVIEW) {
+            if (app->dragging && !app->drag_moved && app->drag_session_slot >= 0) {
+                if (eidolon_session_registry_advance(&app->session_registry, app->drag_session_slot,
+                                                     SDL_GetTicks())) {
+                    EidolonSessionEntry *entry = eidolon_session_registry_at_slot(
+                        &app->session_registry, app->drag_session_slot);
+                    (void)begin_affect_text(app, entry != NULL ? entry->dialogue.page : "");
+                }
+            } else if (app->dragging && !app->drag_moved && app->state == EIDOLON_STATE_REVIEW) {
+                const size_t previous_cursor = app->dialogue.cursor;
                 eidolon_dialogue_advance(&app->dialogue, SDL_GetTicks());
+                if (app->dialogue.cursor != previous_cursor) {
+                    (void)begin_affect_text(app, app->dialogue.page);
+                }
             }
             app->dragging = false;
+            app->drag_session_slot = -1;
         } else if (event->button.button == SDL_BUTTON_MIDDLE) {
             end_model_rotation_drag(app);
         }
@@ -617,6 +757,7 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
 
 void eidolon_app_run(EidolonApp *app) {
     Uint64 next_presentation_ns = SDL_GetTicksNS();
+    Uint64 previous_presentation_ns = 0U;
     while (app->running) {
         SDL_Event event;
         const Sint32 wait_ms = presentation_wait_ms(SDL_GetTicksNS(), next_presentation_ns);
@@ -634,6 +775,12 @@ void eidolon_app_run(EidolonApp *app) {
         if (now_ns < next_presentation_ns) {
             continue;
         }
+        if (previous_presentation_ns != 0U &&
+            now_ns - previous_presentation_ns > PRESENTATION_INTERVAL_NS * 2U) {
+            eidolon_log_write("renderer", "presentation hitch gap_ms=%.2f",
+                              (double)(now_ns - previous_presentation_ns) / (double)SDL_NS_PER_MS);
+        }
+        previous_presentation_ns = now_ns;
 
         EidolonState received_state;
         char received_text[EIDOLON_IPC_TEXT_CAPACITY + 1];
@@ -644,19 +791,81 @@ void eidolon_app_run(EidolonApp *app) {
             eidolon_app_set_state(app, received_state);
             if (received_text[0] != '\0') {
                 eidolon_dialogue_set(&app->dialogue, received_text, SDL_GetTicks());
+                eidolon_dialogue_configure(&app->dialogue, app->dialogue_movement,
+                                           app->dialogue_hold_ms);
+                eidolon_portrait_set_attention(app->portrait, -1.0F);
+                (void)begin_affect_text(app, app->dialogue.page);
             }
         }
 
         const uint64_t now_ms = SDL_GetTicks();
         poll_motion_config(app, now_ms);
-        char session_output[EIDOLON_IPC_TEXT_CAPACITY + 1];
-        if (eidolon_session_watch_poll(&app->session_watch, now_ms, session_output,
-                                       sizeof(session_output))) {
+        const EidolonSessionPoll sessions =
+            eidolon_session_registry_poll(&app->session_registry, now_ms);
+        if (sessions.new_message) {
             eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
-            eidolon_dialogue_set(&app->dialogue, session_output, now_ms);
+            eidolon_portrait_set_attention(
+                app->portrait, session_attention_direction(sessions.message_session));
+            sessions.message_session->affect_sequence =
+                begin_affect_text(app, sessions.message_session->dialogue.page);
+        }
+        if (sessions.page_advanced && sessions.advanced_session != NULL) {
+            eidolon_portrait_set_attention(
+                app->portrait, session_attention_direction(sessions.advanced_session));
+            sessions.advanced_session->affect_sequence =
+                begin_affect_text(app, sessions.advanced_session->dialogue.page);
+        }
+        if (sessions.speech_beat > 0.0F) {
+            eidolon_portrait_set_attention(
+                app->portrait, session_attention_direction(sessions.speaking_session));
+            eidolon_portrait_speak(app->portrait, sessions.speech_beat, now_ms);
+        }
+        if (sessions.changed) {
+            eidolon_app_set_model_scale(app, app->model_scale);
+            app->hit_test_initialized = false;
+            if (eidolon_session_registry_visible_count(&app->session_registry) == 0U) {
+                eidolon_portrait_set_attention(app->portrait, 0.0F);
+            }
         }
         eidolon_animation_update(&app->animation, app->state, now_ms);
-        eidolon_dialogue_update(&app->dialogue, now_ms);
+        if (eidolon_session_registry_visible_count(&app->session_registry) == 0U) {
+            const size_t previous_revealed = app->dialogue.revealed;
+            eidolon_dialogue_update(&app->dialogue, now_ms);
+            const float local_speech_beat =
+                eidolon_dialogue_reveal_emphasis(&app->dialogue, previous_revealed);
+            if (local_speech_beat > 0.0F) {
+                eidolon_portrait_set_attention(app->portrait, -1.0F);
+                eidolon_portrait_speak(app->portrait, local_speech_beat, now_ms);
+            }
+            if (eidolon_dialogue_autoplay(&app->dialogue, now_ms)) {
+                (void)begin_affect_text(app, app->dialogue.page);
+            }
+        }
+        uint64_t affect_sequence = 0U;
+        float affect_probabilities[EIDOLON_GOEMOTIONS_COUNT];
+        while (eidolon_affect_client_poll(app->affect_client, &affect_sequence,
+                                          affect_probabilities)) {
+            if (eidolon_affect_controller_apply_goemotions(&app->affect, affect_sequence,
+                                                           affect_probabilities, now_ms)) {
+                eidolon_log_write("affect", "classification applied sequence=%llu evidence=%.3f",
+                                  (unsigned long long)affect_sequence, app->affect.evidence);
+            }
+        }
+        eidolon_affect_controller_update(&app->affect, 1.0F / (float)PRESENTATION_RATE_HZ, now_ms);
+        eidolon_portrait_set_expression_intent(app->portrait, app->affect.expression_intent,
+                                               now_ms);
+        const uint64_t portrait_revision = eidolon_portrait_revision(app->portrait);
+        eidolon_portrait_update(app->portrait, now_ms);
+        if (eidolon_portrait_revision(app->portrait) != portrait_revision) {
+            app->dialogue_theme = eidolon_portrait_dialogue_theme(app->portrait);
+            app->dialogue_movement = eidolon_portrait_dialogue_movement(app->portrait);
+            app->dialogue_hold_ms = eidolon_portrait_dialogue_hold_ms(app->portrait);
+            eidolon_dialogue_configure(&app->dialogue, app->dialogue_movement,
+                                       app->dialogue_hold_ms);
+            eidolon_session_registry_configure_dialogue(
+                &app->session_registry, app->dialogue_movement, app->dialogue_hold_ms);
+            eidolon_app_set_model_scale(app, app->model_scale);
+        }
         eidolon_model_update(app->model, now_ms);
         eidolon_draw_frame(app);
         next_presentation_ns =
@@ -666,11 +875,15 @@ void eidolon_app_run(EidolonApp *app) {
 
 void eidolon_app_destroy(EidolonApp *app) {
     end_model_rotation_drag(app);
+    eidolon_affect_client_destroy(app->affect_client);
+    eidolon_session_registry_destroy(&app->session_registry);
     if (!app->snapshot_mode) {
         eidolon_ipc_server_destroy(&app->ipc);
     }
     eidolon_platform_destroy_overlay(app->window);
     eidolon_model_destroy(app->model);
+    eidolon_portrait_destroy(app->portrait);
+    eidolon_text_renderer_destroy(app->text_renderer);
     SDL_DestroyTexture(app->atlas);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);

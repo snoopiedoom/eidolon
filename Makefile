@@ -5,8 +5,11 @@ PYTHON ?= python
 FXC ?=
 
 COMMON_SOURCES := \
+	src/affect.c \
+	src/affect_client.c \
 	src/animation.c \
 	src/app.c \
+	src/bubble_layout.c \
 	src/dialogue.c \
 	src/debug_ui.c \
 	src/draw.c \
@@ -20,24 +23,28 @@ COMMON_SOURCES := \
 	src/motion_config.c \
 	src/pose.c \
 	src/pose_solver.c \
-	src/session_watch.c \
-	src/state.c
+	src/portrait.c \
+	src/session_registry.c \
+	src/state.c \
+	src/text_renderer.c
 
 ifeq ($(OS),Windows_NT)
 PLATFORM := windows
 EXE := .exe
 SDL3_ROOT ?= C:/dev/SDL3
+SDL3_TTF_ROOT ?= $(CURDIR)/.cache/sdl_ttf/SDL3_ttf-3.2.2
 SHADERCROSS ?= $(CURDIR)/.cache/shadercross/bin/shadercross.exe
 PLATFORM_SOURCES := src/platform/windows_ipc.c src/platform/windows_overlay.c \
 	src/platform/windows_session_files.c
-CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include"
-LDFLAGS += -L"$(SDL3_ROOT)/lib/x64"
-LDLIBS += -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11
+CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include" -I"$(SDL3_TTF_ROOT)/include"
+LDFLAGS += -L"$(SDL3_ROOT)/lib/x64" -L"$(SDL3_TTF_ROOT)/lib/x64"
+LDLIBS += -lSDL3_ttf -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11
 define make-dir
 @powershell.exe -NoProfile -Command "New-Item -ItemType Directory -Force '$(subst /,\,$(dir $@))' | Out-Null"
 endef
 define copy-runtime
 @powershell.exe -NoProfile -Command "if (Test-Path '$(SDL3_ROOT)/lib/x64/SDL3.dll') { Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)' }"
+@powershell.exe -NoProfile -Command "if (Test-Path '$(SDL3_TTF_ROOT)/lib/x64/SDL3_ttf.dll') { Copy-Item -Force '$(SDL3_TTF_ROOT)/lib/x64/SDL3_ttf.dll' '$(dir $@)' }"
 endef
 define copy-output
 @powershell.exe -NoProfile -Command "Copy-Item -Force '$(subst /,\,$<)' '$(subst /,\,$@)'"
@@ -52,8 +59,8 @@ PKG_CONFIG ?= pkg-config
 SHADERCROSS ?= shadercross
 PLATFORM_SOURCES := src/platform/linux_ipc.c src/platform/linux_overlay.c \
 	src/platform/linux_session_files.c
-CPPFLAGS += -Isrc $(shell $(PKG_CONFIG) --cflags sdl3)
-LDLIBS += $(shell $(PKG_CONFIG) --libs sdl3) -lm
+CPPFLAGS += -Isrc $(shell $(PKG_CONFIG) --cflags sdl3 SDL3_ttf)
+LDLIBS += $(shell $(PKG_CONFIG) --libs sdl3 SDL3_ttf) -lm
 define make-dir
 @mkdir -p "$(dir $@)"
 endef
@@ -87,13 +94,17 @@ SHADER_OUTPUTS := $(SPIRV_SHADERS) $(DXIL_SHADERS)
 endif
 RUNTIME_MODEL := $(CURDIR)/assets/model/rio.glb
 MOTION_CONFIG := $(CURDIR)/config/motion.cfg
+CHARACTER_CONFIG := $(CURDIR)/config/character.cfg
 SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
 DEPS := $(OBJECTS:.o=.d)
 
 CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
+	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
+	"-DEIDOLON_FONT_PATH=\"$(CURDIR)/assets/fonts/MesloLG Nerd Font/MesloLGSNerdFontMono-Regular.ttf\"" \
 	-DEIDOLON_MODEL_PATH=\"$(RUNTIME_MODEL)\" \
 	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
+	-DEIDOLON_CHARACTER_CONFIG_PATH=\"$(abspath $(CHARACTER_CONFIG))\" \
 	-DEIDOLON_SHADER_DIR=\"$(abspath $(SHADER_BUILD_DIR))\"
 CFLAGS += -std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -MMD -MP
 
@@ -107,10 +118,57 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check shaders model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check shaders text-setup affect-setup affect affect-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help
 
 all: $(TARGET)
+
+text-setup:
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/setup_text_windows.ps1"
+
+affect-setup:
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/setup_affect_windows.ps1"
+
+ifeq ($(OS),Windows_NT)
+AFFECT_CACHE := $(CURDIR)/.cache/affect
+AFFECT_ORT := $(AFFECT_CACHE)/onnxruntime
+AFFECT_MODEL_DIR := $(AFFECT_CACHE)/model
+AFFECT_WORKER := $(BUILD_ROOT)/eidolon-affect-worker.exe
+AFFECT_CLIENT_TEST := $(BUILD_ROOT)/tests/$(MODE)/affect_client_test.exe
+
+affect: $(AFFECT_WORKER)
+
+$(AFFECT_WORKER): tools/affect_worker.c src/affect_tokenizer.c src/affect_tokenizer.h \
+		src/affect_protocol.h $(AFFECT_ORT)/include/onnxruntime_c_api.h \
+		$(AFFECT_MODEL_DIR)/model_quantized.onnx $(AFFECT_MODEL_DIR)/vocab.json \
+		$(AFFECT_MODEL_DIR)/merges.txt
+	$(make-dir)
+	$(CC) -Isrc -I"$(AFFECT_ORT)/include" \
+		-DEIDOLON_AFFECT_MODEL_PATH=L\"$(AFFECT_MODEL_DIR)/model_quantized.onnx\" \
+		-DEIDOLON_AFFECT_VOCAB_PATH=\"$(AFFECT_MODEL_DIR)/vocab.json\" \
+		-DEIDOLON_AFFECT_MERGES_PATH=\"$(AFFECT_MODEL_DIR)/merges.txt\" \
+		$(filter-out -MMD -MP,$(CFLAGS)) tools/affect_worker.c src/affect_tokenizer.c \
+		-L"$(AFFECT_ORT)/lib" -lonnxruntime -o $@
+	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(AFFECT_ORT)/lib/onnxruntime.dll' '$(dir $@)'"
+
+$(AFFECT_CLIENT_TEST): tests/affect_client_test.c src/affect_client.c src/affect_client.h \
+		src/affect_protocol.h src/log.c $(AFFECT_WORKER) $(SDL3_ROOT)/lib/x64/SDL3.dll
+	$(make-dir)
+	$(CC) $(CPPFLAGS) -DEIDOLON_TEST_AFFECT_WORKER=\"$(abspath $(AFFECT_WORKER))\" \
+		$(TEST_CFLAGS) tests/affect_client_test.c src/affect_client.c src/log.c \
+		$(LDFLAGS) $(LDLIBS) -o $@
+	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)'"
+
+affect-check: $(AFFECT_WORKER) $(AFFECT_CLIENT_TEST)
+	"$(AFFECT_WORKER)" --text "I love this. You did a wonderful job."
+	"$(AFFECT_CLIENT_TEST)"
+else
+affect:
+	@echo "The native affect worker is currently prepared for Windows only."
+	@false
+
+affect-check: affect
+endif
 
 force-output:
 
@@ -160,6 +218,11 @@ POSE_TEST := $(TEST_DIR)/pose_test$(EXE)
 IK_TEST := $(TEST_DIR)/ik_test$(EXE)
 HUMANOID_TEST := $(TEST_DIR)/humanoid_test$(EXE)
 POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
+PORTRAIT_TEST := $(TEST_DIR)/portrait_test$(EXE)
+AFFECT_TEST := $(TEST_DIR)/affect_test$(EXE)
+AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
+BUBBLE_LAYOUT_TEST := $(TEST_DIR)/bubble_layout_test$(EXE)
+SESSION_REGISTRY_TEST := $(TEST_DIR)/session_registry_test$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
@@ -186,6 +249,7 @@ $(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c | $(TEST_RUNTIME)
 $(HOOK_OUTPUT_TEST): tests/hook_output_test.c src/hook_output.c src/log.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) -DEIDOLON_TEST_TRANSCRIPT=\"$(abspath tests/fixtures/transcript.jsonl)\" \
+		-DEIDOLON_TEST_SUBAGENT_TRANSCRIPT=\"$(abspath tests/fixtures/subagent.jsonl)\" \
 		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(MOTION_TEST): tests/motion_test.c src/motion.c | $(TEST_RUNTIME)
@@ -212,8 +276,33 @@ $(POSE_SOLVER_TEST): tests/pose_solver_test.c src/pose_solver.c src/humanoid.c s
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(PORTRAIT_TEST): tests/portrait_test.c src/portrait.c src/affect.c src/state.c src/log.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(AFFECT_TEST): tests/affect_test.c src/affect.c src/state.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(AFFECT_TOKENIZER_TEST): tests/affect_tokenizer_test.c src/affect_tokenizer.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) \
+		-DEIDOLON_TEST_AFFECT_VOCAB=\"$(abspath tests/fixtures/affect_vocab.json)\" \
+		-DEIDOLON_TEST_AFFECT_MERGES=\"$(abspath tests/fixtures/affect_merges.txt)\" \
+		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(BUBBLE_LAYOUT_TEST): tests/bubble_layout_test.c src/bubble_layout.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(SESSION_REGISTRY_TEST): tests/session_registry_test.c src/session_registry.c src/dialogue.c src/log.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
-	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST)
+	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
+	$(PORTRAIT_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
+	$(SESSION_REGISTRY_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -224,6 +313,11 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MO
 	$(IK_TEST)
 	$(HUMANOID_TEST)
 	$(POSE_SOLVER_TEST)
+	$(PORTRAIT_TEST)
+	$(AFFECT_TEST)
+	$(AFFECT_TOKENIZER_TEST)
+	$(BUBBLE_LAYOUT_TEST)
+	$(SESSION_REGISTRY_TEST)
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json
@@ -289,6 +383,10 @@ help:
 	@echo "make                 build debug Eidolon with clang"
 	@echo "make MODE=release    build optimized Eidolon with clang"
 	@echo "make check           build and run unit tests"
+	@echo "make text-setup      download verified SDL_ttf runtime/development files"
+	@echo "make affect-setup    download verified optional GoEmotions runtime/model"
+	@echo "make affect          build the optional native GoEmotions worker"
+	@echo "make affect-check    run one visible native inference smoke test"
 	@echo "make shaders         bake SDL_GPU SPIR-V and DXIL shaders"
 	@echo "make model-audit     inspect every Rio FBX with Blender"
 	@echo "make model-material-audit  inspect imported FBX shader graphs"

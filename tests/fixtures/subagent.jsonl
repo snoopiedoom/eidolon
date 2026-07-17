@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-17T08:00:00Z","type":"session_meta","payload":{"id":"019f6ea9-a33b-7651-b3aa-742ee1f9f7a5","source":{"subagent":{"other":"guardian"}},"thread_source":"subagent"}}
+{"timestamp":"2026-07-17T08:00:01Z","type":"response_item","payload":{"role":"assistant","phase":"final","content":[{"type":"output_text","text":"internal output"}]}}

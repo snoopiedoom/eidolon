@@ -17,6 +17,14 @@ __pycache__/
 # Source-asset archives are local inputs, not repository history.
 *.zip
 
+# Extracted character art is a local runtime input. Manifests live under config/.
+/assets/characters/
+/assets/Mobile - Blue Archive - Characters - Asuna/
+
+# Local reference checkouts and ad-hoc visual captures.
+/lib/BA2LW/
+/screen*.png
+
 # SDL_shadercross host-tool build and downloaded compiler payloads.
 /lib/SDL_shadercross/build-host/
 /lib/SDL_shadercross/dxc_*-build/

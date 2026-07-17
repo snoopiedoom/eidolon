@@ -20,7 +20,24 @@ static bool has_jsonl_suffix(const char *name) {
     return length >= 6 && strcmp(name + length - 6, ".jsonl") == 0;
 }
 
-static void scan_directory(const char *directory, unsigned depth, LatestFile *latest) {
+static void insert_latest(LatestFile *files, size_t capacity, const char *path, uint64_t stamp) {
+    size_t position = 0U;
+    while (position < capacity && files[position].found && files[position].stamp >= stamp) {
+        ++position;
+    }
+    if (position >= capacity) {
+        return;
+    }
+    for (size_t index = capacity - 1U; index > position; --index) {
+        files[index] = files[index - 1U];
+    }
+    files[position].found = true;
+    files[position].stamp = stamp;
+    snprintf(files[position].path, sizeof(files[position].path), "%s", path);
+}
+
+static void scan_directory(const char *directory, unsigned depth, LatestFile *latest,
+                           size_t capacity) {
     if (depth > 8) {
         return;
     }
@@ -45,55 +62,71 @@ static void scan_directory(const char *directory, unsigned depth, LatestFile *la
             continue;
         }
         if (S_ISDIR(info.st_mode)) {
-            scan_directory(child, depth + 1, latest);
+            scan_directory(child, depth + 1, latest, capacity);
         } else if (S_ISREG(info.st_mode) && has_jsonl_suffix(entry->d_name)) {
-            const uint64_t stamp = (uint64_t)info.st_mtim.tv_sec * 1000000000U +
-                                   (uint64_t)info.st_mtim.tv_nsec;
-            if (!latest->found || stamp > latest->stamp) {
-                latest->found = true;
-                latest->stamp = stamp;
-                snprintf(latest->path, sizeof(latest->path), "%s", child);
-            }
+            const uint64_t stamp =
+                (uint64_t)info.st_mtim.tv_sec * 1000000000U + (uint64_t)info.st_mtim.tv_nsec;
+            insert_latest(latest, capacity, child, stamp);
         }
     }
     closedir(entries);
 }
 
-bool eidolon_platform_latest_transcript(char *path, size_t capacity, uint64_t *stamp) {
-    if (path == NULL || capacity == 0 || stamp == NULL) {
-        return false;
+size_t eidolon_platform_list_transcripts(EidolonTranscriptFile *files, size_t capacity) {
+    if (files == NULL || capacity == 0U) {
+        return 0U;
     }
     const char *home = getenv("HOME");
     if (home == NULL || home[0] == '\0') {
-        return false;
+        return 0U;
     }
 
     char root[SESSION_PATH_CAPACITY];
     const int length = snprintf(root, sizeof(root), "%s/.codex/sessions", home);
     if (length <= 0 || (size_t)length >= sizeof(root)) {
-        return false;
+        return 0U;
     }
 
-    LatestFile latest = {0};
-    const time_t now = time(NULL);
-    for (unsigned offset = 0; offset < 2; ++offset) {
-        const time_t day = now - (time_t)offset * 24 * 60 * 60;
-        struct tm date;
-        if (localtime_r(&day, &date) == NULL) {
-            continue;
-        }
-        char directory[SESSION_PATH_CAPACITY];
-        const int directory_length =
-            snprintf(directory, sizeof(directory), "%s/%04d/%02d/%02d", root,
-                     date.tm_year + 1900, date.tm_mon + 1, date.tm_mday);
-        if (directory_length > 0 && (size_t)directory_length < sizeof(directory)) {
-            scan_directory(directory, 0, &latest);
-        }
+    LatestFile *latest = calloc(capacity, sizeof(*latest));
+    if (latest == NULL) {
+        return 0U;
     }
-    if (!latest.found || strlen(latest.path) + 1 > capacity) {
+    scan_directory(root, 0, latest, capacity);
+    size_t count = 0U;
+    while (count < capacity && latest[count].found) {
+        memcpy(files[count].path, latest[count].path, strlen(latest[count].path) + 1U);
+        files[count].stamp = latest[count].stamp;
+        ++count;
+    }
+    free(latest);
+    return count;
+}
+
+bool eidolon_platform_latest_transcript(char *path, size_t capacity, uint64_t *stamp) {
+    EidolonTranscriptFile file;
+    if (path == NULL || capacity == 0U || stamp == NULL ||
+        eidolon_platform_list_transcripts(&file, 1U) == 0U || strlen(file.path) + 1U > capacity) {
         return false;
     }
-    memcpy(path, latest.path, strlen(latest.path) + 1);
-    *stamp = latest.stamp;
+    memcpy(path, file.path, strlen(file.path) + 1U);
+    *stamp = file.stamp;
     return true;
+}
+
+bool eidolon_platform_transcript_stamp(const char *path, uint64_t *stamp) {
+    struct stat info;
+    if (path == NULL || stamp == NULL || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) {
+        return false;
+    }
+    *stamp = (uint64_t)info.st_mtim.tv_sec * UINT64_C(1000000000) + (uint64_t)info.st_mtim.tv_nsec;
+    return true;
+}
+
+bool eidolon_platform_session_index_path(char *path, size_t capacity) {
+    const char *home = getenv("HOME");
+    if (path == NULL || capacity == 0U || home == NULL || home[0] == '\0') {
+        return false;
+    }
+    const int length = snprintf(path, capacity, "%s/.codex/session_index.jsonl", home);
+    return length > 0 && (size_t)length < capacity;
 }

@@ -1,22 +1,119 @@
 #include "dialogue.h"
 
+#include <math.h>
 #include <string.h>
 
 #define DIALOGUE_COLUMNS 39
 #define DIALOGUE_LINES 5
 #define REVEAL_INTERVAL_MS 24U
 
+static size_t utf8_next(const char *text, size_t cursor, uint32_t *codepoint) {
+    const unsigned char first = (unsigned char)text[cursor];
+    if (first < 0x80U) {
+        *codepoint = first;
+        return cursor + 1U;
+    }
+    size_t length = 0U;
+    uint32_t value = 0U;
+    uint32_t minimum = 0U;
+    if (first >= 0xC2U && first <= 0xDFU) {
+        length = 2U;
+        value = first & 0x1FU;
+        minimum = 0x80U;
+    } else if (first >= 0xE0U && first <= 0xEFU) {
+        length = 3U;
+        value = first & 0x0FU;
+        minimum = 0x800U;
+    } else if (first >= 0xF0U && first <= 0xF4U) {
+        length = 4U;
+        value = first & 0x07U;
+        minimum = 0x10000U;
+    } else {
+        *codepoint = 0xFFFDU;
+        return cursor + 1U;
+    }
+    for (size_t index = 1U; index < length; ++index) {
+        const unsigned char continuation = (unsigned char)text[cursor + index];
+        if (continuation == 0U || (continuation & 0xC0U) != 0x80U) {
+            *codepoint = 0xFFFDU;
+            return cursor + 1U;
+        }
+        value = (value << 6U) | (continuation & 0x3FU);
+    }
+    if (value < minimum || value > 0x10FFFFU || (value >= 0xD800U && value <= 0xDFFFU)) {
+        *codepoint = 0xFFFDU;
+        return cursor + 1U;
+    }
+    *codepoint = value;
+    return cursor + length;
+}
+
+static bool grapheme_extend(uint32_t codepoint) {
+    return (codepoint >= 0x0300U && codepoint <= 0x036FU) ||
+           (codepoint >= 0x1AB0U && codepoint <= 0x1AFFU) ||
+           (codepoint >= 0x1DC0U && codepoint <= 0x1DFFU) ||
+           (codepoint >= 0x20D0U && codepoint <= 0x20FFU) ||
+           (codepoint >= 0xFE00U && codepoint <= 0xFE0FU) ||
+           (codepoint >= 0xFE20U && codepoint <= 0xFE2FU) ||
+           (codepoint >= 0x1F3FBU && codepoint <= 0x1F3FFU);
+}
+
+static size_t utf8_next_grapheme(const char *text, size_t cursor) {
+    uint32_t first = 0U;
+    size_t next = utf8_next(text, cursor, &first);
+    const bool regional = first >= 0x1F1E6U && first <= 0x1F1FFU;
+    bool regional_pair_consumed = false;
+    while (text[next] != '\0') {
+        uint32_t codepoint = 0U;
+        const size_t after = utf8_next(text, next, &codepoint);
+        if (grapheme_extend(codepoint)) {
+            next = after;
+            continue;
+        }
+        if (regional && !regional_pair_consumed && codepoint >= 0x1F1E6U && codepoint <= 0x1F1FFU) {
+            regional_pair_consumed = true;
+            next = after;
+            continue;
+        }
+        if (codepoint == 0x200DU && text[after] != '\0') {
+            next = utf8_next(text, after, &codepoint);
+            continue;
+        }
+        break;
+    }
+    return next;
+}
+
+static int codepoint_columns(uint32_t codepoint) {
+    if (grapheme_extend(codepoint) || codepoint == 0x200DU) {
+        return 0;
+    }
+    if ((codepoint >= 0x1100U && codepoint <= 0x115FU) ||
+        (codepoint >= 0x2E80U && codepoint <= 0xA4CFU) ||
+        (codepoint >= 0xAC00U && codepoint <= 0xD7A3U) ||
+        (codepoint >= 0xF900U && codepoint <= 0xFAFFU) ||
+        (codepoint >= 0xFE10U && codepoint <= 0xFE6FU) ||
+        (codepoint >= 0xFF00U && codepoint <= 0xFF60U) ||
+        (codepoint >= 0x1F300U && codepoint <= 0x1FAFFU)) {
+        return 2;
+    }
+    return 1;
+}
+
 static void normalize_text(char *output, size_t capacity, const char *input) {
-    size_t length = 0;
+    size_t length = 0U;
+    size_t cursor = 0U;
     bool previous_space = false;
     bool line_start = true;
 
-    while (*input != '\0' && length + 1 < capacity) {
-        const unsigned char character = (unsigned char)*input++;
+    while (input[cursor] != '\0' && length + 1U < capacity) {
+        const unsigned char character = (unsigned char)input[cursor];
         if (character == '\r') {
+            ++cursor;
             continue;
         }
         if (character == '\n') {
+            ++cursor;
             while (length > 0 && output[length - 1] == ' ') {
                 --length;
             }
@@ -28,19 +125,37 @@ static void normalize_text(char *output, size_t capacity, const char *input) {
             continue;
         }
         if (character == '\t' || character == ' ') {
+            ++cursor;
             if (!previous_space && !line_start) {
                 output[length++] = ' ';
                 previous_space = true;
             }
             continue;
         }
-        if (character >= 128) {
-            if ((character & 0xC0U) == 0x80U) {
-                continue;
+        if (character >= 0x80U) {
+            uint32_t codepoint = 0U;
+            const size_t next = utf8_next(input, cursor, &codepoint);
+            if (codepoint == 0xFFFDU && next == cursor + 1U) {
+                static const char replacement[] = "\xEF\xBF\xBD";
+                if (length + sizeof(replacement) > capacity) {
+                    break;
+                }
+                memcpy(output + length, replacement, sizeof(replacement) - 1U);
+                length += sizeof(replacement) - 1U;
+            } else {
+                const size_t bytes = next - cursor;
+                if (length + bytes + 1U > capacity) {
+                    break;
+                }
+                memcpy(output + length, input + cursor, bytes);
+                length += bytes;
             }
-            output[length++] = '?';
-        } else if (character >= 32) {
+            cursor = next;
+        } else if (character >= 32U) {
             output[length++] = (char)character;
+            ++cursor;
+        } else {
+            ++cursor;
         }
         previous_space = false;
         line_start = false;
@@ -57,6 +172,8 @@ static void build_page(EidolonDialogue *dialogue) {
     size_t output = 0;
     int column = 0;
     int line = 0;
+    dialogue->scroll_cursor = dialogue->cursor;
+    dialogue->newest_line_offset = 0U;
 
     while (dialogue->text[source] != '\0' && line < DIALOGUE_LINES &&
            output + 1 < sizeof(dialogue->page)) {
@@ -68,6 +185,12 @@ static void build_page(EidolonDialogue *dialogue) {
             dialogue->page[output++] = '\n';
             column = 0;
             ++line;
+            if (line == 1) {
+                dialogue->scroll_cursor = source;
+            }
+            if (line == DIALOGUE_LINES - 1) {
+                dialogue->newest_line_offset = output;
+            }
             continue;
         }
 
@@ -80,14 +203,16 @@ static void build_page(EidolonDialogue *dialogue) {
             continue;
         }
 
-        size_t word_length = 0;
-        while (dialogue->text[source + word_length] != '\0' &&
-               dialogue->text[source + word_length] != ' ' &&
-               dialogue->text[source + word_length] != '\n') {
-            ++word_length;
+        size_t word_end = source;
+        int word_columns = 0;
+        while (dialogue->text[word_end] != '\0' && dialogue->text[word_end] != ' ' &&
+               dialogue->text[word_end] != '\n') {
+            uint32_t codepoint = 0U;
+            word_end = utf8_next(dialogue->text, word_end, &codepoint);
+            word_columns += codepoint_columns(codepoint);
         }
 
-        if (column > 0 && column + (int)word_length > DIALOGUE_COLUMNS) {
+        if (column > 0 && column + word_columns > DIALOGUE_COLUMNS) {
             if (line + 1 >= DIALOGUE_LINES) {
                 break;
             }
@@ -97,43 +222,76 @@ static void build_page(EidolonDialogue *dialogue) {
             dialogue->page[output++] = '\n';
             column = 0;
             ++line;
+            if (line == 1) {
+                dialogue->scroll_cursor = source;
+            }
+            if (line == DIALOGUE_LINES - 1) {
+                dialogue->newest_line_offset = output;
+            }
         }
 
-        while (word_length > 0 && line < DIALOGUE_LINES &&
-               output + 1 < sizeof(dialogue->page)) {
-            if (column == DIALOGUE_COLUMNS) {
+        while (source < word_end && line < DIALOGUE_LINES) {
+            uint32_t codepoint = 0U;
+            const size_t next = utf8_next(dialogue->text, source, &codepoint);
+            const size_t bytes = next - source;
+            const int width = codepoint_columns(codepoint);
+            if (column > 0 && column + width > DIALOGUE_COLUMNS) {
                 if (line + 1 >= DIALOGUE_LINES) {
                     break;
                 }
                 dialogue->page[output++] = '\n';
                 column = 0;
                 ++line;
+                if (line == 1) {
+                    dialogue->scroll_cursor = source;
+                }
+                if (line == DIALOGUE_LINES - 1) {
+                    dialogue->newest_line_offset = output;
+                }
             }
-            dialogue->page[output++] = dialogue->text[source++];
-            ++column;
-            --word_length;
+            if (output + bytes + 1U > sizeof(dialogue->page)) {
+                break;
+            }
+            memcpy(dialogue->page + output, dialogue->text + source, bytes);
+            output += bytes;
+            source = next;
+            column += width;
         }
-        if (word_length > 0) {
+        if (source < word_end) {
             break;
         }
     }
 
-    while (output > 0 && (dialogue->page[output - 1] == ' ' ||
-                          dialogue->page[output - 1] == '\n')) {
+    while (output > 0 &&
+           (dialogue->page[output - 1] == ' ' || dialogue->page[output - 1] == '\n')) {
         --output;
     }
     dialogue->page[output] = '\0';
     dialogue->next_cursor = source;
+    if (dialogue->scroll_cursor == dialogue->cursor) {
+        dialogue->scroll_cursor = source;
+    }
 }
 
 void eidolon_dialogue_set(EidolonDialogue *dialogue, const char *text, uint64_t now_ms) {
     memset(dialogue, 0, sizeof(*dialogue));
+    dialogue->movement = EIDOLON_DIALOGUE_MOVEMENT_FOLLOW;
+    dialogue->hold_ms = EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS;
     if (text == NULL) {
         return;
     }
     normalize_text(dialogue->text, sizeof(dialogue->text), text);
     build_page(dialogue);
     dialogue->reveal_tick_ms = now_ms;
+}
+
+void eidolon_dialogue_configure(EidolonDialogue *dialogue, EidolonDialogueMovement movement,
+                                unsigned int hold_ms) {
+    if (dialogue == NULL || movement < 0 || movement >= EIDOLON_DIALOGUE_MOVEMENT_COUNT) {
+        return;
+    }
+    dialogue->movement = movement;
+    dialogue->hold_ms = hold_ms;
 }
 
 void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
@@ -147,27 +305,100 @@ void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
     if (characters == 0) {
         return;
     }
-    dialogue->revealed += characters;
-    if (dialogue->revealed > page_length) {
-        dialogue->revealed = page_length;
+    for (size_t index = 0U; index < characters && dialogue->revealed < page_length; ++index) {
+        dialogue->revealed = utf8_next_grapheme(dialogue->page, dialogue->revealed);
     }
     dialogue->reveal_tick_ms += (uint64_t)characters * REVEAL_INTERVAL_MS;
+    if (dialogue->revealed >= page_length && dialogue->page_complete_tick_ms == 0U) {
+        dialogue->page_complete_tick_ms = now_ms;
+    }
 }
 
 void eidolon_dialogue_advance(EidolonDialogue *dialogue, uint64_t now_ms) {
     const size_t page_length = strlen(dialogue->page);
     if (dialogue->revealed < page_length) {
         dialogue->revealed = page_length;
+        dialogue->page_complete_tick_ms = now_ms;
         return;
     }
     if (dialogue->text[dialogue->next_cursor] == '\0') {
         return;
     }
 
-    dialogue->cursor = dialogue->next_cursor;
-    dialogue->revealed = 0;
+    const bool rolling = dialogue->movement == EIDOLON_DIALOGUE_MOVEMENT_FOLLOW;
+    dialogue->cursor = rolling ? dialogue->scroll_cursor : dialogue->next_cursor;
     build_page(dialogue);
+    dialogue->revealed = rolling ? dialogue->newest_line_offset : 0U;
     dialogue->reveal_tick_ms = now_ms;
+    dialogue->page_complete_tick_ms = 0U;
+}
+
+bool eidolon_dialogue_autoplay(EidolonDialogue *dialogue, uint64_t now_ms) {
+    if (!eidolon_dialogue_has_next_page(dialogue) ||
+        dialogue->movement == EIDOLON_DIALOGUE_MOVEMENT_MANUAL) {
+        return false;
+    }
+    if (dialogue->movement == EIDOLON_DIALOGUE_MOVEMENT_FOLLOW) {
+        dialogue->cursor = dialogue->scroll_cursor;
+        build_page(dialogue);
+        dialogue->revealed = dialogue->newest_line_offset;
+        dialogue->reveal_tick_ms = now_ms;
+        dialogue->page_complete_tick_ms = 0U;
+        return true;
+    }
+    if (dialogue->page_complete_tick_ms == 0U) {
+        dialogue->page_complete_tick_ms = now_ms;
+        return false;
+    }
+    if (now_ms < dialogue->page_complete_tick_ms ||
+        now_ms - dialogue->page_complete_tick_ms < dialogue->hold_ms) {
+        return false;
+    }
+    dialogue->cursor = dialogue->next_cursor;
+    build_page(dialogue);
+    dialogue->revealed = 0U;
+    dialogue->reveal_tick_ms = now_ms;
+    dialogue->page_complete_tick_ms = 0U;
+    return true;
+}
+
+float eidolon_dialogue_indicator_alpha(const EidolonDialogue *dialogue, uint64_t now_ms) {
+    if (!eidolon_dialogue_has_next_page(dialogue) || dialogue->page_complete_tick_ms == 0U ||
+        now_ms < dialogue->page_complete_tick_ms ||
+        dialogue->movement == EIDOLON_DIALOGUE_MOVEMENT_FOLLOW) {
+        return 0.0F;
+    }
+    if (dialogue->movement == EIDOLON_DIALOGUE_MOVEMENT_MANUAL) {
+        return 1.0F;
+    }
+    const float phase = (float)((now_ms - dialogue->page_complete_tick_ms) % 1000U) / 1000.0F;
+    return 0.28F + 0.72F * (0.5F + 0.5F * cosf(phase * 2.0F * 3.14159265F));
+}
+
+float eidolon_dialogue_reveal_emphasis(const EidolonDialogue *dialogue,
+                                       size_t previous_revealed) {
+    if (dialogue == NULL || previous_revealed >= dialogue->revealed) {
+        return 0.0F;
+    }
+    float emphasis = 0.0F;
+    for (size_t index = previous_revealed; index < dialogue->revealed; ++index) {
+        const unsigned char character = (unsigned char)dialogue->page[index];
+        if (character == '!') {
+            emphasis = fmaxf(emphasis, 1.0F);
+        } else if (character == '?') {
+            emphasis = fmaxf(emphasis, 0.86F);
+        } else if (character == '.') {
+            emphasis = fmaxf(emphasis, 0.62F);
+        } else if (character == ',' || character == ';' || character == ':') {
+            emphasis = fmaxf(emphasis, 0.38F);
+        } else if (character == 0xE2U && index + 2U < dialogue->revealed &&
+                   (unsigned char)dialogue->page[index + 1U] == 0x80U &&
+                   ((unsigned char)dialogue->page[index + 2U] == 0x94U ||
+                    (unsigned char)dialogue->page[index + 2U] == 0xA6U)) {
+            emphasis = fmaxf(emphasis, 0.52F);
+        }
+    }
+    return emphasis;
 }
 
 bool eidolon_dialogue_is_active(const EidolonDialogue *dialogue) {
@@ -177,4 +408,23 @@ bool eidolon_dialogue_is_active(const EidolonDialogue *dialogue) {
 bool eidolon_dialogue_has_next_page(const EidolonDialogue *dialogue) {
     return dialogue->revealed >= strlen(dialogue->page) &&
            dialogue->text[dialogue->next_cursor] != '\0';
+}
+
+bool eidolon_dialogue_has_unread(const EidolonDialogue *dialogue) {
+    return dialogue->revealed < strlen(dialogue->page) ||
+           dialogue->text[dialogue->next_cursor] != '\0';
+}
+
+const char *eidolon_dialogue_movement_name(EidolonDialogueMovement movement) {
+    switch (movement) {
+    case EIDOLON_DIALOGUE_MOVEMENT_MANUAL:
+        return "manual";
+    case EIDOLON_DIALOGUE_MOVEMENT_PAGED:
+        return "paged";
+    case EIDOLON_DIALOGUE_MOVEMENT_FOLLOW:
+        return "follow";
+    case EIDOLON_DIALOGUE_MOVEMENT_COUNT:
+        break;
+    }
+    return "unknown";
 }

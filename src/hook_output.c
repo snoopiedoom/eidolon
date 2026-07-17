@@ -238,3 +238,24 @@ bool eidolon_transcript_read_agent_output(const char *path, char *output, size_t
     free(transcript);
     return found;
 }
+
+bool eidolon_transcript_is_primary_session(const char *path) {
+    if (path == NULL) {
+        return false;
+    }
+    FILE *file = open_binary_file(path);
+    if (file == NULL) {
+        return true;
+    }
+    size_t size = 0U;
+    char *head = read_stream(file, 16384U, &size);
+    (void)size;
+    fclose(file);
+    if (head == NULL) {
+        return true;
+    }
+    const bool subagent = strstr(head, "\"thread_source\":\"subagent\"") != NULL ||
+                          strstr(head, "\"source\":{\"subagent\"") != NULL;
+    free(head);
+    return !subagent;
+}

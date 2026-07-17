@@ -18,6 +18,8 @@ int main(void) {
     char output[128];
     assert(eidolon_hook_read_agent_output(input, output, sizeof(output)));
     assert(strcmp(output, "hello\nworld") == 0);
+    assert(eidolon_transcript_is_primary_session(EIDOLON_TEST_TRANSCRIPT));
+    assert(!eidolon_transcript_is_primary_session(EIDOLON_TEST_SUBAGENT_TRANSCRIPT));
     fclose(input);
     return 0;
 }

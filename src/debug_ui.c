@@ -41,6 +41,10 @@ static SDL_FRect pose_dropdown_row(const EidolonApp *app, size_t row) {
                        button.w, DEBUG_POSE_ROW_HEIGHT};
 }
 
+static SDL_FRect portrait_dropdown_row(const EidolonApp *app, size_t row) {
+    return pose_dropdown_row(app, row);
+}
+
 static SDL_FRect scale_track(const EidolonApp *app) {
     SDL_FRect track = track_rect(app, 14.0F, 67.0F);
     track.w = DEBUG_SCALE_TRACK_WIDTH;
@@ -260,6 +264,73 @@ bool eidolon_debug_ui_handle_event(EidolonApp *app, const SDL_Event *event) {
         return false;
     }
 
+    if (eidolon_portrait_ready(app->portrait)) {
+        switch (event->type) {
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+            const SDL_FRect panel = panel_rect(app);
+            if (event->button.button == SDL_BUTTON_LEFT) {
+                const SDL_FRect button = pose_button(app);
+                if (point_in_rect(event->button.x, event->button.y, &button)) {
+                    app->debug_portrait_dropdown_open = !app->debug_portrait_dropdown_open;
+                    app->debug_drag_control = EIDOLON_DEBUG_CONTROL_NONE;
+                    return true;
+                }
+                if (app->debug_portrait_dropdown_open) {
+                    const size_t row_count = eidolon_portrait_expression_count(app->portrait) + 1U;
+                    for (size_t row = 0U; row < row_count; ++row) {
+                        const SDL_FRect item = portrait_dropdown_row(app, row);
+                        if (point_in_rect(event->button.x, event->button.y, &item)) {
+                            eidolon_app_select_portrait(app, row == 0U ? -1 : (int)(row - 1U));
+                            app->debug_portrait_dropdown_open = false;
+                            return true;
+                        }
+                    }
+                    app->debug_portrait_dropdown_open = false;
+                    return true;
+                }
+            }
+            if (point_in_rect(event->button.x, event->button.y, &panel)) {
+                if (event->button.button == SDL_BUTTON_LEFT) {
+                    const SDL_FRect scale = track_hit_rect(scale_track(app));
+                    if (point_in_rect(event->button.x, event->button.y, &scale)) {
+                        app->debug_drag_control = EIDOLON_DEBUG_CONTROL_MODEL_SCALE;
+                        eidolon_platform_suspend_hit_test(app->window);
+                        update_dragged_control(app, event->button.x);
+                    }
+                }
+                return true;
+            }
+            if (app->debug_portrait_dropdown_open) {
+                app->debug_portrait_dropdown_open = false;
+                return true;
+            }
+            break;
+        }
+        case SDL_EVENT_MOUSE_MOTION:
+            if (app->debug_portrait_dropdown_open) {
+                return true;
+            }
+            if (app->debug_drag_control == EIDOLON_DEBUG_CONTROL_MODEL_SCALE) {
+                update_dragged_control(app, event->motion.x);
+                return true;
+            }
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (event->button.button == SDL_BUTTON_LEFT &&
+                app->debug_drag_control == EIDOLON_DEBUG_CONTROL_MODEL_SCALE) {
+                update_dragged_control(app, event->button.x);
+                app->debug_drag_control = EIDOLON_DEBUG_CONTROL_NONE;
+                app->hit_test_initialized = false;
+                eidolon_app_log_presentation_metrics(app);
+                return true;
+            }
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+
     switch (event->type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         const SDL_FRect panel = panel_rect(app);
@@ -468,8 +539,105 @@ static void draw_resolution_dropdown(EidolonApp *app) {
     }
 }
 
+static void draw_portrait_dropdown(EidolonApp *app) {
+    if (!app->debug_portrait_dropdown_open) {
+        return;
+    }
+    const size_t row_count = eidolon_portrait_expression_count(app->portrait) + 1U;
+    const SDL_FRect first = portrait_dropdown_row(app, 0U);
+    const SDL_FRect backdrop = {first.x, first.y, first.w,
+                                (float)row_count * DEBUG_POSE_ROW_HEIGHT};
+    SDL_SetRenderDrawColor(app->renderer, 12, 12, 17, 255);
+    SDL_RenderFillRect(app->renderer, &backdrop);
+    const int selected = eidolon_portrait_override_expression(app->portrait);
+    for (size_t row = 0U; row < row_count; ++row) {
+        const SDL_FRect item = portrait_dropdown_row(app, row);
+        const bool active = row == 0U ? selected < 0 : selected == (int)(row - 1U);
+        SDL_SetRenderDrawColor(app->renderer, active ? 64 : 22, active ? 78 : 23, active ? 112 : 31,
+                               255);
+        SDL_RenderFillRect(app->renderer, &item);
+        SDL_SetRenderDrawColor(app->renderer, 74, 76, 91, 255);
+        SDL_RenderRect(app->renderer, &item);
+        SDL_SetRenderDrawColor(app->renderer, 226, 225, 234, 255);
+        if (row == 0U) {
+            SDL_RenderDebugText(app->renderer, item.x + 6.0F, item.y + 5.0F, "AUTO / STATE");
+        } else {
+            SDL_RenderDebugTextFormat(app->renderer, item.x + 6.0F, item.y + 5.0F, "%02zu  %s",
+                                      row - 1U,
+                                      eidolon_portrait_expression_label(app->portrait, row - 1U));
+        }
+    }
+}
+
+static void draw_portrait_ui(EidolonApp *app) {
+    const SDL_FRect panel = panel_rect(app);
+    SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(app->renderer, 12, 12, 17, 242);
+    SDL_RenderFillRect(app->renderer, &panel);
+    SDL_SetRenderDrawColor(app->renderer, 112, 156, 255, 255);
+    SDL_RenderRect(app->renderer, &panel);
+
+    SDL_SetRenderDrawColor(app->renderer, 245, 244, 248, 255);
+    SDL_RenderDebugText(app->renderer, panel.x + 14.0F, panel.y + 10.0F, "EIDOLON / PORTRAIT");
+    const SDL_FRect button = pose_button(app);
+    SDL_SetRenderDrawColor(app->renderer, 27, 28, 36, 255);
+    SDL_RenderFillRect(app->renderer, &button);
+    SDL_SetRenderDrawColor(app->renderer, 74, 76, 91, 255);
+    SDL_RenderRect(app->renderer, &button);
+    const int current = eidolon_portrait_current_expression(app->portrait);
+    SDL_SetRenderDrawColor(app->renderer, 226, 225, 234, 255);
+    SDL_RenderDebugTextFormat(
+        app->renderer, button.x + 6.0F, button.y + 5.0F, "%02d  %s  %s", current,
+        current >= 0 ? eidolon_portrait_expression_label(app->portrait, (size_t)current) : "none",
+        app->debug_portrait_dropdown_open ? "^" : "v");
+
+    SDL_SetRenderDrawColor(app->renderer, 168, 166, 177, 255);
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 54.0F, "SCALE  %.2fx",
+                              app->model_scale);
+    const SDL_FRect scale = scale_track(app);
+    draw_slider(app->renderer, &scale,
+                (app->model_scale - EIDOLON_MODEL_SCALE_MIN) /
+                    (EIDOLON_MODEL_SCALE_MAX - EIDOLON_MODEL_SCALE_MIN));
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 91.0F, "STATE      %s",
+                              eidolon_state_name(app->state));
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 111.0F, "SELECTION  %s",
+                              eidolon_portrait_override_expression(app->portrait) < 0 ? "automatic"
+                                                                                      : "override");
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 131.0F, "FRAMING    %s",
+                              eidolon_portrait_face_mode(app->portrait) ? "face [P]" : "full [P]");
+    SDL_RenderDebugTextFormat(
+        app->renderer, panel.x + 14.0F, panel.y + 151.0F, "AFFECT     %s / %s",
+        eidolon_affect_client_available(app->affect_client) ? "worker" : "fallback",
+        app->affect.source == EIDOLON_AFFECT_SOURCE_GOEMOTIONS ? "goemotions" : "state");
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 171.0F, "INTENT     %s",
+                              eidolon_expression_intent_name(app->affect.expression_intent));
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 191.0F,
+                              "VAD        %+.2f %+.2f %+.2f", app->affect.current.valence,
+                              app->affect.current.arousal, app->affect.current.dominance);
+    SDL_RenderDebugTextFormat(app->renderer, panel.x + 14.0F, panel.y + 211.0F, "EVIDENCE   %.2f",
+                              app->affect.evidence);
+    SDL_SetRenderDrawColor(app->renderer, 136, 135, 147, 255);
+    SDL_RenderDebugText(app->renderer, panel.x + 14.0F, panel.y + 246.0F,
+                        "1-5 STATE   SPACE CYCLE");
+    SDL_RenderDebugText(app->renderer, panel.x + 14.0F, panel.y + 266.0F,
+                        "F5 RELOAD character.cfg");
+    const char *error = eidolon_portrait_error(app->portrait);
+    if (error[0] != '\0') {
+        char clipped[29];
+        SDL_strlcpy(clipped, error, sizeof(clipped));
+        SDL_SetRenderDrawColor(app->renderer, 255, 105, 105, 255);
+        SDL_RenderDebugText(app->renderer, panel.x + 14.0F, panel.y + 296.0F, clipped);
+    }
+    draw_portrait_dropdown(app);
+}
+
 void eidolon_debug_ui_draw(EidolonApp *app) {
     if (!app->debug_visible) {
+        return;
+    }
+
+    if (eidolon_portrait_ready(app->portrait)) {
+        draw_portrait_ui(app);
         return;
     }
 

@@ -6,10 +6,11 @@ surface without owning the agent's persona or conversation runtime.
 The current implementation state, sharp edges, and new-session continuation notes live in
 [`docs/development-state.md`](docs/development-state.md).
 
-The project is intentionally split into four layers:
+The project is intentionally split into five layers:
 
 - `app`: state, input, timing, and composition
 - `animation`: provider-independent v2 sprite atlas playback
+- `portrait`: full-canvas 2D expressions, transitions, and subtle procedural motion
 - `motion`: procedural pose goals and skeleton evaluation
 - `platform`: the smallest possible native overlay boundary
 
@@ -22,6 +23,7 @@ Requirements:
 - GNU Make
 - LLVM/Clang
 - SDL3 development files
+- SDL_ttf 3 development files (`make text-setup` installs the pinned Windows package)
 - the vendored `cgltf` source at `lib/cgltf`
 - the Windows SDK's `fxc.exe` for native D3D11 shader builds on Windows
 - the `shadercross` CLI when rebuilding the legacy SDL_GPU shaders on Linux
@@ -29,6 +31,7 @@ Requirements:
 Windows (the Makefile defaults to `C:/dev/SDL3`):
 
 ```powershell
+make text-setup
 make
 ./build/windows/eidolon.exe
 ```
@@ -36,6 +39,12 @@ make
 Override `SDL3_ROOT` if the SDK lives elsewhere. It must contain `include/SDL3`,
 `lib/x64/SDL3.lib`, and preferably
 `lib/x64/SDL3.dll`. The DLL is copied beside Eidolon when present.
+
+`make text-setup` downloads and verifies SDL_ttf 3.2.2 into the ignored `.cache/sdl_ttf`
+directory; the normal build never downloads dependencies. Eidolon ships MesloLGS Nerd Font Mono as
+its default face under `assets/fonts/MesloLG Nerd Font`. On Windows it adds the installed Microsoft
+YaHei, Malgun Gothic, and Segoe UI Emoji faces as fallbacks when available, so Latin, Slovenian,
+Chinese, Korean, Nerd Font glyphs, and emoji can share one UTF-8 dialogue stream.
 
 Shaders are authored once in HLSL. On Windows, `make shaders` discovers the newest x64 `fxc.exe`
 under the installed Windows SDK and bakes Shader Model 5.0 DXBC for D3D11. The compiler is a build
@@ -54,8 +63,33 @@ make
 ./build/linux/eidolon
 ```
 
-Linux discovers SDL3 through `pkg-config`. Use `make MODE=release` for an optimized build and
+Linux discovers SDL3 and SDL_ttf 3 through `pkg-config`. Use `make MODE=release` for an optimized build and
 `make check` for the small state and animation tests.
+
+When `config/character.cfg` and its portrait PNGs are available, the 2D character provider is
+primary and 3D initialization is skipped completely. The bundled manifest expects the ten original
+Bunny Asuna portraits (`00` through `08`, plus `99`) under
+`assets/characters/asuna-bunny/portraits`. Extracted character art is deliberately ignored by Git;
+only the reusable manifest and renderer are repository content.
+
+Expression control is renderer-independent. `src/affect.c` turns lifecycle state or a multi-label
+GoEmotions result into six continuous axes: valence, arousal, dominance, certainty, warmth, and
+surprise. The portrait consumes only the selected expression, while Rio's future posture,
+breathing, gaze, and secondary motion can consume the same axes. Native inference remains optional;
+without its local worker, or whenever that worker fails, lifecycle state is the working fallback.
+
+On Windows, install and verify the optional quantized GoEmotions worker with:
+
+```powershell
+make affect-setup
+make affect-check
+make
+```
+
+`affect-setup` downloads pinned ONNX Runtime and model artifacts into the ignored `.cache/affect`
+directory (roughly 200 MB downloaded, roughly 150 MB retained). `make affect` builds only the worker;
+`make affect-check` additionally runs native single-shot and asynchronous-client inference tests.
+The normal build never downloads artifacts and does not link ONNX Runtime into the renderer.
 
 Windows forces SDL's `direct3d11` renderer. Rio and SDL composition share that renderer's D3D11
 device, avoiding the descriptor-heap failures previously seen in the separate D3D12 path. If
@@ -72,16 +106,40 @@ logged and exits cleanly so the process can be restarted against a valid device.
 - `4`: ready/review
 - `5`: failed
 - `Space`: cycle states
-- middle-mouse drag on the model: rotate yaw and pitch
+- middle-mouse drag on the 3D model: rotate yaw and pitch
 - `Shift` + middle-mouse drag: rotate roll
 - double middle-click: reset model rotation
-- `F1`: toggle the debug panel; choose and calibrate semantic poses while keeping Rio visible
-- `F5`: force a reload of `config/motion.cfg`
+- `F1`: toggle the debug panel; inspect affect source/intent/VAD or override any portrait expression
+- `F5`: force reload `config/character.cfg` and `config/motion.cfg`
+- `P`: toggle the active 2D character between full-body and per-expression face framing
+- `T`: toggle between the preserved `classic` dialogue theme and `academy_heart`
 - `C` while a semantic pose is selected: copy its complete C initializer to the clipboard
 - `Escape`: close the debug panel, then quit
 
+Portrait state defaults and labels are ordinary text in `config/character.cfg`. Saved edits are
+validated and hot-reloaded; invalid edits preserve the last good character. State defaults currently
+map idle to `gentle`, running to `responding`, waiting to `worried`, review to `cheerful`, and failed
+to `annoyed`. The F1 selector is a temporary visual override and does not rewrite the manifest.
+`framing = full` or `framing = portrait` chooses the persisted startup framing; `P` is a temporary
+runtime toggle. Each expression owns its portrait crop, so characters with moving or differently
+composed heads do not need one global rectangle.
+
+Expression changes add a short semantic motion accent independently from the 140 ms image
+crossfade. `motion.accent_strength` and `motion.accent_duration_ms` tune the shared response while
+the expression label selects its direction: positive expressions lift and lean in, worried sinks,
+and annoyed recoils. Translation, scale, and rotation use different spring frequencies; repeated
+expressions select one of three deterministic variants, and an interrupted accent adds a brief
+opposite anticipation before committing to the replacement.
+
+The settled pose also retains a tiny expression-specific posture instead of returning to one shared
+neutral. Phrase punctuation drives short speaking beats, and the portrait eases toward the side of
+the currently speaking session bubble. `motion.posture_strength`, `motion.speech_strength`, and
+`motion.attention_strength` independently tune these layers. All transforms compose once around the
+portrait's lower-body pivot, above breathing and with sway still disabled by the bundled character
+configuration.
+
 Window and rendering dimensions follow SDL's per-display content scale, so `1.0x` remains physically
-consistent on high-DPI displays. The model scale control is an additional `0.75x..4.0x` multiplier.
+consistent on high-DPI displays. The scale control is an additional `0.75x..4.0x` multiplier.
 Scale changes Rio's presentation size without silently changing the 3D render target. The adjacent
 resolution selector chooses a bounded `512`, `1024`, `1536`, or `2048` square target; `1024` is the
 Windows default. This makes the quality/cost tradeoff explicit and prevents a large desktop scale
@@ -102,6 +160,8 @@ without manual input:
 ./build/windows/eidolon.exe --snapshot-pose 1 build/relaxed.png
 ./build/windows/eidolon.exe --snapshot-debug-pose 1 build/relaxed-debug.png
 ./build/windows/eidolon.exe --snapshot-resolution 2048 build/resolution-2048.png
+./build/windows/eidolon.exe --snapshot-sessions build/sessions.png
+./build/windows/eidolon.exe --snapshot-face build/face.png
 ```
 
 Pose indices follow the order shown in the F1 selector. Snapshot commands create a hidden window,
@@ -148,19 +208,32 @@ The mapping is deliberately small:
 - turn stop: review
 
 On `Stop`, the hook reads Codex's `transcript_path`, extracts the latest final agent message, and
-sends plain text through the local IPC channel. Eidolon renders it as a five-line JRPG dialogue
-page with a typewriter reveal. Click once to reveal the page immediately; click again to advance
-when the small triangle is visible. Dragging still moves the overlay.
+sends plain text through the local IPC channel. Eidolon renders it as a rolling five-line JRPG
+viewport with a typewriter reveal. The default `follow` movement shifts lines 2–5 upward immediately
+when the cursor reaches a sixth line, then continues typing on the freed bottom row. There is no
+scroll pause. Clicking still reveals or scrolls immediately, and dragging still moves the overlay.
+
+Dialogue movement is runtime configuration in `config/character.cfg`: `manual` waits for a click
+and replaces the whole five-line page; `paged` waits `dialogue.hold_ms` and then replaces the whole
+page automatically; `follow` continuously follows the typing cursor one line at a time. The hold
+value is retained for `paged` even while another movement is selected, ready for the future menu.
+
+`dialogue.theme = classic` preserves the original dark bubble exactly. The bundled
+`academy_heart` preset uses a pale glass panel with cyan structure and pink accents; it is the
+current character default and can be compared at runtime with `T`.
 
 Codex can load hooks from several layers at once; copying this over an existing global
 `hooks.json` would erase those definitions. Merge the `hooks` entries instead when that file
 already exists.
 
-## Deferred multi-session direction
+## Multiple-session direction
 
-Each running session will own a separate dialogue bubble. A later layout layer will place those
-bubbles dynamically, avoid overlap, and keep them associated with the shared sprite. Until that
-layout work exists, the current single-bubble renderer remains intentionally session-agnostic.
+Each active Codex session owns an independent dialogue bubble keyed by session UUID. Titles come
+from `.codex/session_index.jsonl`; dialogue scrolling, activity time, and stable layout slots remain
+per-session. Up to four visible bubbles occupy deterministic left/right anchors around the shared
+character while the registry tracks eight recent transcripts. Quiet completed bubbles retire after
+five minutes; a bubble with unread text remains. Session discovery and transcript parsing do
+not leak into drawing. Detailed continuation notes are in `docs/development-state.md`.
 
 ## Live 3D
 

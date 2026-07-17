@@ -15,12 +15,31 @@ typedef struct LatestFile {
     bool found;
 } LatestFile;
 
+static void insert_latest(LatestFile *files, size_t capacity, const wchar_t *path,
+                          ULARGE_INTEGER stamp) {
+    size_t position = 0U;
+    while (position < capacity && files[position].found &&
+           files[position].stamp.QuadPart >= stamp.QuadPart) {
+        ++position;
+    }
+    if (position >= capacity) {
+        return;
+    }
+    for (size_t index = capacity - 1U; index > position; --index) {
+        files[index] = files[index - 1U];
+    }
+    files[position].found = true;
+    files[position].stamp = stamp;
+    wcscpy_s(files[position].path, _countof(files[position].path), path);
+}
+
 static bool has_jsonl_suffix(const wchar_t *name) {
     const size_t length = wcslen(name);
     return length >= 6 && _wcsicmp(name + length - 6, L".jsonl") == 0;
 }
 
-static void scan_directory(const wchar_t *directory, unsigned depth, LatestFile *latest) {
+static void scan_directory(const wchar_t *directory, unsigned depth, LatestFile *latest,
+                           size_t capacity) {
     if (depth > 8) {
         return;
     }
@@ -46,7 +65,7 @@ static void scan_directory(const wchar_t *directory, unsigned depth, LatestFile 
         }
         if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
             if ((data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) {
-                scan_directory(child, depth + 1, latest);
+                scan_directory(child, depth + 1, latest, capacity);
             }
             continue;
         }
@@ -57,67 +76,85 @@ static void scan_directory(const wchar_t *directory, unsigned depth, LatestFile 
         ULARGE_INTEGER stamp;
         stamp.LowPart = data.ftLastWriteTime.dwLowDateTime;
         stamp.HighPart = data.ftLastWriteTime.dwHighDateTime;
-        if (!latest->found || stamp.QuadPart > latest->stamp.QuadPart) {
-            latest->stamp = stamp;
-            latest->found = true;
-            wcscpy_s(latest->path, _countof(latest->path), child);
-        }
+        insert_latest(latest, capacity, child, stamp);
     } while (FindNextFileW(search, &data));
     FindClose(search);
 }
 
-bool eidolon_platform_latest_transcript(char *path, size_t capacity, uint64_t *stamp) {
-    if (path == NULL || capacity == 0 || stamp == NULL) {
-        return false;
+size_t eidolon_platform_list_transcripts(EidolonTranscriptFile *files, size_t capacity) {
+    if (files == NULL || capacity == 0U) {
+        return 0U;
     }
     wchar_t profile[WIDE_PATH_CAPACITY];
     const DWORD profile_length =
         GetEnvironmentVariableW(L"USERPROFILE", profile, (DWORD)_countof(profile));
     if (profile_length == 0 || profile_length >= _countof(profile)) {
-        return false;
+        return 0U;
     }
 
     wchar_t root[WIDE_PATH_CAPACITY];
     if (swprintf(root, _countof(root), L"%ls\\.codex\\sessions", profile) < 0) {
-        return false;
+        return 0U;
     }
 
-    LatestFile latest = {0};
-    SYSTEMTIME today;
-    GetLocalTime(&today);
-    FILETIME today_file_time;
-    if (!SystemTimeToFileTime(&today, &today_file_time)) {
-        return false;
+    LatestFile *latest = calloc(capacity, sizeof(*latest));
+    if (latest == NULL) {
+        return 0U;
     }
-    ULARGE_INTEGER day;
-    day.LowPart = today_file_time.dwLowDateTime;
-    day.HighPart = today_file_time.dwHighDateTime;
-
-    for (unsigned offset = 0; offset < 2; ++offset) {
-        ULARGE_INTEGER date_value = day;
-        date_value.QuadPart -= (uint64_t)offset * 24U * 60U * 60U * 10000000U;
-        FILETIME date_file_time;
-        date_file_time.dwLowDateTime = date_value.LowPart;
-        date_file_time.dwHighDateTime = date_value.HighPart;
-        SYSTEMTIME date;
-        if (!FileTimeToSystemTime(&date_file_time, &date)) {
-            continue;
+    scan_directory(root, 0, latest, capacity);
+    size_t count = 0U;
+    while (count < capacity && latest[count].found) {
+        if (WideCharToMultiByte(CP_UTF8, 0, latest[count].path, -1, files[count].path,
+                                (int)sizeof(files[count].path), NULL, NULL) <= 0) {
+            break;
         }
-        wchar_t directory[WIDE_PATH_CAPACITY];
-        if (swprintf(directory, _countof(directory), L"%ls\\%04u\\%02u\\%02u", root,
-                     (unsigned)date.wYear, (unsigned)date.wMonth, (unsigned)date.wDay) >= 0) {
-            scan_directory(directory, 0, &latest);
-        }
+        files[count].stamp = latest[count].stamp.QuadPart;
+        ++count;
     }
-    if (!latest.found) {
-        return false;
-    }
+    free(latest);
+    return count;
+}
 
-    const int written = WideCharToMultiByte(CP_UTF8, 0, latest.path, -1, path, (int)capacity, NULL,
-                                            NULL);
-    if (written <= 0) {
+bool eidolon_platform_latest_transcript(char *path, size_t capacity, uint64_t *stamp) {
+    EidolonTranscriptFile file;
+    if (path == NULL || capacity == 0U || stamp == NULL ||
+        eidolon_platform_list_transcripts(&file, 1U) == 0U) {
         return false;
     }
-    *stamp = latest.stamp.QuadPart;
+    if (strlen(file.path) + 1U > capacity) {
+        return false;
+    }
+    memcpy(path, file.path, strlen(file.path) + 1U);
+    *stamp = file.stamp;
     return true;
+}
+
+bool eidolon_platform_transcript_stamp(const char *path, uint64_t *stamp) {
+    if (path == NULL || stamp == NULL) {
+        return false;
+    }
+    wchar_t wide_path[WIDE_PATH_CAPACITY];
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide_path, (int)_countof(wide_path)) <= 0) {
+        return false;
+    }
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(wide_path, GetFileExInfoStandard, &data)) {
+        return false;
+    }
+    ULARGE_INTEGER modified;
+    modified.LowPart = data.ftLastWriteTime.dwLowDateTime;
+    modified.HighPart = data.ftLastWriteTime.dwHighDateTime;
+    *stamp = modified.QuadPart;
+    return true;
+}
+
+bool eidolon_platform_session_index_path(char *path, size_t capacity) {
+    wchar_t profile[WIDE_PATH_CAPACITY];
+    wchar_t index[WIDE_PATH_CAPACITY];
+    const DWORD length = GetEnvironmentVariableW(L"USERPROFILE", profile, (DWORD)_countof(profile));
+    if (path == NULL || capacity == 0U || length == 0U || length >= _countof(profile) ||
+        swprintf(index, _countof(index), L"%ls\\.codex\\session_index.jsonl", profile) < 0) {
+        return false;
+    }
+    return WideCharToMultiByte(CP_UTF8, 0, index, -1, path, (int)capacity, NULL, NULL) > 0;
 }

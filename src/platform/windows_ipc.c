@@ -42,14 +42,14 @@ bool eidolon_ipc_server_poll(EidolonIpcServer *server, EidolonState *state, char
             const DWORD error = GetLastError();
             if (error == ERROR_PIPE_CONNECTED) {
                 server->connected = true;
-            } else if (error == ERROR_PIPE_LISTENING || error == ERROR_NO_DATA) {
-                if (error == ERROR_NO_DATA) {
-                    DisconnectNamedPipe(pipe);
-                }
+            } else if (error == ERROR_PIPE_LISTENING) {
                 return false;
+            } else if (error == ERROR_NO_DATA) {
+                /* The short-lived hook may already have closed after writing. The message is
+                   still readable until we disconnect this pipe instance. */
+                server->connected = true;
             } else {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Eidolon state pipe failed: %lu",
-                             error);
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Eidolon state pipe failed: %lu", error);
                 return false;
             }
         }
@@ -59,10 +59,6 @@ bool eidolon_ipc_server_poll(EidolonIpcServer *server, EidolonState *state, char
     DWORD bytes_read = 0;
     const BOOL read = ReadFile(pipe, message, sizeof(message), &bytes_read, NULL);
     if (!read) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_NO_DATA) {
-            return false;
-        }
         DisconnectNamedPipe(pipe);
         server->connected = false;
         return false;

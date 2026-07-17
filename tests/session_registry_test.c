@@ -1,0 +1,105 @@
+#include "session_registry.h"
+
+#include "platform/session_files.h"
+
+#include <SDL3/SDL.h>
+
+#include <assert.h>
+#include <string.h>
+
+static uint64_t fixture_stamp = 1U;
+static const char *fixture_output = "baseline";
+static bool slow_discovery = false;
+static SDL_AtomicInt discovery_entered;
+static const char *fixture_path =
+    "C:/fixture/rollout-2026-07-17T00-00-00-01234567-89ab-cdef-8123-456789abcdef.jsonl";
+
+size_t eidolon_platform_list_transcripts(EidolonTranscriptFile *files, size_t capacity) {
+    if (slow_discovery) {
+        (void)SDL_SetAtomicInt(&discovery_entered, 1);
+        SDL_Delay(120U);
+    }
+    if (capacity == 0U) {
+        return 0U;
+    }
+    const size_t path_length = strlen(fixture_path);
+    assert(path_length < sizeof(files[0].path));
+    memcpy(files[0].path, fixture_path, path_length + 1U);
+    files[0].stamp = fixture_stamp;
+    return 1U;
+}
+
+bool eidolon_platform_latest_transcript(char *path, size_t capacity, uint64_t *stamp) {
+    (void)path;
+    (void)capacity;
+    (void)stamp;
+    return false;
+}
+
+bool eidolon_platform_transcript_stamp(const char *path, uint64_t *stamp) {
+    assert(strcmp(path, fixture_path) == 0);
+    *stamp = fixture_stamp;
+    return true;
+}
+
+bool eidolon_platform_session_index_path(char *path, size_t capacity) {
+    (void)path;
+    (void)capacity;
+    return false;
+}
+
+bool eidolon_transcript_read_agent_output(const char *path, char *output, size_t capacity) {
+    assert(strcmp(path, fixture_path) == 0);
+    const size_t output_length = strlen(fixture_output);
+    assert(output_length + 1U <= capacity);
+    memcpy(output, fixture_output, output_length + 1U);
+    return true;
+}
+
+bool eidolon_transcript_is_primary_session(const char *path) {
+    assert(strcmp(path, fixture_path) == 0);
+    return true;
+}
+
+int main(void) {
+    assert(SDL_Init(0));
+    EidolonSessionRegistry registry = {0};
+    EidolonSessionEntry *entry = &registry.entries[0];
+    entry->occupied = true;
+    entry->stamp = fixture_stamp;
+    memcpy(entry->id, "01234567-89ab-cdef-8123-456789abcdef", EIDOLON_SESSION_ID_CAPACITY);
+    memcpy(entry->path, fixture_path, strlen(fixture_path) + 1U);
+    memcpy(entry->last_output, fixture_output, strlen(fixture_output) + 1U);
+
+    fixture_stamp = 2U;
+    fixture_output = "smooth dialogue!";
+    EidolonSessionPoll poll = eidolon_session_registry_poll(&registry, 10U);
+    assert(poll.new_message);
+    assert(poll.message_session != NULL);
+    assert(strcmp(poll.message_session->dialogue.page, fixture_output) == 0);
+    assert(poll.message_session->dialogue.revealed == 0U);
+
+    poll = eidolon_session_registry_poll(&registry, 44U);
+    assert(!poll.new_message);
+    assert(registry.entries[0].dialogue.revealed > 0U);
+
+    poll = eidolon_session_registry_poll(&registry, 500U);
+    assert(poll.speech_beat == 1.0F);
+    assert(poll.speaking_session == &registry.entries[0]);
+
+    EidolonSessionRegistry asynchronous = {0};
+    slow_discovery = true;
+    assert(eidolon_session_registry_init(&asynchronous));
+    (void)eidolon_session_registry_poll(&asynchronous, SDL_GetTicks());
+    const uint64_t discovery_deadline = SDL_GetTicks() + 1000U;
+    while (SDL_GetAtomicInt(&discovery_entered) == 0 && SDL_GetTicks() < discovery_deadline) {
+        SDL_Delay(1U);
+    }
+    assert(SDL_GetAtomicInt(&discovery_entered) != 0);
+    const uint64_t presentation_started = SDL_GetTicks();
+    (void)eidolon_session_registry_poll(&asynchronous, presentation_started);
+    assert(SDL_GetTicks() - presentation_started < 20U);
+    eidolon_session_registry_destroy(&asynchronous);
+    SDL_Quit();
+    return 0;
+}
