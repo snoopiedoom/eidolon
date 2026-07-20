@@ -29,6 +29,12 @@ typedef struct OverlayHitTest {
 static OverlayHitTest overlay;
 
 static LRESULT CALLBACK overlay_window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCACTIVATE) {
+        return TRUE;
+    }
+    if (message == WM_NCPAINT) {
+        return 0;
+    }
     if (message == WM_NCHITTEST && overlay.alpha != NULL) {
         POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         if (ScreenToClient(hwnd, &point)) {
@@ -355,6 +361,18 @@ bool eidolon_platform_configure_overlay(SDL_Window *window) {
     HWND hwnd = window_handle(window);
     if (hwnd == NULL) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL did not expose the Win32 window handle");
+        return false;
+    }
+
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME | WS_SYSMENU |
+               WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    style |= WS_POPUP;
+
+    SetLastError(ERROR_SUCCESS);
+    if (SetWindowLongPtrW(hwnd, GWL_STYLE, style) == 0 && GetLastError() != ERROR_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not strip overlay window chrome: %lu",
+                     GetLastError());
         return false;
     }
 

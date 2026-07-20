@@ -10,7 +10,6 @@ static const char *VALID_CONFIG = "version = 1\n"
                                   "display_height = 560\n"
                                   "portrait_display_height = 360\n"
                                   "framing = full\n"
-                                  "transition_ms = 140\n"
                                   "motion.breath_amount = 0.006\n"
                                   "motion.breath_period_s = 4.8\n"
                                   "motion.sway_pixels = 1.8\n"
@@ -57,7 +56,6 @@ int main(void) {
 
     const char *incomplete = "version = 1\nname = Test\ndirectory = test\nexpression_count = 1\n"
                              "display_height = 560\nportrait_display_height = 360\n"
-                             "transition_ms = 100\n"
                              "motion.breath_amount = 0.01\nmotion.breath_period_s = 4\n"
                              "motion.sway_pixels = 1\nmotion.sway_degrees = 0.2\n";
     assert(!eidolon_portrait_config_parse(incomplete, strlen(incomplete), &config, error,

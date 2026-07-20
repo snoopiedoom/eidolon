@@ -173,6 +173,14 @@ EidolonExpressionIntent eidolon_affect_expression(const EidolonAffect *affect) {
     return (EidolonExpressionIntent)best;
 }
 
+float eidolon_affect_expression_distance(const EidolonAffect *affect,
+                                         EidolonExpressionIntent intent) {
+    if (affect == NULL || intent < 0 || intent >= EIDOLON_EXPRESSION_COUNT) {
+        return INFINITY;
+    }
+    return distance_squared(affect, &expression_prototypes[intent]);
+}
+
 void eidolon_affect_controller_init(EidolonAffectController *controller, EidolonState state,
                                     uint64_t now_ms) {
     memset(controller, 0, sizeof(*controller));
@@ -194,6 +202,8 @@ void eidolon_affect_controller_set_state(EidolonAffectController *controller, Ei
     controller->target = eidolon_affect_for_state(state);
     controller->source = EIDOLON_AFFECT_SOURCE_STATE;
     controller->evidence = 0.0F;
+    controller->expression_intent = eidolon_affect_expression(&controller->target);
+    controller->candidate_expression_intent = controller->expression_intent;
     controller->candidate_since_ms = now_ms;
 }
 
@@ -248,6 +258,23 @@ void eidolon_affect_controller_update(EidolonAffectController *controller, float
     if (candidate_distance + EXPRESSION_CHANGE_MARGIN < current_distance) {
         controller->expression_intent = candidate;
     }
+}
+
+void eidolon_affect_controller_perform(EidolonAffectController *controller,
+                                       const EidolonAffect *affect,
+                                       EidolonExpressionIntent expression, float evidence,
+                                       uint64_t now_ms) {
+    if (controller == NULL || affect == NULL || expression < 0 ||
+        expression >= EIDOLON_EXPRESSION_COUNT) {
+        return;
+    }
+    controller->current = *affect;
+    controller->target = *affect;
+    controller->source = EIDOLON_AFFECT_SOURCE_GOEMOTIONS;
+    controller->evidence = fmaxf(0.0F, fminf(1.0F, evidence));
+    controller->expression_intent = expression;
+    controller->candidate_expression_intent = expression;
+    controller->candidate_since_ms = now_ms;
 }
 
 const char *eidolon_goemotion_name(size_t index) {

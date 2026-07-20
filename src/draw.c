@@ -2,7 +2,6 @@
 
 #include "animation.h"
 #include "bubble_layout.h"
-#include "debug_ui.h"
 #include "log.h"
 #include "platform/overlay.h"
 
@@ -211,12 +210,10 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     if (points_right) {
         fill_triangle(app->renderer, (SDL_FPoint){shadow.x + shadow.w - 8.0F, tail_y - 8.0F},
                       (SDL_FPoint){shadow.x + shadow.w + 25.0F, tail_y + 12.0F},
-                      (SDL_FPoint){shadow.x + shadow.w - 8.0F, tail_y + 18.0F},
-                      style.shadow);
+                      (SDL_FPoint){shadow.x + shadow.w - 8.0F, tail_y + 18.0F}, style.shadow);
         fill_triangle(app->renderer, (SDL_FPoint){bubble->x + bubble->w - 8.0F, tail_y - 10.0F},
                       (SDL_FPoint){bubble->x + bubble->w + 23.0F, tail_y + 9.0F},
-                      (SDL_FPoint){bubble->x + bubble->w - 8.0F, tail_y + 15.0F},
-                      style.background);
+                      (SDL_FPoint){bubble->x + bubble->w - 8.0F, tail_y + 15.0F}, style.background);
     } else {
         fill_triangle(app->renderer, (SDL_FPoint){shadow.x + 8.0F, tail_y - 8.0F},
                       (SDL_FPoint){shadow.x - 25.0F, tail_y + 12.0F},
@@ -227,26 +224,22 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     }
     fill_rounded_rect(app->renderer, bubble, style.radius, style.outline);
     if (style.outlined) {
-        SDL_FRect inner = {bubble->x + 2.0F, bubble->y + 2.0F, bubble->w - 4.0F,
-                           bubble->h - 4.0F};
+        SDL_FRect inner = {bubble->x + 2.0F, bubble->y + 2.0F, bubble->w - 4.0F, bubble->h - 4.0F};
         fill_rounded_rect(app->renderer, &inner, style.radius - 2.0F, style.background);
     }
 
     const SDL_FRect accent_bar = {bubble->x + 16.0F, bubble->y + 15.0F, 4.0F, 15.0F};
     fill_rounded_rect(app->renderer, &accent_bar, 2.0F, style.accent);
     if (style.outlined) {
-        const SDL_FRect cyan_tick = {bubble->x + bubble->w - 50.0F, bubble->y + 17.0F, 21.0F,
-                                     2.0F};
-        const SDL_FRect pink_tick = {bubble->x + bubble->w - 26.0F, bubble->y + 17.0F, 8.0F,
-                                     2.0F};
+        const SDL_FRect cyan_tick = {bubble->x + bubble->w - 50.0F, bubble->y + 17.0F, 21.0F, 2.0F};
+        const SDL_FRect pink_tick = {bubble->x + bubble->w - 26.0F, bubble->y + 17.0F, 8.0F, 2.0F};
         fill_rounded_rect(app->renderer, &cyan_tick, 1.0F, style.secondary);
         fill_rounded_rect(app->renderer, &pink_tick, 1.0F, style.accent);
     }
     char heading[40];
     SDL_strlcpy(heading, title != NULL && title[0] != '\0' ? title : "EIDOLON", sizeof(heading));
     if (!eidolon_text_renderer_draw(app->text_renderer, title_slot, heading, strlen(heading),
-                                    bubble->x + 28.0F, bubble->y + 11.0F, 0,
-                                    style.title)) {
+                                    bubble->x + 28.0F, bubble->y + 11.0F, 0, style.title)) {
         SDL_SetRenderDrawColor(app->renderer, style.title.r, style.title.g, style.title.b,
                                style.title.a);
         SDL_RenderDebugText(app->renderer, bubble->x + 28.0F, bubble->y + 17.0F, heading);
@@ -297,7 +290,7 @@ static void draw_scene(EidolonApp *app) {
         draw_state_bubble(app);
     }
 
-    if (eidolon_portrait_ready(app->portrait)) {
+    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
         const float width = eidolon_portrait_display_width(app->portrait) * app->model_scale;
         const float height = eidolon_portrait_display_height(app->portrait) * app->model_scale;
         const SDL_FRect destination = eidolon_bubble_layout_character(
@@ -309,7 +302,8 @@ static void draw_scene(EidolonApp *app) {
                 portrait_draw_reported = true;
             }
         }
-    } else if (eidolon_model_texture(app->model) != NULL) {
+    } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
+               eidolon_model_texture(app->model) != NULL) {
         SDL_Texture *model_texture = eidolon_model_texture(app->model);
         const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * app->model_scale;
         const SDL_FRect destination = {
@@ -325,7 +319,7 @@ static void draw_scene(EidolonApp *app) {
                               rendered ? "yes" : "no", SDL_GetError());
             model_draw_reported = true;
         }
-    } else if (app->atlas != NULL) {
+    } else if (app->render_mode == EIDOLON_RENDER_MODE_SPRITE && app->atlas != NULL) {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
         const float width = (float)EIDOLON_CELL_WIDTH * app->model_scale;
         const float height = (float)EIDOLON_CELL_HEIGHT * app->model_scale;
@@ -337,8 +331,6 @@ static void draw_scene(EidolonApp *app) {
         };
         SDL_RenderTexture(app->renderer, app->atlas, &source, &destination);
     }
-
-    eidolon_debug_ui_draw(app);
 }
 
 static int hit_test_mode(const EidolonApp *app) {
@@ -357,10 +349,11 @@ static void update_hit_test_if_needed(EidolonApp *app) {
     const uint64_t model_transform_revision =
         eidolon_model_presented_transform_revision(app->model);
     const uint64_t portrait_revision = eidolon_portrait_revision(app->portrait);
-    const bool portrait_active = eidolon_portrait_ready(app->portrait);
-    const bool model_active = eidolon_model_texture(app->model) != NULL;
-    const bool interaction_active =
-        app->model_rotation_dragging || app->debug_drag_control != EIDOLON_DEBUG_CONTROL_NONE;
+    const bool portrait_active =
+        app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait);
+    const bool model_active = app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
+                              eidolon_model_texture(app->model) != NULL;
+    const bool interaction_active = app->model_rotation_dragging;
     const bool model_transform_changed =
         app->hit_test_model_transform_revision != model_transform_revision;
     const bool sprite_unchanged =

@@ -18,6 +18,12 @@ int main(void) {
     char output[128];
     assert(eidolon_hook_read_agent_output(input, output, sizeof(output)));
     assert(strcmp(output, "hello\nworld") == 0);
+    char source_timestamp[EIDOLON_TRANSCRIPT_TIMESTAMP_CAPACITY];
+    assert(eidolon_transcript_read_agent_output_info(
+        EIDOLON_TEST_TRANSCRIPT, output, sizeof(output), source_timestamp,
+        sizeof(source_timestamp)));
+    assert(strcmp(output, "hello\nworld") == 0);
+    assert(strcmp(source_timestamp, "2026-07-15T00:00:01Z") == 0);
     assert(eidolon_transcript_is_primary_session(EIDOLON_TEST_TRANSCRIPT));
     assert(!eidolon_transcript_is_primary_session(EIDOLON_TEST_SUBAGENT_TRANSCRIPT));
     fclose(input);

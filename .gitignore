@@ -24,6 +24,7 @@ __pycache__/
 # Local reference checkouts and ad-hoc visual captures.
 /lib/BA2LW/
 /screen*.png
+!/screen0.png
 
 # SDL_shadercross host-tool build and downloaded compiler payloads.
 /lib/SDL_shadercross/build-host/

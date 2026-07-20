@@ -19,18 +19,20 @@ struct EidolonPortraitRenderer {
     uint64_t config_hash;
     uint64_t attempted_hash;
     uint64_t revision;
-    uint64_t transition_started_ms;
+    uint64_t expression_changed_ms;
     uint64_t speech_started_ms;
+    uint64_t performance_started_ms;
     uint64_t last_poll_ms;
     uint64_t last_draw_ms;
-    unsigned int transition_serial;
+    unsigned int expression_serial;
     unsigned int accent_variant;
     unsigned int speech_serial;
     float speech_emphasis;
+    float performance_intensity;
+    EidolonPerformanceCue performance_cue;
     float attention_target;
     float attention_current;
     int current_expression;
-    int previous_expression;
     int automatic_expression;
     int override_expression;
     EidolonState state;
@@ -39,7 +41,7 @@ struct EidolonPortraitRenderer {
     bool ready;
     bool force_reload;
     bool face_mode;
-    bool transition_interrupted;
+    bool accent_interrupted;
 };
 
 static void set_error(char *error, size_t capacity, const char *format, ...) {
@@ -297,13 +299,6 @@ static bool parse_line(EidolonPortraitConfig *config, const char *key, const cha
         }
         return true;
     }
-    if (strcmp(key, "transition_ms") == 0) {
-        if (!parse_unsigned(value, &config->transition_ms)) {
-            set_error(error, error_capacity, "invalid transition_ms");
-            return false;
-        }
-        return true;
-    }
     if (strncmp(key, "state.", 6U) == 0) {
         const int state = state_index(key + 6U);
         unsigned int expression = 0U;
@@ -429,8 +424,7 @@ bool eidolon_portrait_config_parse(const char *text, size_t length, EidolonPortr
         config->accent_duration_ms > 2000U || config->posture_strength < 0.0F ||
         config->posture_strength > 3.0F || config->speech_strength < 0.0F ||
         config->speech_strength > 3.0F || config->attention_strength < 0.0F ||
-        config->attention_strength > 3.0F || config->transition_ms > 2000U ||
-        config->dialogue_hold_ms > 30000U) {
+        config->attention_strength > 3.0F || config->dialogue_hold_ms > 30000U) {
         set_error(error, error_capacity, "portrait motion or display value out of range");
         return false;
     }
@@ -509,22 +503,36 @@ static bool load_textures(EidolonPortraitRenderer *portrait, const EidolonPortra
     return true;
 }
 
-static void select_expression(EidolonPortraitRenderer *portrait, int expression, uint64_t now_ms) {
+static void select_expression(EidolonPortraitRenderer *portrait, int expression, uint64_t now_ms,
+                              const char *source) {
     if (!portrait->ready || expression < 0 ||
         (size_t)expression >= portrait->config.expression_count ||
         expression == portrait->current_expression) {
         return;
     }
-    portrait->transition_interrupted =
-        portrait->current_expression >= 0 && now_ms >= portrait->transition_started_ms &&
-        now_ms - portrait->transition_started_ms < portrait->config.accent_duration_ms;
-    portrait->previous_expression = portrait->current_expression;
+    const int previous = portrait->current_expression;
+    const uint64_t since_previous =
+        portrait->expression_changed_ms == 0U || now_ms < portrait->expression_changed_ms
+            ? 0U
+            : now_ms - portrait->expression_changed_ms;
+    portrait->accent_interrupted =
+        portrait->current_expression >= 0 && now_ms >= portrait->expression_changed_ms &&
+        now_ms - portrait->expression_changed_ms < portrait->config.accent_duration_ms;
     portrait->current_expression = expression;
-    portrait->transition_started_ms = now_ms;
-    portrait->transition_serial += 1U;
+    portrait->expression_changed_ms = now_ms;
+    portrait->expression_serial += 1U;
     portrait->accent_variant =
-        (portrait->transition_serial + (unsigned int)expression * 5U) % 3U;
+        (portrait->expression_serial + (unsigned int)expression * 5U) % 3U;
     portrait->revision += 1U;
+    const char *previous_label =
+        previous >= 0 && (size_t)previous < portrait->config.expression_count
+            ? portrait->config.expressions[previous].label
+            : "none";
+    const char *current_label = portrait->config.expressions[expression].label;
+    eidolon_log_write("portrait", "expression %s->%s source=%s since_ms=%llu interrupted=%s",
+                      previous_label, current_label, source != NULL ? source : "unknown",
+                      (unsigned long long)since_previous,
+                      portrait->accent_interrupted ? "yes" : "no");
 }
 
 static bool reload_config(EidolonPortraitRenderer *portrait, uint64_t now_ms) {
@@ -584,9 +592,8 @@ static bool reload_config(EidolonPortraitRenderer *portrait, uint64_t now_ms) {
     const int selected = portrait->override_expression >= 0 ? portrait->override_expression
                                                             : portrait->automatic_expression;
     portrait->current_expression = selected;
-    portrait->previous_expression = selected;
-    portrait->transition_started_ms = now_ms;
-    portrait->transition_interrupted = false;
+    portrait->expression_changed_ms = now_ms;
+    portrait->accent_interrupted = false;
     portrait->revision += 1U;
     eidolon_log_write("portrait", "loaded %s expressions=%zu canvas=%dx%d", config.name,
                       config.expression_count, width, height);
@@ -608,7 +615,6 @@ EidolonPortraitRenderer *eidolon_portrait_create(SDL_Renderer *renderer, const c
     portrait->override_expression = -1;
     portrait->automatic_expression = -1;
     portrait->current_expression = -1;
-    portrait->previous_expression = -1;
     portrait->state = EIDOLON_STATE_IDLE;
     portrait->force_reload = true;
     SDL_strlcpy(portrait->config_path, config_path, sizeof(portrait->config_path));
@@ -649,7 +655,9 @@ void eidolon_portrait_set_state(EidolonPortraitRenderer *portrait, EidolonState 
     portrait->state = state;
     portrait->automatic_expression = portrait->config.state_expressions[state];
     if (portrait->override_expression < 0) {
-        select_expression(portrait, portrait->automatic_expression, now_ms);
+        char source[48];
+        SDL_snprintf(source, sizeof(source), "state:%s", eidolon_state_name(state));
+        select_expression(portrait, portrait->automatic_expression, now_ms, source);
     }
 }
 
@@ -671,7 +679,9 @@ void eidolon_portrait_set_expression_intent(EidolonPortraitRenderer *portrait,
     }
     portrait->automatic_expression = expression;
     if (portrait->override_expression < 0) {
-        select_expression(portrait, expression, now_ms);
+        char source[64];
+        SDL_snprintf(source, sizeof(source), "intent:%s", label);
+        select_expression(portrait, expression, now_ms, source);
     }
 }
 
@@ -683,7 +693,7 @@ void eidolon_portrait_set_override(EidolonPortraitRenderer *portrait, int expres
     }
     portrait->override_expression = expression;
     select_expression(portrait, expression >= 0 ? expression : portrait->automatic_expression,
-                      now_ms);
+                      now_ms, expression >= 0 ? "debug-override" : "override-cleared");
 }
 
 void eidolon_portrait_speak(EidolonPortraitRenderer *portrait, float emphasis, uint64_t now_ms) {
@@ -693,6 +703,16 @@ void eidolon_portrait_speak(EidolonPortraitRenderer *portrait, float emphasis, u
     portrait->speech_emphasis = SDL_clamp(emphasis, 0.0F, 1.0F);
     portrait->speech_started_ms = now_ms;
     portrait->speech_serial += 1U;
+}
+
+void eidolon_portrait_perform(EidolonPortraitRenderer *portrait, EidolonPerformanceCue cue,
+                              float intensity, uint64_t now_ms) {
+    if (portrait == NULL || cue == EIDOLON_PERFORMANCE_CUE_NONE || intensity <= 0.0F) {
+        return;
+    }
+    portrait->performance_cue = cue;
+    portrait->performance_intensity = SDL_clamp(intensity, 0.0F, 1.0F);
+    portrait->performance_started_ms = now_ms;
 }
 
 void eidolon_portrait_set_attention(EidolonPortraitRenderer *portrait, float direction) {
@@ -817,7 +837,7 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
                      portrait->config.attention_strength;
 
     const float accent_progress = SDL_clamp(
-        (float)(now_ms - portrait->transition_started_ms) /
+        (float)(now_ms - portrait->expression_changed_ms) /
             (float)portrait->config.accent_duration_ms,
         0.0F, 1.0F);
     if (accent_progress < 1.0F && portrait->config.accent_strength > 0.0F) {
@@ -826,7 +846,7 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
         const float amplitude = variant_amplitude[portrait->accent_variant] *
                                 portrait->config.accent_strength;
         float anticipation = 0.0F;
-        if (portrait->transition_interrupted && accent_progress < 0.18F) {
+        if (portrait->accent_interrupted && accent_progress < 0.18F) {
             const float anticipation_progress = accent_progress / 0.18F;
             anticipation = -0.30F * SDL_sinf(anticipation_progress * SDL_PI_F) *
                            (1.0F - anticipation_progress);
@@ -859,6 +879,48 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
         }
     }
 
+    if (portrait->performance_started_ms != 0U && now_ms >= portrait->performance_started_ms) {
+        const float cue_progress =
+            (float)(now_ms - portrait->performance_started_ms) / 560.0F;
+        if (cue_progress < 1.0F) {
+            const float pulse = damped_channel(cue_progress, 2.15F, 1.75F) *
+                                portrait->performance_intensity;
+            const float direction = fabsf(portrait->attention_current) > 0.1F
+                                        ? portrait->attention_current
+                                        : -1.0F;
+            switch (portrait->performance_cue) {
+            case EIDOLON_PERFORMANCE_CUE_LIFT:
+                translation_y -= 10.0F * unit * pulse;
+                scale_delta += 0.012F * pulse;
+                degrees_delta -= 0.24F * direction * pulse;
+                break;
+            case EIDOLON_PERFORMANCE_CUE_RECOIL:
+                translation_x -= 7.0F * unit * direction * pulse;
+                translation_y += 3.0F * unit * pulse;
+                scale_delta -= 0.008F * pulse;
+                degrees_delta -= 0.38F * direction * pulse;
+                break;
+            case EIDOLON_PERFORMANCE_CUE_LEAN:
+                translation_x += 5.0F * unit * direction * pulse;
+                translation_y -= 4.0F * unit * pulse;
+                scale_delta += 0.007F * pulse;
+                degrees_delta += 0.28F * direction * pulse;
+                break;
+            case EIDOLON_PERFORMANCE_CUE_SURPRISE:
+                translation_y -= 19.0F * unit * pulse;
+                scale_delta += 0.026F * pulse;
+                degrees_delta -= 0.48F * direction * pulse;
+                break;
+            case EIDOLON_PERFORMANCE_CUE_ACCENT:
+                translation_y -= 4.0F * unit * pulse;
+                degrees_delta += 0.12F * direction * pulse;
+                break;
+            case EIDOLON_PERFORMANCE_CUE_NONE:
+                break;
+            }
+        }
+    }
+
     const float transform_scale = 1.0F + scale_delta;
     const float old_width = animated.w;
     const float old_height = animated.h;
@@ -869,34 +931,13 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
     angle += (double)degrees_delta;
     const SDL_FPoint pivot = {animated.w * 0.5F, animated.h * 0.94F};
 
-    float progress = 1.0F;
-    if (portrait->config.transition_ms > 0U) {
-        progress = SDL_clamp((float)(now_ms - portrait->transition_started_ms) /
-                                 (float)portrait->config.transition_ms,
-                             0.0F, 1.0F);
-    }
-    if (progress < 1.0F && portrait->previous_expression >= 0 &&
-        portrait->previous_expression != portrait->current_expression) {
-        SDL_Texture *previous = portrait->textures[portrait->previous_expression];
-        const SDL_FRect *previous_source =
-            portrait->face_mode
-                ? &portrait->config.expressions[portrait->previous_expression].portrait_crop
-                : NULL;
-        SDL_SetTextureAlphaMod(previous, (Uint8)((1.0F - progress) * 255.0F));
-        SDL_RenderTextureRotated(renderer, previous, previous_source, &animated, angle, &pivot,
-                                 SDL_FLIP_NONE);
-        SDL_SetTextureAlphaMod(previous, 255U);
-    }
     SDL_Texture *current = portrait->textures[portrait->current_expression];
     const SDL_FRect *current_source =
         portrait->face_mode
             ? &portrait->config.expressions[portrait->current_expression].portrait_crop
             : NULL;
-    SDL_SetTextureAlphaMod(current, (Uint8)(progress * 255.0F));
-    const bool rendered = SDL_RenderTextureRotated(renderer, current, current_source, &animated,
-                                                   angle, &pivot, SDL_FLIP_NONE);
-    SDL_SetTextureAlphaMod(current, 255U);
-    return rendered;
+    return SDL_RenderTextureRotated(renderer, current, current_source, &animated, angle, &pivot,
+                                    SDL_FLIP_NONE);
 }
 
 bool eidolon_portrait_ready(const EidolonPortraitRenderer *portrait) {

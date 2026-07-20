@@ -164,7 +164,8 @@ static char *read_transcript_tail(const char *path, size_t *size) {
     return buffer;
 }
 
-static bool extract_latest_message(char *transcript, char *output, size_t capacity) {
+static bool extract_latest_message(char *transcript, char *output, size_t capacity,
+                                   char *source_timestamp, size_t timestamp_capacity) {
     bool found = false;
     char *line = transcript;
     while (*line != '\0') {
@@ -173,14 +174,23 @@ static bool extract_latest_message(char *transcript, char *output, size_t capaci
             *end = '\0';
         }
 
+        bool candidate = false;
         if (strstr(line, "\"type\":\"task_complete\"") != NULL) {
-            found = find_string_value(line, "last_agent_message", output, capacity) || found;
+            candidate = find_string_value(line, "last_agent_message", output, capacity);
         } else if (strstr(line, "\"type\":\"response_item\"") != NULL &&
                    strstr(line, "\"role\":\"assistant\"") != NULL &&
                    strstr(line, "\"phase\":\"final\"") != NULL &&
                    strstr(line, "\"type\":\"output_text\"") != NULL) {
             const char *content = strstr(line, "\"type\":\"output_text\"");
-            found = find_string_value(content, "text", output, capacity) || found;
+            candidate = find_string_value(content, "text", output, capacity);
+        }
+        if (candidate) {
+            found = true;
+            if (source_timestamp != NULL && timestamp_capacity > 0U) {
+                source_timestamp[0] = '\0';
+                (void)find_string_value(line, "timestamp", source_timestamp,
+                                        timestamp_capacity);
+            }
         }
 
         if (end == NULL) {
@@ -221,10 +231,19 @@ bool eidolon_hook_read_agent_output(FILE *input, char *output, size_t capacity) 
 }
 
 bool eidolon_transcript_read_agent_output(const char *path, char *output, size_t capacity) {
+    return eidolon_transcript_read_agent_output_info(path, output, capacity, NULL, 0U);
+}
+
+bool eidolon_transcript_read_agent_output_info(const char *path, char *output, size_t capacity,
+                                               char *source_timestamp,
+                                               size_t timestamp_capacity) {
     if (path == NULL || output == NULL || capacity == 0) {
         return false;
     }
     output[0] = '\0';
+    if (source_timestamp != NULL && timestamp_capacity > 0U) {
+        source_timestamp[0] = '\0';
+    }
 
     size_t transcript_size = 0;
     char *transcript = read_transcript_tail(path, &transcript_size);
@@ -234,7 +253,8 @@ bool eidolon_transcript_read_agent_output(const char *path, char *output, size_t
         return false;
     }
 
-    const bool found = extract_latest_message(transcript, output, capacity);
+    const bool found = extract_latest_message(transcript, output, capacity, source_timestamp,
+                                              timestamp_capacity);
     free(transcript);
     return found;
 }

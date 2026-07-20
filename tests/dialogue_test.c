@@ -78,5 +78,27 @@ int main(void) {
     eidolon_dialogue_update(&dialogue, 5000U);
     assert(eidolon_dialogue_reveal_emphasis(&dialogue, 0U) == 1.0F);
     assert(eidolon_dialogue_reveal_emphasis(&dialogue, dialogue.revealed) == 0.0F);
+
+    eidolon_dialogue_set(&dialogue, "ready, set, go", 6000U);
+    dialogue.expression_track.waiting = true;
+    eidolon_dialogue_update(&dialogue, 7000U);
+    assert(dialogue.revealed == 0U);
+    dialogue.expression_track.waiting = false;
+    eidolon_dialogue_resume(&dialogue, 7000U);
+    eidolon_dialogue_update(&dialogue, 7024U);
+    assert(dialogue.revealed == 1U);
+    assert(eidolon_dialogue_revealed_text_offset(&dialogue) == 1U);
+
+    eidolon_dialogue_set(&dialogue, "hello", 8000U);
+    eidolon_dialogue_update(&dialogue, 9000U);
+    assert(dialogue.revealed == strlen("hello"));
+    assert(eidolon_dialogue_sync(&dialogue, "hello world 💖", 9100U));
+    assert(strcmp(dialogue.text, "hello world 💖") == 0);
+    assert(dialogue.revealed == strlen("hello"));
+    eidolon_dialogue_update(&dialogue, 9123U);
+    assert(dialogue.revealed == strlen("hello"));
+    eidolon_dialogue_update(&dialogue, 9124U);
+    assert(dialogue.revealed == strlen("hello "));
+    assert(!eidolon_dialogue_sync(&dialogue, "hello world 💖", 9200U));
     return 0;
 }

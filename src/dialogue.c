@@ -174,15 +174,19 @@ static void build_page(EidolonDialogue *dialogue) {
     int line = 0;
     dialogue->scroll_cursor = dialogue->cursor;
     dialogue->newest_line_offset = 0U;
+    dialogue->page_text_offsets[0] = source;
 
     while (dialogue->text[source] != '\0' && line < DIALOGUE_LINES &&
            output + 1 < sizeof(dialogue->page)) {
         if (dialogue->text[source] == '\n') {
+            const size_t newline_source = source;
             ++source;
             if (line + 1 >= DIALOGUE_LINES) {
                 break;
             }
+            dialogue->page_text_offsets[output] = newline_source;
             dialogue->page[output++] = '\n';
+            dialogue->page_text_offsets[output] = source;
             column = 0;
             ++line;
             if (line == 1) {
@@ -195,10 +199,15 @@ static void build_page(EidolonDialogue *dialogue) {
         }
 
         if (dialogue->text[source] == ' ') {
+            const size_t space_source = source;
             ++source;
             if (column > 0 && column < DIALOGUE_COLUMNS) {
+                dialogue->page_text_offsets[output] = space_source;
                 dialogue->page[output++] = ' ';
+                dialogue->page_text_offsets[output] = source;
                 ++column;
+            } else {
+                dialogue->page_text_offsets[output] = source;
             }
             continue;
         }
@@ -219,7 +228,9 @@ static void build_page(EidolonDialogue *dialogue) {
             while (output > 0 && dialogue->page[output - 1] == ' ') {
                 --output;
             }
+            dialogue->page_text_offsets[output] = source;
             dialogue->page[output++] = '\n';
+            dialogue->page_text_offsets[output] = source;
             column = 0;
             ++line;
             if (line == 1) {
@@ -239,7 +250,9 @@ static void build_page(EidolonDialogue *dialogue) {
                 if (line + 1 >= DIALOGUE_LINES) {
                     break;
                 }
+                dialogue->page_text_offsets[output] = source;
                 dialogue->page[output++] = '\n';
+                dialogue->page_text_offsets[output] = source;
                 column = 0;
                 ++line;
                 if (line == 1) {
@@ -253,8 +266,12 @@ static void build_page(EidolonDialogue *dialogue) {
                 break;
             }
             memcpy(dialogue->page + output, dialogue->text + source, bytes);
+            for (size_t byte = 0U; byte < bytes; ++byte) {
+                dialogue->page_text_offsets[output + byte] = source + byte;
+            }
             output += bytes;
             source = next;
+            dialogue->page_text_offsets[output] = source;
             column += width;
         }
         if (source < word_end) {
@@ -267,6 +284,7 @@ static void build_page(EidolonDialogue *dialogue) {
         --output;
     }
     dialogue->page[output] = '\0';
+    dialogue->page_text_offsets[output] = source;
     dialogue->next_cursor = source;
     if (dialogue->scroll_cursor == dialogue->cursor) {
         dialogue->scroll_cursor = source;
@@ -285,6 +303,51 @@ void eidolon_dialogue_set(EidolonDialogue *dialogue, const char *text, uint64_t 
     dialogue->reveal_tick_ms = now_ms;
 }
 
+bool eidolon_dialogue_sync(EidolonDialogue *dialogue, const char *text, uint64_t now_ms) {
+    if (dialogue == NULL || text == NULL) {
+        return false;
+    }
+    char normalized[EIDOLON_DIALOGUE_TEXT_CAPACITY];
+    normalize_text(normalized, sizeof(normalized), text);
+    if (strcmp(dialogue->text, normalized) == 0) {
+        return false;
+    }
+
+    const size_t previous_text_length = strlen(dialogue->text);
+    size_t common = 0U;
+    while (dialogue->text[common] != '\0' && normalized[common] != '\0' &&
+           dialogue->text[common] == normalized[common]) {
+        ++common;
+    }
+    const size_t page_length = strlen(dialogue->page);
+    const size_t revealed = dialogue->revealed < page_length ? dialogue->revealed : page_length;
+    const bool was_page_complete = dialogue->revealed >= page_length;
+    size_t revealed_text_offset = dialogue->page_text_offsets[revealed];
+    if (revealed_text_offset > common) {
+        revealed_text_offset = common;
+    }
+    if (dialogue->cursor > common) {
+        dialogue->cursor = common;
+    }
+    memcpy(dialogue->text, normalized, strlen(normalized) + 1U);
+    build_page(dialogue);
+
+    dialogue->revealed = 0U;
+    const size_t rebuilt_length = strlen(dialogue->page);
+    while (dialogue->revealed < rebuilt_length &&
+           dialogue->page_text_offsets[dialogue->revealed + 1U] <= revealed_text_offset) {
+        ++dialogue->revealed;
+    }
+    if (strlen(normalized) > previous_text_length || dialogue->revealed < rebuilt_length) {
+        dialogue->page_complete_tick_ms = 0U;
+        if (was_page_complete || dialogue->reveal_tick_ms == 0U ||
+            now_ms > dialogue->reveal_tick_ms + 1000U) {
+            dialogue->reveal_tick_ms = now_ms;
+        }
+    }
+    return true;
+}
+
 void eidolon_dialogue_configure(EidolonDialogue *dialogue, EidolonDialogueMovement movement,
                                 unsigned int hold_ms) {
     if (dialogue == NULL || movement < 0 || movement >= EIDOLON_DIALOGUE_MOVEMENT_COUNT) {
@@ -296,7 +359,8 @@ void eidolon_dialogue_configure(EidolonDialogue *dialogue, EidolonDialogueMoveme
 
 void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
     const size_t page_length = strlen(dialogue->page);
-    if (dialogue->revealed >= page_length || now_ms < dialogue->reveal_tick_ms) {
+    if (dialogue->expression_track.waiting || dialogue->revealed >= page_length ||
+        now_ms < dialogue->reveal_tick_ms) {
         return;
     }
 
@@ -311,6 +375,12 @@ void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
     dialogue->reveal_tick_ms += (uint64_t)characters * REVEAL_INTERVAL_MS;
     if (dialogue->revealed >= page_length && dialogue->page_complete_tick_ms == 0U) {
         dialogue->page_complete_tick_ms = now_ms;
+    }
+}
+
+void eidolon_dialogue_resume(EidolonDialogue *dialogue, uint64_t now_ms) {
+    if (dialogue != NULL && dialogue->revealed < strlen(dialogue->page)) {
+        dialogue->reveal_tick_ms = now_ms;
     }
 }
 
@@ -413,6 +483,15 @@ bool eidolon_dialogue_has_next_page(const EidolonDialogue *dialogue) {
 bool eidolon_dialogue_has_unread(const EidolonDialogue *dialogue) {
     return dialogue->revealed < strlen(dialogue->page) ||
            dialogue->text[dialogue->next_cursor] != '\0';
+}
+
+size_t eidolon_dialogue_revealed_text_offset(const EidolonDialogue *dialogue) {
+    if (dialogue == NULL) {
+        return 0U;
+    }
+    const size_t page_length = strlen(dialogue->page);
+    const size_t revealed = dialogue->revealed < page_length ? dialogue->revealed : page_length;
+    return dialogue->page_text_offsets[revealed];
 }
 
 const char *eidolon_dialogue_movement_name(EidolonDialogueMovement movement) {

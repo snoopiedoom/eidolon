@@ -7,16 +7,24 @@
 
 #include <string.h>
 
+#define AFFECT_QUEUE_CAPACITY 128U
+
+typedef struct AffectQueuedRequest {
+    char text[EIDOLON_AFFECT_TEXT_CAPACITY + 1U];
+    uint64_t sequence;
+} AffectQueuedRequest;
+
 struct EidolonAffectClient {
     SDL_Mutex *mutex;
     SDL_Condition *condition;
     SDL_Thread *thread;
     char worker_path[4096];
-    char request_text[EIDOLON_AFFECT_TEXT_CAPACITY + 1U];
-    EidolonAffectResponse result;
-    uint64_t request_sequence;
-    bool request_pending;
-    bool result_pending;
+    AffectQueuedRequest requests[AFFECT_QUEUE_CAPACITY];
+    EidolonAffectResponse results[AFFECT_QUEUE_CAPACITY];
+    size_t request_head;
+    size_t request_count;
+    size_t result_head;
+    size_t result_count;
     bool stopping;
     bool available;
 };
@@ -84,27 +92,27 @@ static int SDLCALL affect_thread(void *userdata) {
     eidolon_log_write("affect", "native GoEmotions worker ready");
 
     for (;;) {
-        char text[EIDOLON_AFFECT_TEXT_CAPACITY + 1U];
-        uint64_t sequence = 0U;
+        AffectQueuedRequest queued;
         SDL_LockMutex(client->mutex);
-        while (!client->request_pending && !client->stopping) {
+        while (client->request_count == 0U && !client->stopping) {
             SDL_WaitCondition(client->condition, client->mutex);
         }
         if (client->stopping) {
             SDL_UnlockMutex(client->mutex);
             break;
         }
-        sequence = client->request_sequence;
-        SDL_strlcpy(text, client->request_text, sizeof(text));
-        client->request_pending = false;
+        queued = client->requests[client->request_head];
+        client->request_head = (client->request_head + 1U) % AFFECT_QUEUE_CAPACITY;
+        client->request_count -= 1U;
         SDL_UnlockMutex(client->mutex);
 
-        const size_t text_length = strlen(text);
+        const size_t text_length = strlen(queued.text);
         const EidolonAffectRequestHeader request = {EIDOLON_AFFECT_PROTOCOL_MAGIC,
-                                                    EIDOLON_AFFECT_PROTOCOL_VERSION, sequence,
+                                                    EIDOLON_AFFECT_PROTOCOL_VERSION,
+                                                    queued.sequence,
                                                     (uint32_t)text_length};
         if (!write_exact(input, &request, sizeof(request)) ||
-            !write_exact(input, text, text_length) || !SDL_FlushIO(input)) {
+            !write_exact(input, queued.text, text_length) || !SDL_FlushIO(input)) {
             eidolon_log_write("affect", "worker request failed: %s", SDL_GetError());
             break;
         }
@@ -118,12 +126,19 @@ static int SDLCALL affect_thread(void *userdata) {
         if (response.magic != EIDOLON_AFFECT_PROTOCOL_MAGIC ||
             response.version != EIDOLON_AFFECT_PROTOCOL_VERSION || response.status != 0U) {
             eidolon_log_write("affect", "worker rejected sequence=%llu status=%u",
-                              (unsigned long long)sequence, response.status);
+                              (unsigned long long)queued.sequence, response.status);
             continue;
         }
         SDL_LockMutex(client->mutex);
-        client->result = response;
-        client->result_pending = true;
+        if (client->result_count == AFFECT_QUEUE_CAPACITY) {
+            client->result_head = (client->result_head + 1U) % AFFECT_QUEUE_CAPACITY;
+            client->result_count -= 1U;
+            eidolon_log_write("affect", "result queue full; oldest classification discarded");
+        }
+        const size_t result_tail =
+            (client->result_head + client->result_count) % AFFECT_QUEUE_CAPACITY;
+        client->results[result_tail] = response;
+        client->result_count += 1U;
         SDL_UnlockMutex(client->mutex);
     }
 
@@ -187,9 +202,14 @@ bool eidolon_affect_client_submit(EidolonAffectClient *client, uint64_t sequence
         return false;
     }
     SDL_LockMutex(client->mutex);
-    client->request_sequence = sequence;
-    SDL_strlcpy(client->request_text, text, sizeof(client->request_text));
-    client->request_pending = true;
+    if (client->request_count == AFFECT_QUEUE_CAPACITY) {
+        SDL_UnlockMutex(client->mutex);
+        return false;
+    }
+    const size_t tail = (client->request_head + client->request_count) % AFFECT_QUEUE_CAPACITY;
+    client->requests[tail].sequence = sequence;
+    SDL_strlcpy(client->requests[tail].text, text, sizeof(client->requests[tail].text));
+    client->request_count += 1U;
     SDL_SignalCondition(client->condition);
     SDL_UnlockMutex(client->mutex);
     return true;
@@ -201,11 +221,13 @@ bool eidolon_affect_client_poll(EidolonAffectClient *client, uint64_t *sequence,
         return false;
     }
     SDL_LockMutex(client->mutex);
-    const bool pending = client->result_pending;
+    const bool pending = client->result_count > 0U;
     if (pending) {
-        *sequence = client->result.sequence;
-        memcpy(probabilities, client->result.probabilities, sizeof(client->result.probabilities));
-        client->result_pending = false;
+        const EidolonAffectResponse *result = &client->results[client->result_head];
+        *sequence = result->sequence;
+        memcpy(probabilities, result->probabilities, sizeof(result->probabilities));
+        client->result_head = (client->result_head + 1U) % AFFECT_QUEUE_CAPACITY;
+        client->result_count -= 1U;
     }
     SDL_UnlockMutex(client->mutex);
     return pending;

@@ -48,7 +48,6 @@ typedef struct EidolonPortraitConfig {
     float posture_strength;
     float speech_strength;
     float attention_strength;
-    unsigned int transition_ms;
     EidolonDialogueTheme dialogue_theme;
     EidolonDialogueMovement dialogue_movement;
     unsigned int dialogue_hold_ms;
@@ -69,6 +68,8 @@ void eidolon_portrait_set_expression_intent(EidolonPortraitRenderer *portrait,
 void eidolon_portrait_set_override(EidolonPortraitRenderer *portrait, int expression,
                                    uint64_t now_ms);
 void eidolon_portrait_speak(EidolonPortraitRenderer *portrait, float emphasis, uint64_t now_ms);
+void eidolon_portrait_perform(EidolonPortraitRenderer *portrait, EidolonPerformanceCue cue,
+                              float intensity, uint64_t now_ms);
 void eidolon_portrait_set_attention(EidolonPortraitRenderer *portrait, float direction);
 void eidolon_portrait_force_reload(EidolonPortraitRenderer *portrait);
 void eidolon_portrait_set_face_mode(EidolonPortraitRenderer *portrait, bool enabled);

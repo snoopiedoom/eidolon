@@ -34,6 +34,8 @@ static void state_is_always_a_working_fallback(void) {
     EidolonAffectController controller;
     eidolon_affect_controller_init(&controller, EIDOLON_STATE_IDLE, 0U);
     eidolon_affect_controller_set_state(&controller, EIDOLON_STATE_FAILED, 10U);
+    assert(controller.expression_intent == EIDOLON_EXPRESSION_ANNOYED);
+    assert(controller.candidate_expression_intent == EIDOLON_EXPRESSION_ANNOYED);
     for (uint64_t now = 20U; now <= 2000U; now += 20U) {
         eidolon_affect_controller_update(&controller, 0.02F, now);
     }

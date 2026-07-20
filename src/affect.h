@@ -92,10 +92,16 @@ bool eidolon_affect_controller_apply_goemotions(EidolonAffectController *control
                                                 uint64_t now_ms);
 void eidolon_affect_controller_update(EidolonAffectController *controller, float delta_seconds,
                                       uint64_t now_ms);
+void eidolon_affect_controller_perform(EidolonAffectController *controller,
+                                       const EidolonAffect *affect,
+                                       EidolonExpressionIntent expression, float evidence,
+                                       uint64_t now_ms);
 EidolonAffect eidolon_affect_for_state(EidolonState state);
 EidolonAffect eidolon_affect_from_goemotions(
     const float probabilities[EIDOLON_GOEMOTIONS_COUNT], EidolonAffect prior, float *evidence);
 EidolonExpressionIntent eidolon_affect_expression(const EidolonAffect *affect);
+float eidolon_affect_expression_distance(const EidolonAffect *affect,
+                                         EidolonExpressionIntent intent);
 const char *eidolon_expression_intent_name(EidolonExpressionIntent intent);
 const char *eidolon_goemotion_name(size_t index);
 

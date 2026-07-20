@@ -3,6 +3,7 @@
 #include "hook_output.h"
 #include "log.h"
 #include "platform/ipc.h"
+#include "settings_ui.h"
 #include "state.h"
 
 #include <stdlib.h>
@@ -64,26 +65,23 @@ static bool is_snapshot_command(int argc, char **argv) {
     if (argc < 2) {
         return false;
     }
-    return strcmp(argv[1], "--snapshot") == 0 || strcmp(argv[1], "--snapshot-debug") == 0 ||
-           strcmp(argv[1], "--snapshot-debug-resolution") == 0 ||
-           strcmp(argv[1], "--snapshot-dialogue") == 0 || strcmp(argv[1], "--snapshot-pose") == 0 ||
-           strcmp(argv[1], "--snapshot-debug-pose") == 0 ||
+    return strcmp(argv[1], "--snapshot") == 0 || strcmp(argv[1], "--snapshot-dialogue") == 0 ||
+           strcmp(argv[1], "--snapshot-pose") == 0 ||
            strcmp(argv[1], "--snapshot-resolution") == 0 ||
-           strcmp(argv[1], "--snapshot-sessions") == 0 ||
-           strcmp(argv[1], "--snapshot-face") == 0 ||
+           strcmp(argv[1], "--snapshot-sessions") == 0 || strcmp(argv[1], "--snapshot-face") == 0 ||
+           strcmp(argv[1], "--snapshot-settings") == 0 ||
            strcmp(argv[1], "--snapshot-portrait-motion") == 0;
 }
 
 static void log_usage(void) {
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                 "Usage: eidolon [--snapshot <output.png>] [--snapshot-debug <output.png>] "
-                 "[--snapshot-debug-resolution <output.png>] "
+                 "Usage: eidolon [--snapshot <output.png>] "
                  "[--snapshot-dialogue <output.png> <text>] "
                  "[--snapshot-face <output.png>] "
+                 "[--snapshot-settings <output.png>] "
                  "[--snapshot-sessions <output.png>] "
                  "[--snapshot-portrait-motion <expression> <elapsed-ms> <output.png>] "
                  "[--snapshot-pose <index> <output.png>] "
-                 "[--snapshot-debug-pose <index> <output.png>] "
                  "[--snapshot-resolution <side> <output.png>] [--hook <state>]");
 }
 
@@ -135,19 +133,10 @@ int main(int argc, char **argv) {
         return saved ? 0 : 1;
     }
 
-    if (argc == 3 && strcmp(argv[1], "--snapshot-debug") == 0) {
-        app.debug_visible = true;
-        app.debug_pose_dropdown_open = true;
-        app.debug_portrait_dropdown_open = true;
-        const bool saved = eidolon_draw_snapshot(&app, argv[2]);
-        eidolon_app_destroy(&app);
-        return saved ? 0 : 1;
-    }
-
-    if (argc == 3 && strcmp(argv[1], "--snapshot-debug-resolution") == 0) {
-        app.debug_visible = true;
-        app.debug_resolution_dropdown_open = true;
-        const bool saved = eidolon_draw_snapshot(&app, argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--snapshot-settings") == 0) {
+        app.settings_ui = eidolon_settings_ui_create(EIDOLON_FONT_PATH);
+        const bool saved =
+            app.settings_ui != NULL && eidolon_settings_ui_snapshot(app.settings_ui, &app, argv[2]);
         eidolon_app_destroy(&app);
         return saved ? 0 : 1;
     }
@@ -164,7 +153,7 @@ int main(int argc, char **argv) {
 
     if (argc == 3 && strcmp(argv[1], "--snapshot-sessions") == 0) {
         static const char *const titles[4] = {"eidolon", "Fix authentication tests",
-                                               "Review shader pipeline", "Plan release notes"};
+                                              "Review shader pipeline", "Plan release notes"};
         static const char *const messages[4] = {
             "multiple session registry is alive. each bubble owns its own dialogue state.",
             "three tests remain. the transaction boundary is the suspicious part.",
@@ -212,6 +201,10 @@ int main(int argc, char **argv) {
             eidolon_app_destroy(&app);
             return 2;
         }
+        if (!eidolon_app_set_render_mode(&app, EIDOLON_RENDER_MODE_MODEL_3D)) {
+            eidolon_app_destroy(&app);
+            return 1;
+        }
         const uint64_t previous_revision = eidolon_model_presented_transform_revision(app.model);
         eidolon_app_select_semantic_pose(&app, pose_index);
         const bool settled = wait_for_pose_frame(&app, previous_revision);
@@ -227,27 +220,15 @@ int main(int argc, char **argv) {
             eidolon_app_destroy(&app);
             return 2;
         }
+        if (!eidolon_app_set_render_mode(&app, EIDOLON_RENDER_MODE_MODEL_3D)) {
+            eidolon_app_destroy(&app);
+            return 1;
+        }
         const uint64_t previous_revision = eidolon_model_presented_transform_revision(app.model);
         const bool already_selected = eidolon_model_render_resolution(app.model) == resolution;
         const bool changed = eidolon_app_set_model_render_resolution(&app, resolution);
         const bool settled =
             changed && (already_selected || wait_for_pose_frame(&app, previous_revision));
-        const bool saved = settled && eidolon_draw_snapshot(&app, argv[3]);
-        eidolon_app_destroy(&app);
-        return saved ? 0 : 1;
-    }
-
-    if (argc == 4 && strcmp(argv[1], "--snapshot-debug-pose") == 0) {
-        int pose_index = 0;
-        if (!parse_pose_index(argv[2], &pose_index)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid semantic pose index: %s", argv[2]);
-            eidolon_app_destroy(&app);
-            return 2;
-        }
-        const uint64_t previous_revision = eidolon_model_presented_transform_revision(app.model);
-        eidolon_app_select_semantic_pose(&app, pose_index);
-        app.debug_visible = true;
-        const bool settled = wait_for_pose_frame(&app, previous_revision);
         const bool saved = settled && eidolon_draw_snapshot(&app, argv[3]);
         eidolon_app_destroy(&app);
         return saved ? 0 : 1;

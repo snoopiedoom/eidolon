@@ -11,7 +11,16 @@ typedef enum EidolonAppMode {
 bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode);
 void eidolon_app_run(EidolonApp *app);
 void eidolon_app_set_state(EidolonApp *app, EidolonState state);
+bool eidolon_app_set_render_mode(EidolonApp *app, EidolonRenderMode mode);
+const char *eidolon_render_mode_name(EidolonRenderMode mode);
+const char *eidolon_app_model_name(const EidolonApp *app);
 void eidolon_app_select_portrait(EidolonApp *app, int expression);
+void eidolon_app_set_portrait_framing(EidolonApp *app, bool face_mode);
+void eidolon_app_reload_configs(EidolonApp *app);
+void eidolon_app_set_dialogue_theme(EidolonApp *app, EidolonDialogueTheme theme);
+void eidolon_app_set_dialogue_movement(EidolonApp *app, EidolonDialogueMovement movement);
+void eidolon_app_set_dialogue_hold_ms(EidolonApp *app, unsigned int hold_ms);
+bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField field);
 void eidolon_app_set_model_scale(EidolonApp *app, float scale);
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side);
 void eidolon_app_log_presentation_metrics(const EidolonApp *app);

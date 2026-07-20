@@ -1,4 +1,5 @@
 CC := clang
+CXX := clang++
 MODE ?= debug
 BLENDER ?= blender
 PYTHON ?= python
@@ -10,12 +11,15 @@ COMMON_SOURCES := \
 	src/animation.c \
 	src/app.c \
 	src/bubble_layout.c \
+	src/conversation.c \
+	src/conversation_sources.c \
 	src/dialogue.c \
-	src/debug_ui.c \
 	src/draw.c \
+	src/expression_director.c \
 	src/hook_output.c \
 	src/humanoid.c \
 	src/ik.c \
+	src/json_scan.c \
 	src/log.c \
 	src/main.c \
 	src/model.c \
@@ -24,9 +28,31 @@ COMMON_SOURCES := \
 	src/pose.c \
 	src/pose_solver.c \
 	src/portrait.c \
+	src/relay_core.c \
+	src/providers/codex_relay.c \
+	src/providers/codex_stream.c \
+	src/providers/live_source.c \
+	src/providers/opencode_stream.c \
+	src/provider_config.c \
 	src/session_registry.c \
+	src/settings_ui.c \
 	src/state.c \
-	src/text_renderer.c
+	src/text_renderer.c \
+	src/user_settings.c
+
+IMGUI_DIR := lib/imgui
+DEAR_BINDINGS_GENERATED := lib/dear_bindings/generated
+IMGUI_CPP_SOURCES := \
+	$(IMGUI_DIR)/imgui.cpp \
+	$(IMGUI_DIR)/imgui_demo.cpp \
+	$(IMGUI_DIR)/imgui_draw.cpp \
+	$(IMGUI_DIR)/imgui_tables.cpp \
+	$(IMGUI_DIR)/imgui_widgets.cpp \
+	$(IMGUI_DIR)/backends/imgui_impl_sdl3.cpp \
+	$(IMGUI_DIR)/backends/imgui_impl_sdlrenderer3.cpp \
+	$(DEAR_BINDINGS_GENERATED)/dcimgui.cpp \
+	$(DEAR_BINDINGS_GENERATED)/backends/dcimgui_impl_sdl3.cpp \
+	$(DEAR_BINDINGS_GENERATED)/backends/dcimgui_impl_sdlrenderer3.cpp
 
 ifeq ($(OS),Windows_NT)
 PLATFORM := windows
@@ -38,7 +64,7 @@ PLATFORM_SOURCES := src/platform/windows_ipc.c src/platform/windows_overlay.c \
 	src/platform/windows_session_files.c
 CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include" -I"$(SDL3_TTF_ROOT)/include"
 LDFLAGS += -L"$(SDL3_ROOT)/lib/x64" -L"$(SDL3_TTF_ROOT)/lib/x64"
-LDLIBS += -lSDL3_ttf -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11
+LDLIBS += -lSDL3_ttf -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11 -lwinhttp -lws2_32 -lbcrypt
 define make-dir
 @powershell.exe -NoProfile -Command "New-Item -ItemType Directory -Force '$(subst /,\,$(dir $@))' | Out-Null"
 endef
@@ -98,28 +124,39 @@ CHARACTER_CONFIG := $(CURDIR)/config/character.cfg
 SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
 DEPS := $(OBJECTS:.o=.d)
+IMGUI_OBJECTS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(IMGUI_CPP_SOURCES))
+IMGUI_DEPS := $(IMGUI_OBJECTS:.o=.d)
 
 CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
 	"-DEIDOLON_FONT_PATH=\"$(CURDIR)/assets/fonts/MesloLG Nerd Font/MesloLGSNerdFontMono-Regular.ttf\"" \
 	-DEIDOLON_MODEL_PATH=\"$(RUNTIME_MODEL)\" \
 	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
+	-DEIDOLON_SYSTEM_SETTINGS_PATH=\"$(abspath config/settings.cfg)\" \
 	-DEIDOLON_CHARACTER_CONFIG_PATH=\"$(abspath $(CHARACTER_CONFIG))\" \
+	-DEIDOLON_PROVIDER_CONFIG_PATH=\"$(abspath config/providers.cfg)\" \
 	-DEIDOLON_SHADER_DIR=\"$(abspath $(SHADER_BUILD_DIR))\"
+CPPFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends \
+	-I$(DEAR_BINDINGS_GENERATED) -I$(DEAR_BINDINGS_GENERATED)/backends
+IMGUI_CPPFLAGS := $(CPPFLAGS) -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends \
+	-I$(DEAR_BINDINGS_GENERATED) -I$(DEAR_BINDINGS_GENERATED)/backends
 CFLAGS += -std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -MMD -MP
+CXXFLAGS += -std=c++17 -MMD -MP
 
 ifeq ($(MODE),release)
 CFLAGS += -O2 -DNDEBUG
+CXXFLAGS += -O2 -DNDEBUG
 else ifeq ($(MODE),debug)
 CFLAGS += -O0 -g
+CXXFLAGS += -O0 -g
 else
 $(error MODE must be debug or release)
 endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check shaders text-setup affect-setup affect affect-check model-audit model-material-audit model-export model-preview \
-	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help
+.PHONY: all force-output clean check imgui-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
 
@@ -135,6 +172,7 @@ AFFECT_ORT := $(AFFECT_CACHE)/onnxruntime
 AFFECT_MODEL_DIR := $(AFFECT_CACHE)/model
 AFFECT_WORKER := $(BUILD_ROOT)/eidolon-affect-worker.exe
 AFFECT_CLIENT_TEST := $(BUILD_ROOT)/tests/$(MODE)/affect_client_test.exe
+AFFECT_BENCHMARK := $(BUILD_ROOT)/tools/$(MODE)/affect_benchmark.exe
 
 affect: $(AFFECT_WORKER)
 
@@ -159,16 +197,35 @@ $(AFFECT_CLIENT_TEST): tests/affect_client_test.c src/affect_client.c src/affect
 		$(LDFLAGS) $(LDLIBS) -o $@
 	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)'"
 
+$(AFFECT_BENCHMARK): tools/affect_benchmark.c src/affect.c src/affect.h src/affect_protocol.h \
+		src/state.h $(AFFECT_WORKER)
+	$(make-dir)
+	$(CC) -Isrc $(TEST_CFLAGS) tools/affect_benchmark.c src/affect.c -lpsapi -o $@
+
 affect-check: $(AFFECT_WORKER) $(AFFECT_CLIENT_TEST)
 	"$(AFFECT_WORKER)" --text "I love this. You did a wonderful job."
 	"$(AFFECT_CLIENT_TEST)"
+
+affect-benchmark: $(AFFECT_BENCHMARK)
+	"$(AFFECT_BENCHMARK)" "$(AFFECT_WORKER)"
 else
 affect:
 	@echo "The native affect worker is currently prepared for Windows only."
 	@false
 
 affect-check: affect
+
+affect-benchmark: affect
 endif
+
+character-sprites:
+	$(PYTHON) tools/download_character_sprites.py
+
+character-sprites-download:
+	$(PYTHON) tools/download_character_sprites.py --download
+
+character-sprites-check:
+	$(PYTHON) -m unittest discover -s tests -p download_character_sprites_test.py
 
 force-output:
 
@@ -177,13 +234,32 @@ $(TARGET): $(MODE_TARGET) force-output
 	$(copy-output)
 	$(copy-runtime)
 
-$(MODE_TARGET): $(OBJECTS) | shaders
+$(MODE_TARGET): $(OBJECTS) $(IMGUI_OBJECTS) | shaders
 	$(make-dir)
-	$(CC) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(IMGUI_OBJECTS) $(LDLIBS) -o $@
 
 $(OBJ_DIR)/%.o: %.c
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+IMGUI_SMOKE := $(BUILD_ROOT)/tests/$(MODE)/imgui_smoke$(EXE)
+IMGUI_SMOKE_OBJECT := $(OBJ_DIR)/tests/imgui_smoke.o
+
+$(OBJ_DIR)/%.o: %.cpp
+	$(make-dir)
+	$(CXX) $(IMGUI_CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(IMGUI_SMOKE_OBJECT): tests/imgui_smoke.c
+	$(make-dir)
+	$(CC) $(IMGUI_CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(IMGUI_SMOKE): $(IMGUI_SMOKE_OBJECT) $(IMGUI_OBJECTS)
+	$(make-dir)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(copy-runtime)
+
+imgui-smoke: $(IMGUI_SMOKE)
+	"$(IMGUI_SMOKE)"
 
 shaders: $(SHADER_OUTPUTS)
 
@@ -221,8 +297,14 @@ POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
 PORTRAIT_TEST := $(TEST_DIR)/portrait_test$(EXE)
 AFFECT_TEST := $(TEST_DIR)/affect_test$(EXE)
 AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
+EXPRESSION_DIRECTOR_TEST := $(TEST_DIR)/expression_director_test$(EXE)
 BUBBLE_LAYOUT_TEST := $(TEST_DIR)/bubble_layout_test$(EXE)
 SESSION_REGISTRY_TEST := $(TEST_DIR)/session_registry_test$(EXE)
+USER_SETTINGS_TEST := $(TEST_DIR)/user_settings_test$(EXE)
+CONVERSATION_TEST := $(TEST_DIR)/conversation_test$(EXE)
+LIVE_SOURCE_TEST := $(TEST_DIR)/live_source_test$(EXE)
+RELAY_CORE_TEST := $(TEST_DIR)/relay_core_test$(EXE)
+CODEX_RELAY_TEST := $(TEST_DIR)/codex_relay_test$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
@@ -291,18 +373,60 @@ $(AFFECT_TOKENIZER_TEST): tests/affect_tokenizer_test.c src/affect_tokenizer.c |
 		-DEIDOLON_TEST_AFFECT_MERGES=\"$(abspath tests/fixtures/affect_merges.txt)\" \
 		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(EXPRESSION_DIRECTOR_TEST): tests/expression_director_test.c src/expression_director.c \
+		src/affect.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 $(BUBBLE_LAYOUT_TEST): tests/bubble_layout_test.c src/bubble_layout.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(SESSION_REGISTRY_TEST): tests/session_registry_test.c src/session_registry.c src/dialogue.c src/log.c | $(TEST_RUNTIME)
+$(SESSION_REGISTRY_TEST): tests/session_registry_test.c src/session_registry.c src/dialogue.c \
+		src/log.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(USER_SETTINGS_TEST): tests/user_settings_test.c src/user_settings.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) \
+		-DEIDOLON_TEST_SETTINGS_PATH=\"$(abspath $(TEST_DIR)/user-settings-roundtrip.cfg)\" \
+		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(CONVERSATION_TEST): tests/conversation_test.c src/conversation.c src/json_scan.c \
+		src/provider_config.c src/providers/codex_stream.c src/providers/opencode_stream.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(LIVE_SOURCE_TEST): tests/live_source_test.c src/conversation.c src/json_scan.c src/log.c \
+		src/providers/codex_stream.c src/providers/live_source.c \
+		src/providers/opencode_stream.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(RELAY_CORE_TEST): tests/relay_core_test.c src/relay_core.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(CODEX_RELAY_TEST): tests/codex_relay_test.c src/conversation.c src/json_scan.c src/log.c \
+		src/relay_core.c src/providers/codex_relay.c src/providers/codex_stream.c \
+		src/providers/live_source.c src/providers/opencode_stream.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+PROVIDER ?= codex
+PROVIDER_URL ?= ws://127.0.0.1:4500
+provider-live-test: $(LIVE_SOURCE_TEST)
+	"$(LIVE_SOURCE_TEST)" "$(PROVIDER)" "$(PROVIDER_URL)"
+
+codex-relay-test: $(CODEX_RELAY_TEST)
+	"$(CODEX_RELAY_TEST)"
 
 check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
-	$(SESSION_REGISTRY_TEST)
+	$(EXPRESSION_DIRECTOR_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
+	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -316,8 +440,12 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MO
 	$(PORTRAIT_TEST)
 	$(AFFECT_TEST)
 	$(AFFECT_TOKENIZER_TEST)
+	$(EXPRESSION_DIRECTOR_TEST)
 	$(BUBBLE_LAYOUT_TEST)
 	$(SESSION_REGISTRY_TEST)
+	$(USER_SETTINGS_TEST)
+	$(CONVERSATION_TEST)
+	$(RELAY_CORE_TEST)
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json
@@ -379,14 +507,25 @@ model-preview-glb: model-export
 clean:
 	$(remove-build)
 
+log:
+	powershell.exe -NoProfile -Command "$$path = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Eidolon\eidolon.log'; Get-Content -LiteralPath $$path -Tail 120 -Wait"
+
 help:
 	@echo "make                 build debug Eidolon with clang"
 	@echo "make MODE=release    build optimized Eidolon with clang"
 	@echo "make check           build and run unit tests"
+	@echo "make imgui-smoke     build and run Dear ImGui through its generated C API"
+	@echo "make provider-live-test PROVIDER=codex PROVIDER_URL=ws://...  probe a running provider"
+	@echo "make codex-relay-test  launch a hidden app-server and verify the in-path relay"
 	@echo "make text-setup      download verified SDL_ttf runtime/development files"
 	@echo "make affect-setup    download verified optional GoEmotions runtime/model"
 	@echo "make affect          build the optional native GoEmotions worker"
 	@echo "make affect-check    run one visible native inference smoke test"
+	@echo "make affect-benchmark  profile the persistent worker across six dialogue beats"
+	@echo "make character-sprites  inspect the complete Blue Archive portrait download"
+	@echo "make character-sprites-download  download all grouped character portraits"
+	@echo "make character-sprites-check  test wiki filename grouping without network access"
+	@echo "make log             tail the Eidolon debug log"
 	@echo "make shaders         bake SDL_GPU SPIR-V and DXIL shaders"
 	@echo "make model-audit     inspect every Rio FBX with Blender"
 	@echo "make model-material-audit  inspect imported FBX shader graphs"
@@ -399,4 +538,4 @@ help:
 	@echo "make model-preview-glb  export and render the runtime GLB"
 	@echo "make clean           remove this platform's build directory"
 
--include $(DEPS)
+-include $(DEPS) $(IMGUI_DEPS)
