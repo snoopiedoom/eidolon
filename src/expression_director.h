@@ -7,7 +7,7 @@
 
 #include "affect.h"
 
-#define EIDOLON_EXPRESSION_BEAT_CAPACITY 32U
+#define EIDOLON_EXPRESSION_BEAT_CAPACITY 128U
 #define EIDOLON_EXPRESSION_BEAT_TEXT_CAPACITY 512U
 
 typedef enum EidolonPerformanceCue {
@@ -68,15 +68,20 @@ typedef struct EidolonExpressionTrack {
     size_t count;
     size_t ready_count;
     size_t active_index;
+    size_t next_submit_index;
+    size_t logged_count;
     uint64_t deadline_ms;
     uint64_t track_id;
     uint64_t prepared_ms;
+    uint64_t batch_prepared_ms;
     uint64_t ready_ms;
     uint64_t last_activation_ms;
     char owner[64];
     EidolonState state;
     bool waiting;
     bool complete;
+    bool submission_complete;
+    bool submission_deferred;
 } EidolonExpressionTrack;
 
 typedef struct EidolonPerformanceEvent {
@@ -90,6 +95,8 @@ typedef struct EidolonPerformanceEvent {
 
 void eidolon_expression_track_compile(EidolonExpressionTrack *track, const char *text,
                                       EidolonState state);
+bool eidolon_expression_track_extend(EidolonExpressionTrack *track, const char *text,
+                                     EidolonState state, bool completed);
 bool eidolon_expression_track_set_sequence(EidolonExpressionTrack *track, size_t beat_index,
                                            uint64_t sequence);
 bool eidolon_expression_track_copy_text(const EidolonExpressionTrack *track, size_t beat_index,
@@ -101,6 +108,8 @@ void eidolon_expression_track_fallback(EidolonExpressionTrack *track, const char
 bool eidolon_expression_track_ready(const EidolonExpressionTrack *track);
 bool eidolon_expression_track_event(EidolonExpressionTrack *track, size_t text_offset,
                                     EidolonPerformanceEvent *event);
+bool eidolon_expression_track_blocks_reveal(const EidolonExpressionTrack *track,
+                                            size_t text_offset);
 const char *eidolon_performance_cue_name(EidolonPerformanceCue cue);
 const char *eidolon_beat_boundary_reason_name(EidolonBeatBoundaryReason reason);
 const char *eidolon_cue_reason_name(EidolonCueReason reason);

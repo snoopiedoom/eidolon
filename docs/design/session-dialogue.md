@@ -13,7 +13,7 @@ another session speaks.
 - show multiple active outputs simultaneously;
 - use real session titles with stable fallbacks;
 - keep placement deterministic and visually stable;
-- retire inactive bubbles without hiding unread text;
+- retire inactive bubbles on a short, predictable presentation timeout;
 - route clicks to the bubble actually clicked;
 - keep the one-session case simple.
 
@@ -38,8 +38,11 @@ rollout must not create a second bubble merely because its dated directory is ol
 The first bounded implementation tracks eight sessions and presents four. Active/unread entries take
 priority. Capacity overflow evicts the oldest inactive entry deterministically and logs it.
 
-Without a reliable explicit end record, a completed bubble retires after five minutes of quiet.
-Unread dialogue prevents retirement. This timeout is policy and should become runtime-configurable.
+Each bubble has an independent five-second presentation lease. Text deltas, completed messages, and
+turn activity renew the matching session's lease. Five seconds without provider activity hides that
+bubble even when its dialogue has not finished revealing; the session and its dialogue state remain
+tracked and the next output makes it visible again. The timeout is policy and should become
+runtime-configurable.
 
 ## Layout
 
@@ -86,7 +89,8 @@ bubble, shadow, and character pixels remain interactive.
 - two sessions can type and scroll independently without replacing each other;
 - a session retains title and slot across repeated messages;
 - clicking the left bubble never advances the right bubble;
-- an unread quiet bubble does not disappear;
+- one quiet bubble disappears after five seconds without hiding or resetting another session;
+- new output renews a hidden session and restores its bubble;
 - subagent rollouts never appear as user bubbles;
 - a slow discovery scan does not stall presentation or dialogue reveal;
 - concurrent reveals choose the shared expression through explicit ownership, not array order.

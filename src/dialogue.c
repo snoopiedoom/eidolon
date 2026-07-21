@@ -299,6 +299,7 @@ void eidolon_dialogue_set(EidolonDialogue *dialogue, const char *text, uint64_t 
         return;
     }
     normalize_text(dialogue->text, sizeof(dialogue->text), text);
+    eidolon_delivery_track_compile(&dialogue->delivery_track, dialogue->text);
     build_page(dialogue);
     dialogue->reveal_tick_ms = now_ms;
 }
@@ -330,6 +331,10 @@ bool eidolon_dialogue_sync(EidolonDialogue *dialogue, const char *text, uint64_t
         dialogue->cursor = common;
     }
     memcpy(dialogue->text, normalized, strlen(normalized) + 1U);
+    eidolon_delivery_track_compile(&dialogue->delivery_track, dialogue->text);
+    if (revealed_text_offset > 0U) {
+        eidolon_delivery_track_seek_after(&dialogue->delivery_track, revealed_text_offset);
+    }
     build_page(dialogue);
 
     dialogue->revealed = 0U;
@@ -359,8 +364,7 @@ void eidolon_dialogue_configure(EidolonDialogue *dialogue, EidolonDialogueMoveme
 
 void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
     const size_t page_length = strlen(dialogue->page);
-    if (dialogue->expression_track.waiting || dialogue->revealed >= page_length ||
-        now_ms < dialogue->reveal_tick_ms) {
+    if (dialogue->revealed >= page_length || now_ms < dialogue->reveal_tick_ms) {
         return;
     }
 
@@ -369,10 +373,17 @@ void eidolon_dialogue_update(EidolonDialogue *dialogue, uint64_t now_ms) {
     if (characters == 0) {
         return;
     }
+    size_t advanced = 0U;
     for (size_t index = 0U; index < characters && dialogue->revealed < page_length; ++index) {
-        dialogue->revealed = utf8_next_grapheme(dialogue->page, dialogue->revealed);
+        const size_t next = utf8_next_grapheme(dialogue->page, dialogue->revealed);
+        if (eidolon_expression_track_blocks_reveal(&dialogue->expression_track,
+                                                   dialogue->page_text_offsets[next])) {
+            break;
+        }
+        dialogue->revealed = next;
+        advanced += 1U;
     }
-    dialogue->reveal_tick_ms += (uint64_t)characters * REVEAL_INTERVAL_MS;
+    dialogue->reveal_tick_ms += (uint64_t)advanced * REVEAL_INTERVAL_MS;
     if (dialogue->revealed >= page_length && dialogue->page_complete_tick_ms == 0U) {
         dialogue->page_complete_tick_ms = now_ms;
     }
@@ -443,32 +454,6 @@ float eidolon_dialogue_indicator_alpha(const EidolonDialogue *dialogue, uint64_t
     }
     const float phase = (float)((now_ms - dialogue->page_complete_tick_ms) % 1000U) / 1000.0F;
     return 0.28F + 0.72F * (0.5F + 0.5F * cosf(phase * 2.0F * 3.14159265F));
-}
-
-float eidolon_dialogue_reveal_emphasis(const EidolonDialogue *dialogue,
-                                       size_t previous_revealed) {
-    if (dialogue == NULL || previous_revealed >= dialogue->revealed) {
-        return 0.0F;
-    }
-    float emphasis = 0.0F;
-    for (size_t index = previous_revealed; index < dialogue->revealed; ++index) {
-        const unsigned char character = (unsigned char)dialogue->page[index];
-        if (character == '!') {
-            emphasis = fmaxf(emphasis, 1.0F);
-        } else if (character == '?') {
-            emphasis = fmaxf(emphasis, 0.86F);
-        } else if (character == '.') {
-            emphasis = fmaxf(emphasis, 0.62F);
-        } else if (character == ',' || character == ';' || character == ':') {
-            emphasis = fmaxf(emphasis, 0.38F);
-        } else if (character == 0xE2U && index + 2U < dialogue->revealed &&
-                   (unsigned char)dialogue->page[index + 1U] == 0x80U &&
-                   ((unsigned char)dialogue->page[index + 2U] == 0x94U ||
-                    (unsigned char)dialogue->page[index + 2U] == 0xA6U)) {
-            emphasis = fmaxf(emphasis, 0.52F);
-        }
-    }
-    return emphasis;
 }
 
 bool eidolon_dialogue_is_active(const EidolonDialogue *dialogue) {

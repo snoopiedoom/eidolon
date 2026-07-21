@@ -5,12 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "conversation.h"
 #include "dialogue.h"
 #include "hook_output.h"
-#include "conversation.h"
 
 #define EIDOLON_SESSION_CAPACITY 8U
 #define EIDOLON_VISIBLE_SESSION_CAPACITY 4U
+#define EIDOLON_SESSION_BUBBLE_TIMEOUT_MS 5000U
 #define EIDOLON_SESSION_ID_CAPACITY EIDOLON_PROVIDER_SESSION_ID_CAPACITY
 #define EIDOLON_SESSION_TITLE_CAPACITY EIDOLON_PROVIDER_TITLE_CAPACITY
 #define EIDOLON_SESSION_PATH_CAPACITY 4096U
@@ -56,18 +57,17 @@ typedef struct EidolonSessionPoll {
     bool stream_started;
     bool stream_delta;
     bool message_completed;
-    float speech_beat;
     EidolonSessionEntry *message_session;
     EidolonSessionEntry *advanced_session;
-    EidolonSessionEntry *speaking_session;
 } EidolonSessionPoll;
 
 EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registry, uint64_t now_ms);
 bool eidolon_session_registry_init(EidolonSessionRegistry *registry);
 void eidolon_session_registry_set_legacy_transcripts(EidolonSessionRegistry *registry,
                                                      bool enabled);
-EidolonSessionPoll eidolon_session_registry_apply_event(
-    EidolonSessionRegistry *registry, const EidolonConversationEvent *event, uint64_t now_ms);
+EidolonSessionPoll eidolon_session_registry_apply_event(EidolonSessionRegistry *registry,
+                                                        const EidolonConversationEvent *event,
+                                                        uint64_t now_ms);
 void eidolon_session_registry_configure_dialogue(EidolonSessionRegistry *registry,
                                                  EidolonDialogueMovement movement,
                                                  unsigned int hold_ms);

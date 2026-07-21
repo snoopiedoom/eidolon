@@ -10,7 +10,6 @@
 #include <string.h>
 
 #define SESSION_POLL_INTERVAL_MS 5000U
-#define SESSION_QUIET_TIMEOUT_MS (5U * 60U * 1000U)
 #define SESSION_DISCOVERY_CANDIDATES 32U
 
 static bool parse_decimal_field(const char *text, size_t length, int *value) {
@@ -120,8 +119,8 @@ bool eidolon_session_registry_init(EidolonSessionRegistry *registry) {
     if (registry == NULL) {
         return false;
     }
-    eidolon_session_registry_configure_dialogue(
-        registry, EIDOLON_DIALOGUE_MOVEMENT_FOLLOW, EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS);
+    eidolon_session_registry_configure_dialogue(registry, EIDOLON_DIALOGUE_MOVEMENT_FOLLOW,
+                                                EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS);
     registry->legacy_transcripts_enabled = true;
     registry->legacy_transcripts_configured = true;
     EidolonSessionDiscovery *discovery = SDL_calloc(1U, sizeof(*discovery));
@@ -399,11 +398,11 @@ static void show_entry(EidolonSessionRegistry *registry, EidolonSessionEntry *en
     }
 }
 
-EidolonSessionPoll eidolon_session_registry_apply_event(
-    EidolonSessionRegistry *registry, const EidolonConversationEvent *event, uint64_t now_ms) {
+EidolonSessionPoll eidolon_session_registry_apply_event(EidolonSessionRegistry *registry,
+                                                        const EidolonConversationEvent *event,
+                                                        uint64_t now_ms) {
     EidolonSessionPoll result = {0};
-    if (registry == NULL || event == NULL ||
-        event->type == EIDOLON_CONVERSATION_SOURCE_CONNECTED ||
+    if (registry == NULL || event == NULL || event->type == EIDOLON_CONVERSATION_SOURCE_CONNECTED ||
         event->type == EIDOLON_CONVERSATION_SOURCE_DISCONNECTED) {
         return result;
     }
@@ -426,9 +425,9 @@ EidolonSessionPoll eidolon_session_registry_apply_event(
         entry->last_activity_ms = now_ms;
         break;
     case EIDOLON_CONVERSATION_TEXT_DELTA: {
-        const bool new_stream = !entry->streaming ||
-                                (event->message_id[0] != '\0' &&
-                                 strcmp(entry->message_id, event->message_id) != 0);
+        const bool new_stream =
+            !entry->streaming ||
+            (event->message_id[0] != '\0' && strcmp(entry->message_id, event->message_id) != 0);
         if (new_stream) {
             entry->last_output[0] = '\0';
             entry->detected_ms = now_ms;
@@ -476,9 +475,9 @@ EidolonSessionPoll eidolon_session_registry_apply_event(
         result.new_message = !was_streaming;
         result.message_completed = true;
         result.message_session = entry;
-        eidolon_log_write("session", "message complete provider=%s session=%s bytes=%zu streamed=%s",
-                          entry->provider, entry->id, strlen(entry->last_output),
-                          was_streaming ? "yes" : "no");
+        eidolon_log_write(
+            "session", "message complete provider=%s session=%s bytes=%zu streamed=%s",
+            entry->provider, entry->id, strlen(entry->last_output), was_streaming ? "yes" : "no");
         break;
     }
     case EIDOLON_CONVERSATION_TURN_COMPLETED:
@@ -499,11 +498,11 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         return result;
     }
     if (!registry->dialogue_configured) {
-        eidolon_session_registry_configure_dialogue(
-            registry, EIDOLON_DIALOGUE_MOVEMENT_FOLLOW, EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS);
+        eidolon_session_registry_configure_dialogue(registry, EIDOLON_DIALOGUE_MOVEMENT_FOLLOW,
+                                                    EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS);
     }
-    const bool legacy_transcripts = !registry->legacy_transcripts_configured ||
-                                    registry->legacy_transcripts_enabled;
+    const bool legacy_transcripts =
+        !registry->legacy_transcripts_configured || registry->legacy_transcripts_enabled;
     const bool discovery_due = legacy_transcripts && now_ms >= registry->next_poll_ms;
     EidolonTranscriptFile files[SESSION_DISCOVERY_CANDIDATES];
     size_t count = 0U;
@@ -559,15 +558,13 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         char source_timestamp[EIDOLON_TRANSCRIPT_TIMESTAMP_CAPACITY];
         const uint64_t read_started_ms = SDL_GetTicks();
         if (!eidolon_transcript_read_agent_output_info(
-                entry->path, output, sizeof(output), source_timestamp,
-                sizeof(source_timestamp)) ||
+                entry->path, output, sizeof(output), source_timestamp, sizeof(source_timestamp)) ||
             output[0] == '\0' || strcmp(output, entry->last_output) == 0) {
             continue;
         }
         const uint64_t read_ms = SDL_GetTicks() - read_started_ms;
         SDL_strlcpy(entry->last_output, output, sizeof(entry->last_output));
-        SDL_strlcpy(entry->source_timestamp, source_timestamp,
-                    sizeof(entry->source_timestamp));
+        SDL_strlcpy(entry->source_timestamp, source_timestamp, sizeof(entry->source_timestamp));
         eidolon_dialogue_set(&entry->dialogue, output, now_ms);
         eidolon_dialogue_configure(&entry->dialogue, registry->dialogue_movement,
                                    registry->dialogue_hold_ms);
@@ -585,15 +582,14 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         eidolon_log_write("session", "agent output session=%s title=%s bytes=%zu", entry->id,
                           entry->title, strlen(output));
         eidolon_log_write(
-            "latency",
-            "session=%s phase=transcript-detected source_ts=%s read_ms=%llu bytes=%zu",
+            "latency", "session=%s phase=transcript-detected source_ts=%s read_ms=%llu bytes=%zu",
             entry->id, entry->source_timestamp[0] != '\0' ? entry->source_timestamp : "unknown",
             (unsigned long long)read_ms, strlen(output));
         uint64_t source_to_detect_ms = 0U;
         if (source_timestamp_age_ms(entry->source_timestamp, &source_to_detect_ms)) {
-            eidolon_log_write(
-                "latency", "session=%s phase=transcript-detected source_to_detect_ms=%llu",
-                entry->id, (unsigned long long)source_to_detect_ms);
+            eidolon_log_write("latency",
+                              "session=%s phase=transcript-detected source_to_detect_ms=%llu",
+                              entry->id, (unsigned long long)source_to_detect_ms);
         }
     }
     if (session_index != NULL) {
@@ -601,11 +597,14 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
     }
     for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
         EidolonSessionEntry *entry = &registry->entries[index];
-        if (entry->visible && now_ms - entry->last_activity_ms >= SESSION_QUIET_TIMEOUT_MS &&
-            !eidolon_dialogue_has_unread(&entry->dialogue)) {
+        if (entry->visible &&
+            now_ms - entry->last_activity_ms >= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) {
+            const uint64_t quiet_ms = now_ms - entry->last_activity_ms;
             entry->visible = false;
             entry->layout_slot = -1;
             result.changed = true;
+            eidolon_log_write("session", "bubble hidden provider=%s session=%s quiet_ms=%llu",
+                              entry->provider, entry->id, (unsigned long long)quiet_ms);
         }
         if (entry->visible) {
             const size_t previous_revealed = entry->dialogue.revealed;
@@ -623,16 +622,10 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
                     entry->source_timestamp[0] != '\0' ? entry->source_timestamp : "unknown");
                 uint64_t source_to_glyph_ms = 0U;
                 if (source_timestamp_age_ms(entry->source_timestamp, &source_to_glyph_ms)) {
-                    eidolon_log_write(
-                        "latency", "session=%s phase=first-glyph source_to_glyph_ms=%llu",
-                        entry->id, (unsigned long long)source_to_glyph_ms);
+                    eidolon_log_write("latency",
+                                      "session=%s phase=first-glyph source_to_glyph_ms=%llu",
+                                      entry->id, (unsigned long long)source_to_glyph_ms);
                 }
-            }
-            const float speech_beat =
-                eidolon_dialogue_reveal_emphasis(&entry->dialogue, previous_revealed);
-            if (speech_beat > result.speech_beat) {
-                result.speech_beat = speech_beat;
-                result.speaking_session = entry;
             }
             if (eidolon_dialogue_autoplay(&entry->dialogue, now_ms)) {
                 result.page_advanced = true;

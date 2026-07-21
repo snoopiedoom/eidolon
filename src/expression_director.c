@@ -38,8 +38,8 @@ static bool starts_word_case_insensitive(const char *text, size_t start, size_t 
     return start + length == end || isalpha((unsigned char)text[start + length]) == 0;
 }
 
-static bool append_beat(EidolonExpressionTrack *track, const char *text, size_t start,
-                        size_t end, EidolonBeatBoundaryReason boundary_reason) {
+static bool append_beat(EidolonExpressionTrack *track, const char *text, size_t start, size_t end,
+                        EidolonBeatBoundaryReason boundary_reason) {
     start = trim_left(text, start, end);
     end = trim_right(text, start, end);
     if (start >= end) {
@@ -86,8 +86,8 @@ static bool modifier_fragment(const char *text, const EidolonExpressionBeat *bea
         }
     }
     word[count] = '\0';
-    static const char *const modifiers[] = {"actually", "but", "fine", "hmm", "mm", "no",
-                                            "oh", "okay", "ugh", "wait", "well", "yet"};
+    static const char *const modifiers[] = {"actually", "but",  "fine", "hmm",  "mm",   "no",
+                                            "oh",       "okay", "ugh",  "wait", "well", "yet"};
     for (size_t index = 0U; index < sizeof(modifiers) / sizeof(modifiers[0]); ++index) {
         if (strcmp(word, modifiers[index]) == 0) {
             return true;
@@ -125,8 +125,8 @@ static void merge_fragments(EidolonExpressionTrack *track, const char *text) {
             beat.text_end = original[index].text_end;
             beat.boundary_reason = original[index].boundary_reason;
             beat.cue = hint != EIDOLON_PERFORMANCE_CUE_NONE ? hint : original[index].cue;
-            beat.cue_reason = hint != EIDOLON_PERFORMANCE_CUE_NONE ? hint_reason
-                                                                  : original[index].cue_reason;
+            beat.cue_reason =
+                hint != EIDOLON_PERFORMANCE_CUE_NONE ? hint_reason : original[index].cue_reason;
             beat.intensity = fmaxf(hint_intensity, original[index].intensity);
         }
         track->beats[track->count++] = beat;
@@ -148,7 +148,7 @@ static bool ascii_word_equal(const char *text, size_t start, size_t end, const c
 
 static bool contrast_word(const char *text, size_t start, size_t end) {
     static const char *const words[] = {"actually", "but", "except", "however", "instead",
-                                        "no", "oh", "wait", "yet"};
+                                        "no",       "oh",  "wait",   "yet"};
     for (size_t index = 0U; index < sizeof(words) / sizeof(words[0]); ++index) {
         if (ascii_word_equal(text, start, end, words[index])) {
             return true;
@@ -187,8 +187,7 @@ static size_t punctuation_end(const char *text, size_t cursor, size_t length) {
             ++cursor;
             continue;
         }
-        if (cursor + 2U < length && byte == 0xE2U &&
-            (unsigned char)text[cursor + 1U] == 0x80U &&
+        if (cursor + 2U < length && byte == 0xE2U && (unsigned char)text[cursor + 1U] == 0x80U &&
             (unsigned char)text[cursor + 2U] == 0xA6U) {
             cursor += 3U;
             continue;
@@ -247,7 +246,8 @@ void eidolon_expression_track_compile(EidolonExpressionTrack *track, const char 
         }
 
         const unsigned char byte = (unsigned char)text[cursor];
-        if ((isalpha(byte) != 0) && (cursor == 0U || isalpha((unsigned char)text[cursor - 1U]) == 0)) {
+        if ((isalpha(byte) != 0) &&
+            (cursor == 0U || isalpha((unsigned char)text[cursor - 1U]) == 0)) {
             size_t word_end = cursor + 1U;
             while (word_end < length && isalpha((unsigned char)text[word_end]) != 0) {
                 ++word_end;
@@ -289,6 +289,73 @@ void eidolon_expression_track_compile(EidolonExpressionTrack *track, const char 
     track->complete = track->count == 0U;
 }
 
+static size_t stable_stream_count(const EidolonExpressionTrack *candidate, const char *text,
+                                  bool completed) {
+    if (completed || candidate->count == 0U) {
+        return candidate->count;
+    }
+    const EidolonExpressionBeat *last = &candidate->beats[candidate->count - 1U];
+    if (last->boundary_reason == EIDOLON_BEAT_BOUNDARY_END || modifier_fragment(text, last)) {
+        return candidate->count - 1U;
+    }
+    return candidate->count;
+}
+
+static bool stream_prefix_compatible(const EidolonExpressionTrack *track,
+                                     const EidolonExpressionTrack *candidate, size_t stable_count) {
+    if (track->count > stable_count) {
+        return false;
+    }
+    for (size_t index = 0U; index < track->count; ++index) {
+        if (track->beats[index].text_start != candidate->beats[index].text_start ||
+            track->beats[index].text_end > candidate->beats[index].text_end) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool eidolon_expression_track_extend(EidolonExpressionTrack *track, const char *text,
+                                     EidolonState state, bool completed) {
+    if (track == NULL || text == NULL) {
+        return false;
+    }
+    EidolonExpressionTrack candidate;
+    eidolon_expression_track_compile(&candidate, text, state);
+    const size_t stable_count = stable_stream_count(&candidate, text, completed);
+    const bool compatible = stream_prefix_compatible(track, &candidate, stable_count);
+    const size_t previous_count = track->count;
+
+    if (!compatible) {
+        const uint64_t track_id = track->track_id;
+        const uint64_t prepared_ms = track->prepared_ms;
+        char owner[sizeof(track->owner)];
+        memcpy(owner, track->owner, sizeof(owner));
+        candidate.count = stable_count;
+        candidate.waiting = stable_count > 0U;
+        candidate.complete = stable_count == 0U;
+        candidate.submission_complete = stable_count == 0U;
+        candidate.track_id = track_id;
+        candidate.prepared_ms = prepared_ms;
+        memcpy(candidate.owner, owner, sizeof(candidate.owner));
+        *track = candidate;
+        return true;
+    }
+
+    if (stable_count == previous_count) {
+        return false;
+    }
+    memcpy(track->beats + previous_count, candidate.beats + previous_count,
+           (stable_count - previous_count) * sizeof(track->beats[0]));
+    track->count = stable_count;
+    track->state = candidate.state;
+    track->waiting = track->ready_count < track->count;
+    track->complete = !track->waiting;
+    track->submission_complete = track->next_submit_index >= track->count;
+    track->submission_deferred = false;
+    return true;
+}
+
 bool eidolon_expression_track_set_sequence(EidolonExpressionTrack *track, size_t beat_index,
                                            uint64_t sequence) {
     if (track == NULL || beat_index >= track->count || sequence == 0U) {
@@ -322,7 +389,8 @@ static float affect_change(const EidolonAffect *left, const EidolonAffect *right
 static void stabilize_expressions(EidolonExpressionTrack *track) {
     for (size_t index = 0U; index < track->count; ++index) {
         EidolonExpressionBeat *beat = &track->beats[index];
-        beat->raw_expression = beat->expression;
+        beat->expression = beat->raw_expression;
+        beat->expression_held = false;
         if (index == 0U) {
             continue;
         }
@@ -332,8 +400,7 @@ static void stabilize_expressions(EidolonExpressionTrack *track) {
         }
         const float winning_distance =
             eidolon_affect_expression_distance(&beat->affect, beat->expression);
-        const float previous_distance =
-            eidolon_affect_expression_distance(&beat->affect, previous);
+        const float previous_distance = eidolon_affect_expression_distance(&beat->affect, previous);
         beat->previous_expression_advantage = previous_distance - winning_distance;
         if (beat->previous_expression_advantage < 0.12F &&
             affect_change(&beat->affect, &track->beats[index - 1U].affect) < 0.72F) {
@@ -353,18 +420,21 @@ static void derive_cues(EidolonExpressionTrack *track) {
         const float arousal_delta = beat->affect.arousal - previous.arousal;
         const float valence_delta = beat->affect.valence - previous.valence;
         const float warmth_delta = beat->affect.warmth - previous.warmth;
-        const EidolonPerformanceCue semantic_hint = beat->cue;
-        const EidolonCueReason semantic_hint_reason = beat->cue_reason;
-        const float hint_intensity = beat->intensity;
-        beat->intensity = fmaxf(hint_intensity,
-                                clamp01(0.35F + beat->evidence * 0.50F +
-                                        fabsf(arousal_delta) * 0.25F));
+        const bool explicit_hint = beat->cue_reason == EIDOLON_CUE_REASON_INTERJECTION ||
+                                   beat->cue_reason == EIDOLON_CUE_REASON_EXCLAMATION;
+        const EidolonPerformanceCue semantic_hint =
+            explicit_hint ? beat->cue : EIDOLON_PERFORMANCE_CUE_NONE;
+        const EidolonCueReason semantic_hint_reason =
+            explicit_hint ? beat->cue_reason : EIDOLON_CUE_REASON_NONE;
+        const float hint_intensity = explicit_hint ? beat->intensity : 0.0F;
+        beat->intensity = fmaxf(
+            hint_intensity, clamp01(0.35F + beat->evidence * 0.50F + fabsf(arousal_delta) * 0.25F));
         if (index == 0U && semantic_hint == EIDOLON_PERFORMANCE_CUE_NONE) {
             beat->cue = EIDOLON_PERFORMANCE_CUE_NONE;
             beat->cue_reason = EIDOLON_CUE_REASON_TRACK_START;
             beat->intensity = 0.0F;
         } else if (semantic_hint == EIDOLON_PERFORMANCE_CUE_SURPRISE ||
-            beat->affect.surprise > 0.52F || surprise_delta > 0.30F) {
+                   beat->affect.surprise > 0.52F || surprise_delta > 0.30F) {
             beat->cue = EIDOLON_PERFORMANCE_CUE_SURPRISE;
             beat->cue_reason = semantic_hint == EIDOLON_PERFORMANCE_CUE_SURPRISE
                                    ? semantic_hint_reason
@@ -427,8 +497,8 @@ static void rank_expressions(EidolonExpressionBeat *beat) {
         if (candidate == (int)beat->expression) {
             continue;
         }
-        const float distance = eidolon_affect_expression_distance(
-            &beat->affect, (EidolonExpressionIntent)candidate);
+        const float distance =
+            eidolon_affect_expression_distance(&beat->affect, (EidolonExpressionIntent)candidate);
         if (distance < runner_distance) {
             runner_distance = distance;
             beat->runner_up_expression = (EidolonExpressionIntent)candidate;
@@ -451,6 +521,7 @@ bool eidolon_expression_track_apply(EidolonExpressionTrack *track, uint64_t sequ
         beat->affect = eidolon_affect_from_goemotions(
             probabilities, eidolon_affect_for_state(track->state), &beat->evidence);
         beat->expression = eidolon_affect_expression(&beat->affect);
+        beat->raw_expression = beat->expression;
         beat->classified_ms = now_ms;
         rank_emotions(beat, probabilities);
         rank_expressions(beat);
@@ -488,6 +559,9 @@ void eidolon_expression_track_fallback(EidolonExpressionTrack *track, const char
     }
     for (size_t index = 0U; index < track->count; ++index) {
         EidolonExpressionBeat *beat = &track->beats[index];
+        if (beat->ready) {
+            continue;
+        }
         beat->affect = eidolon_affect_for_state(track->state);
         beat->evidence = 0.25F;
         if (text != NULL &&
@@ -495,13 +569,13 @@ void eidolon_expression_track_fallback(EidolonExpressionTrack *track, const char
              memchr(text + beat->text_start, '!', beat->text_end - beat->text_start) != NULL)) {
             beat->affect.surprise = 0.82F;
             beat->affect.arousal = 0.72F;
-        } else if (text != NULL &&
-                   memchr(text + beat->text_start, '?', beat->text_end - beat->text_start) !=
-                       NULL) {
+        } else if (text != NULL && memchr(text + beat->text_start, '?',
+                                          beat->text_end - beat->text_start) != NULL) {
             beat->affect.arousal = 0.42F;
             beat->affect.certainty = -0.25F;
         }
         beat->expression = eidolon_affect_expression(&beat->affect);
+        beat->raw_expression = beat->expression;
         beat->runner_up_expression = beat->expression;
         beat->expression_margin = 0.0F;
         beat->top_emotions[0] = EIDOLON_EMOTION_NEUTRAL;
@@ -509,6 +583,7 @@ void eidolon_expression_track_fallback(EidolonExpressionTrack *track, const char
         beat->ready = true;
     }
     track->ready_count = track->count;
+    track->submission_complete = true;
     derive_cues(track);
     track->waiting = false;
     track->complete = true;
@@ -520,24 +595,37 @@ bool eidolon_expression_track_ready(const EidolonExpressionTrack *track) {
 
 bool eidolon_expression_track_event(EidolonExpressionTrack *track, size_t text_offset,
                                     EidolonPerformanceEvent *event) {
-    if (!eidolon_expression_track_ready(track) || track->count == 0U || event == NULL) {
+    if (track == NULL || track->count == 0U || event == NULL) {
         return false;
     }
-    size_t selected = 0U;
+    size_t selected = SIZE_MAX;
     for (size_t index = 0U; index < track->count; ++index) {
         if (text_offset < track->beats[index].text_start) {
             break;
         }
         selected = index;
     }
-    if (selected == track->active_index) {
+    if (selected == SIZE_MAX || !track->beats[selected].ready || selected == track->active_index) {
         return false;
     }
     track->active_index = selected;
     const EidolonExpressionBeat *beat = &track->beats[selected];
-    *event = (EidolonPerformanceEvent){beat->affect, beat->expression, beat->cue,
-                                      beat->evidence, beat->intensity, selected};
+    *event = (EidolonPerformanceEvent){beat->affect,   beat->expression, beat->cue,
+                                       beat->evidence, beat->intensity,  selected};
     return true;
+}
+
+bool eidolon_expression_track_blocks_reveal(const EidolonExpressionTrack *track,
+                                            size_t text_offset) {
+    if (track == NULL) {
+        return false;
+    }
+    for (size_t index = 0U; index < track->count; ++index) {
+        if (!track->beats[index].ready && text_offset > track->beats[index].text_start) {
+            return true;
+        }
+    }
+    return false;
 }
 
 const char *eidolon_performance_cue_name(EidolonPerformanceCue cue) {

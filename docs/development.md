@@ -32,6 +32,22 @@ downloads dependencies.
 Linux discovers SDL3 and SDL_ttf through `pkg-config`. Its renderer currently follows the legacy
 SDL_GPU/shadercross path.
 
+## VS Code and clangd
+
+The repository configures VS Code to use clangd and disables the Microsoft C/C++ IntelliSense
+engine. Install the recommended `vscode-clangd` extension when VS Code offers it, then generate the
+local compilation database:
+
+```powershell
+make editor-config
+```
+
+`compile_commands.json` is produced from a dry run of the real Make recipes, so clangd receives the
+same language standards, preprocessor definitions, SDL3/SDL_ttf paths, and vendored-library include
+paths as Clang. The generated file contains machine-local absolute paths and is intentionally
+ignored by Git. Regenerate it after changing compiler flags, dependency roots, build mode, or
+machines; use `make editor-config MODE=release` when release-only definitions matter.
+
 ## Build and test
 
 ```powershell

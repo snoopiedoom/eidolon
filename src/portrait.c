@@ -1,6 +1,7 @@
 #include "portrait.h"
 
 #include "log.h"
+#include "portrait_motion.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -20,14 +21,11 @@ struct EidolonPortraitRenderer {
     uint64_t attempted_hash;
     uint64_t revision;
     uint64_t expression_changed_ms;
-    uint64_t speech_started_ms;
     uint64_t performance_started_ms;
     uint64_t last_poll_ms;
     uint64_t last_draw_ms;
     unsigned int expression_serial;
     unsigned int accent_variant;
-    unsigned int speech_serial;
-    float speech_emphasis;
     float performance_intensity;
     EidolonPerformanceCue performance_cue;
     float attention_target;
@@ -36,6 +34,7 @@ struct EidolonPortraitRenderer {
     int automatic_expression;
     int override_expression;
     EidolonState state;
+    EidolonPortraitSpring delivery_spring;
     int texture_width;
     int texture_height;
     bool ready;
@@ -215,16 +214,14 @@ static bool parse_line(EidolonPortraitConfig *config, const char *key, const cha
     }
     if (strcmp(key, "dialogue.theme") == 0) {
         if (!parse_dialogue_theme(value, &config->dialogue_theme)) {
-            set_error(error, error_capacity,
-                      "dialogue.theme must be classic or academy_heart");
+            set_error(error, error_capacity, "dialogue.theme must be classic or academy_heart");
             return false;
         }
         return true;
     }
     if (strcmp(key, "dialogue.movement") == 0) {
         if (!parse_dialogue_movement(value, &config->dialogue_movement)) {
-            set_error(error, error_capacity,
-                      "dialogue.movement must be manual, paged, or follow");
+            set_error(error, error_capacity, "dialogue.movement must be manual, paged, or follow");
             return false;
         }
         return true;
@@ -520,9 +517,9 @@ static void select_expression(EidolonPortraitRenderer *portrait, int expression,
         now_ms - portrait->expression_changed_ms < portrait->config.accent_duration_ms;
     portrait->current_expression = expression;
     portrait->expression_changed_ms = now_ms;
+    eidolon_portrait_spring_reset(&portrait->delivery_spring, now_ms);
     portrait->expression_serial += 1U;
-    portrait->accent_variant =
-        (portrait->expression_serial + (unsigned int)expression * 5U) % 3U;
+    portrait->accent_variant = (portrait->expression_serial + (unsigned int)expression * 5U) % 3U;
     portrait->revision += 1U;
     const char *previous_label =
         previous >= 0 && (size_t)previous < portrait->config.expression_count
@@ -696,13 +693,90 @@ void eidolon_portrait_set_override(EidolonPortraitRenderer *portrait, int expres
                       now_ms, expression >= 0 ? "debug-override" : "override-cleared");
 }
 
-void eidolon_portrait_speak(EidolonPortraitRenderer *portrait, float emphasis, uint64_t now_ms) {
-    if (portrait == NULL || emphasis <= 0.0F) {
+void eidolon_portrait_deliver(EidolonPortraitRenderer *portrait, EidolonDeliveryCue cue,
+                              float intensity, float direction, uint64_t now_ms) {
+    if (portrait == NULL || !portrait->ready || intensity <= 0.0F) {
         return;
     }
-    portrait->speech_emphasis = SDL_clamp(emphasis, 0.0F, 1.0F);
-    portrait->speech_started_ms = now_ms;
-    portrait->speech_serial += 1U;
+    eidolon_portrait_spring_update(&portrait->delivery_spring, now_ms);
+    const char *label = portrait->config.expressions[portrait->current_expression].label;
+    float energy = 1.0F;
+    float vertical = 1.0F;
+    float lateral = 1.0F;
+    float rotation = 1.0F;
+    if (strcmp(label, "cheerful") == 0 || strcmp(label, "delighted") == 0 ||
+        strcmp(label, "ecstatic") == 0) {
+        energy = 1.12F;
+        vertical = 1.18F;
+    } else if (strcmp(label, "gentle") == 0) {
+        energy = 0.82F;
+        lateral = 1.12F;
+    } else if (strcmp(label, "annoyed") == 0) {
+        energy = 0.96F;
+        vertical = 0.72F;
+        lateral = 1.24F;
+        rotation = 1.20F;
+    } else if (strcmp(label, "worried") == 0) {
+        energy = 0.76F;
+        vertical = 0.82F;
+    } else if (strcmp(label, "serious") == 0) {
+        energy = 0.62F;
+        rotation = 0.72F;
+    } else if (strcmp(label, "embarrassed") == 0) {
+        energy = 0.86F;
+        rotation = 1.18F;
+    }
+    const float amount =
+        SDL_clamp(intensity, 0.0F, 1.0F) * portrait->config.speech_strength * energy;
+    const float signed_direction = direction < 0.0F ? -1.0F : 1.0F;
+    float velocity_x = 0.0F;
+    float velocity_y = 0.0F;
+    float velocity_scale = 0.0F;
+    float velocity_angle = 0.0F;
+    switch (cue) {
+    case EIDOLON_DELIVERY_CUE_PHRASE:
+        velocity_y = -24.0F * vertical;
+        velocity_angle = 0.70F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_ACCENT:
+        velocity_y = -44.0F * vertical;
+        velocity_scale = 0.030F;
+        velocity_angle = 1.25F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_CONTRAST:
+        velocity_x = 52.0F * signed_direction * lateral;
+        velocity_y = -12.0F * vertical;
+        velocity_angle = -2.10F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_HESITATE:
+        velocity_x = 20.0F * signed_direction * lateral;
+        velocity_y = 12.0F * vertical;
+        velocity_angle = 1.35F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_PAUSE:
+        velocity_y = 12.0F * vertical;
+        velocity_scale = -0.010F;
+        velocity_angle = -0.45F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_LAND:
+        velocity_y = 20.0F * vertical;
+        velocity_scale = -0.018F;
+        velocity_angle = -0.62F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_QUESTION:
+        velocity_y = -32.0F * vertical;
+        velocity_scale = 0.018F;
+        velocity_angle = 1.85F * signed_direction * rotation;
+        break;
+    case EIDOLON_DELIVERY_CUE_EXCLAIM:
+        velocity_y = -76.0F * vertical;
+        velocity_scale = 0.065F;
+        velocity_angle = 2.50F * signed_direction * rotation;
+        break;
+    }
+    eidolon_portrait_spring_impulse(&portrait->delivery_spring, velocity_x * amount,
+                                    velocity_y * amount, velocity_scale * amount,
+                                    velocity_angle * amount);
 }
 
 void eidolon_portrait_perform(EidolonPortraitRenderer *portrait, EidolonPerformanceCue cue,
@@ -752,40 +826,31 @@ typedef struct PortraitMotionProfile {
 
 static PortraitMotionProfile motion_for_label(const char *label) {
     if (strcmp(label, "cheerful") == 0) {
-        return (PortraitMotionProfile){0.0F, -10.0F, 0.016F, -0.40F, 0.0F, -1.4F, 0.003F,
-                                       -0.08F};
+        return (PortraitMotionProfile){0.0F, -10.0F, 0.016F, -0.40F, 0.0F, -1.4F, 0.003F, -0.08F};
     }
     if (strcmp(label, "responding") == 0) {
-        return (PortraitMotionProfile){0.0F, -5.0F, 0.008F, 0.12F, 0.0F, -0.5F, 0.001F,
-                                       0.04F};
+        return (PortraitMotionProfile){0.0F, -5.0F, 0.008F, 0.12F, 0.0F, -0.5F, 0.001F, 0.04F};
     }
     if (strcmp(label, "delighted") == 0) {
-        return (PortraitMotionProfile){0.0F, -12.0F, 0.018F, 0.45F, 0.7F, -2.0F, 0.004F,
-                                       0.12F};
+        return (PortraitMotionProfile){0.0F, -12.0F, 0.018F, 0.45F, 0.7F, -2.0F, 0.004F, 0.12F};
     }
     if (strcmp(label, "embarrassed") == 0) {
-        return (PortraitMotionProfile){5.0F, 2.0F, -0.006F, 0.55F, 1.6F, 1.0F, -0.002F,
-                                       0.16F};
+        return (PortraitMotionProfile){5.0F, 2.0F, -0.006F, 0.55F, 1.6F, 1.0F, -0.002F, 0.16F};
     }
     if (strcmp(label, "serious") == 0) {
-        return (PortraitMotionProfile){-5.0F, 0.0F, 0.003F, -0.25F, -1.0F, 0.3F, 0.0F,
-                                       -0.12F};
+        return (PortraitMotionProfile){-5.0F, 0.0F, 0.003F, -0.25F, -1.0F, 0.3F, 0.0F, -0.12F};
     }
     if (strcmp(label, "worried") == 0) {
-        return (PortraitMotionProfile){0.0F, 7.0F, -0.012F, -0.25F, 0.0F, 2.0F, -0.003F,
-                                       -0.10F};
+        return (PortraitMotionProfile){0.0F, 7.0F, -0.012F, -0.25F, 0.0F, 2.0F, -0.003F, -0.10F};
     }
     if (strcmp(label, "annoyed") == 0) {
-        return (PortraitMotionProfile){-8.0F, -1.0F, 0.005F, -0.65F, -1.5F, -0.2F, 0.001F,
-                                       -0.20F};
+        return (PortraitMotionProfile){-8.0F, -1.0F, 0.005F, -0.65F, -1.5F, -0.2F, 0.001F, -0.20F};
     }
     if (strcmp(label, "gentle") == 0) {
-        return (PortraitMotionProfile){4.0F, -4.0F, 0.010F, 0.35F, 1.5F, -0.8F, 0.002F,
-                                       0.12F};
+        return (PortraitMotionProfile){4.0F, -4.0F, 0.010F, 0.35F, 1.5F, -0.8F, 0.002F, 0.12F};
     }
     if (strcmp(label, "ecstatic") == 0) {
-        return (PortraitMotionProfile){0.0F, -15.0F, 0.025F, -0.75F, 0.0F, -2.5F, 0.005F,
-                                       -0.16F};
+        return (PortraitMotionProfile){0.0F, -15.0F, 0.025F, -0.75F, 0.0F, -2.5F, 0.005F, -0.16F};
     }
     return (PortraitMotionProfile){0.0F, -3.0F, 0.004F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 }
@@ -823,28 +888,32 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
     float scale_delta = motion.posture_scale * portrait->config.posture_strength;
     float degrees_delta = motion.posture_degrees * portrait->config.posture_strength;
 
+    eidolon_portrait_spring_update(&portrait->delivery_spring, now_ms);
+    translation_x += portrait->delivery_spring.x * unit;
+    translation_y += portrait->delivery_spring.y * unit;
+    scale_delta += portrait->delivery_spring.scale;
+    degrees_delta += portrait->delivery_spring.angle;
+
     if (portrait->last_draw_ms != 0U && now_ms >= portrait->last_draw_ms) {
-        const float delta_seconds = SDL_min((float)(now_ms - portrait->last_draw_ms) / 1000.0F,
-                                            0.1F);
+        const float delta_seconds =
+            SDL_min((float)(now_ms - portrait->last_draw_ms) / 1000.0F, 0.1F);
         const float attention_blend = 1.0F - expf(-7.0F * delta_seconds);
         portrait->attention_current +=
             (portrait->attention_target - portrait->attention_current) * attention_blend;
     }
     portrait->last_draw_ms = now_ms;
-    translation_x += portrait->attention_current * 2.2F * unit *
-                     portrait->config.attention_strength;
-    degrees_delta += portrait->attention_current * 0.18F *
-                     portrait->config.attention_strength;
+    translation_x +=
+        portrait->attention_current * 2.2F * unit * portrait->config.attention_strength;
+    degrees_delta += portrait->attention_current * 0.18F * portrait->config.attention_strength;
 
-    const float accent_progress = SDL_clamp(
-        (float)(now_ms - portrait->expression_changed_ms) /
-            (float)portrait->config.accent_duration_ms,
-        0.0F, 1.0F);
+    const float accent_progress = SDL_clamp((float)(now_ms - portrait->expression_changed_ms) /
+                                                (float)portrait->config.accent_duration_ms,
+                                            0.0F, 1.0F);
     if (accent_progress < 1.0F && portrait->config.accent_strength > 0.0F) {
         static const float variant_amplitude[3] = {0.88F, 1.0F, 1.12F};
         const float variant = (float)portrait->accent_variant - 1.0F;
-        const float amplitude = variant_amplitude[portrait->accent_variant] *
-                                portrait->config.accent_strength;
+        const float amplitude =
+            variant_amplitude[portrait->accent_variant] * portrait->config.accent_strength;
         float anticipation = 0.0F;
         if (portrait->accent_interrupted && accent_progress < 0.18F) {
             const float anticipation_progress = accent_progress / 0.18F;
@@ -865,29 +934,13 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
         degrees_delta += motion.accent_degrees * pulse_angle * amplitude;
     }
 
-    if (portrait->speech_started_ms != 0U && now_ms >= portrait->speech_started_ms) {
-        const float speech_progress =
-            (float)(now_ms - portrait->speech_started_ms) / 320.0F;
-        if (speech_progress < 1.0F) {
-            const float speech_pulse = SDL_sinf(speech_progress * SDL_PI_F) *
-                                       powf(1.0F - speech_progress, 1.3F) *
-                                       portrait->speech_emphasis * portrait->config.speech_strength;
-            const float speech_direction = (portrait->speech_serial & 1U) != 0U ? 1.0F : -1.0F;
-            translation_y -= 3.0F * unit * speech_pulse;
-            scale_delta += 0.004F * speech_pulse;
-            degrees_delta += 0.20F * speech_direction * speech_pulse;
-        }
-    }
-
     if (portrait->performance_started_ms != 0U && now_ms >= portrait->performance_started_ms) {
-        const float cue_progress =
-            (float)(now_ms - portrait->performance_started_ms) / 560.0F;
+        const float cue_progress = (float)(now_ms - portrait->performance_started_ms) / 560.0F;
         if (cue_progress < 1.0F) {
-            const float pulse = damped_channel(cue_progress, 2.15F, 1.75F) *
-                                portrait->performance_intensity;
-            const float direction = fabsf(portrait->attention_current) > 0.1F
-                                        ? portrait->attention_current
-                                        : -1.0F;
+            const float pulse =
+                damped_channel(cue_progress, 2.15F, 1.75F) * portrait->performance_intensity;
+            const float direction =
+                fabsf(portrait->attention_current) > 0.1F ? portrait->attention_current : -1.0F;
             switch (portrait->performance_cue) {
             case EIDOLON_PERFORMANCE_CUE_LIFT:
                 translation_y -= 10.0F * unit * pulse;
@@ -994,13 +1047,11 @@ EidolonDialogueTheme eidolon_portrait_dialogue_theme(const EidolonPortraitRender
 
 EidolonDialogueMovement
 eidolon_portrait_dialogue_movement(const EidolonPortraitRenderer *portrait) {
-    return portrait != NULL ? portrait->config.dialogue_movement
-                            : EIDOLON_DIALOGUE_MOVEMENT_FOLLOW;
+    return portrait != NULL ? portrait->config.dialogue_movement : EIDOLON_DIALOGUE_MOVEMENT_FOLLOW;
 }
 
 unsigned int eidolon_portrait_dialogue_hold_ms(const EidolonPortraitRenderer *portrait) {
-    return portrait != NULL ? portrait->config.dialogue_hold_ms
-                            : EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS;
+    return portrait != NULL ? portrait->config.dialogue_hold_ms : EIDOLON_DIALOGUE_AUTOPLAY_HOLD_MS;
 }
 
 const char *eidolon_portrait_error(const EidolonPortraitRenderer *portrait) {

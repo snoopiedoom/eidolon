@@ -67,7 +67,8 @@ void eidolon_portrait_set_expression_intent(EidolonPortraitRenderer *portrait,
                                             EidolonExpressionIntent intent, uint64_t now_ms);
 void eidolon_portrait_set_override(EidolonPortraitRenderer *portrait, int expression,
                                    uint64_t now_ms);
-void eidolon_portrait_speak(EidolonPortraitRenderer *portrait, float emphasis, uint64_t now_ms);
+void eidolon_portrait_deliver(EidolonPortraitRenderer *portrait, EidolonDeliveryCue cue,
+                              float intensity, float direction, uint64_t now_ms);
 void eidolon_portrait_perform(EidolonPortraitRenderer *portrait, EidolonPerformanceCue cue,
                               float intensity, uint64_t now_ms);
 void eidolon_portrait_set_attention(EidolonPortraitRenderer *portrait, float direction);
@@ -86,8 +87,7 @@ float eidolon_portrait_display_width(const EidolonPortraitRenderer *portrait);
 float eidolon_portrait_display_height(const EidolonPortraitRenderer *portrait);
 uint64_t eidolon_portrait_revision(const EidolonPortraitRenderer *portrait);
 EidolonDialogueTheme eidolon_portrait_dialogue_theme(const EidolonPortraitRenderer *portrait);
-EidolonDialogueMovement
-eidolon_portrait_dialogue_movement(const EidolonPortraitRenderer *portrait);
+EidolonDialogueMovement eidolon_portrait_dialogue_movement(const EidolonPortraitRenderer *portrait);
 unsigned int eidolon_portrait_dialogue_hold_ms(const EidolonPortraitRenderer *portrait);
 const char *eidolon_portrait_error(const EidolonPortraitRenderer *portrait);
 

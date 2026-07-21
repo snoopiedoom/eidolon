@@ -4,8 +4,7 @@
 #include <string.h>
 
 int main(void) {
-    static const char example[] =
-        "and of course, i would never... Oh, what is that?";
+    static const char example[] = "and of course, i would never... Oh, what is that?";
     EidolonExpressionTrack track;
     eidolon_expression_track_compile(&track, example, EIDOLON_STATE_REVIEW);
     assert(track.count == 2U);
@@ -17,8 +16,7 @@ int main(void) {
     assert(track.waiting);
 
     char beat_text[EIDOLON_EXPRESSION_BEAT_TEXT_CAPACITY];
-    assert(eidolon_expression_track_copy_text(&track, 1U, example, beat_text,
-                                              sizeof(beat_text)));
+    assert(eidolon_expression_track_copy_text(&track, 1U, example, beat_text, sizeof(beat_text)));
     assert(strcmp(beat_text, "Oh, what is that?") == 0);
 
     assert(eidolon_expression_track_set_sequence(&track, 0U, 101U));
@@ -75,14 +73,70 @@ int main(void) {
         "ugh… now embarrassed. fine. come here. ❤️";
     eidolon_expression_track_compile(&track, fragments, EIDOLON_STATE_RUNNING);
     assert(track.count == 6U);
-    assert(eidolon_expression_track_copy_text(&track, 0U, fragments, beat_text,
-                                              sizeof(beat_text)));
+    assert(eidolon_expression_track_copy_text(&track, 0U, fragments, beat_text, sizeof(beat_text)));
     assert(strcmp(beat_text, "mm… everything is quiet.") == 0);
-    assert(eidolon_expression_track_copy_text(&track, 1U, fragments, beat_text,
-                                              sizeof(beat_text)));
+    assert(eidolon_expression_track_copy_text(&track, 1U, fragments, beat_text, sizeof(beat_text)));
     assert(strcmp(beat_text, "wait. something moved.") == 0);
-    assert(eidolon_expression_track_copy_text(&track, 5U, fragments, beat_text,
-                                              sizeof(beat_text)));
+    assert(eidolon_expression_track_copy_text(&track, 5U, fragments, beat_text, sizeof(beat_text)));
     assert(strcmp(beat_text, "fine. come here. ❤️") == 0);
+
+    char many_beats[512];
+    size_t length = 0U;
+    for (size_t index = 0U; index < 100U; ++index) {
+        memcpy(many_beats + length, "a. ", 3U);
+        length += 3U;
+    }
+    many_beats[length] = '\0';
+    eidolon_expression_track_compile(&track, many_beats, EIDOLON_STATE_RUNNING);
+    assert(track.count == 100U);
+    assert(track.beats[99].text_end == length - 1U);
+
+    EidolonExpressionTrack stream;
+    eidolon_expression_track_compile(&stream, "", EIDOLON_STATE_REVIEW);
+    assert(stream.active_index == SIZE_MAX);
+    assert(!eidolon_expression_track_extend(&stream, "quiet", EIDOLON_STATE_REVIEW, false));
+    assert(stream.count == 0U);
+    static const char first_stream[] = "quiet. wait.";
+    assert(eidolon_expression_track_extend(&stream, first_stream, EIDOLON_STATE_REVIEW, false));
+    assert(stream.count == 1U);
+    assert(stream.beats[0].text_end == strlen("quiet."));
+    assert(eidolon_expression_track_set_sequence(&stream, 0U, 201U));
+    stream.next_submit_index = 1U;
+    stream.submission_complete = true;
+    assert(eidolon_expression_track_apply(&stream, 201U, neutral, 2000U));
+    assert(eidolon_expression_track_event(&stream, 0U, &event));
+    assert(event.beat_index == 0U);
+
+    static const char second_stream[] = "quiet. wait. something moved.";
+    assert(eidolon_expression_track_extend(&stream, second_stream, EIDOLON_STATE_REVIEW, false));
+    assert(stream.count == 2U);
+    assert(stream.beats[0].ready);
+    assert(stream.active_index == 0U);
+    assert(!stream.beats[1].ready);
+    assert(!stream.submission_complete);
+    assert(eidolon_expression_track_blocks_reveal(&stream, stream.beats[1].text_start + 1U));
+    assert(eidolon_expression_track_set_sequence(&stream, 1U, 202U));
+    stream.next_submit_index = 2U;
+    stream.submission_complete = true;
+    assert(eidolon_expression_track_apply(&stream, 202U, surprise, 2020U));
+    assert(!eidolon_expression_track_blocks_reveal(&stream, stream.beats[1].text_start + 1U));
+    assert(eidolon_expression_track_event(&stream, stream.beats[1].text_start, &event));
+    assert(event.beat_index == 1U);
+    const EidolonAffect preserved_affect = stream.beats[0].affect;
+    const EidolonExpressionIntent preserved_expression = stream.beats[0].raw_expression;
+
+    static const char final_stream[] = "quiet. wait. something moved. stay close";
+    assert(!eidolon_expression_track_extend(&stream, final_stream, EIDOLON_STATE_REVIEW, false));
+    assert(stream.count == 2U);
+    assert(eidolon_expression_track_extend(&stream, final_stream, EIDOLON_STATE_REVIEW, true));
+    assert(stream.count == 3U);
+    assert(stream.beats[0].ready);
+    assert(stream.beats[1].ready);
+    assert(!stream.beats[2].ready);
+    eidolon_expression_track_fallback(&stream, final_stream);
+    assert(stream.beats[0].affect.valence == preserved_affect.valence);
+    assert(stream.beats[0].affect.arousal == preserved_affect.arousal);
+    assert(stream.beats[0].raw_expression == preserved_expression);
+    assert(stream.beats[2].ready);
     return 0;
 }

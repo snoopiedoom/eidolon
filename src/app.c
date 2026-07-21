@@ -13,6 +13,10 @@
 #define PRESENTATION_INTERVAL_NS ((Uint64)SDL_NS_PER_SECOND / PRESENTATION_RATE_HZ)
 #define USER_SETTINGS_SAVE_DELAY_MS 500U
 #define EXPRESSION_TRACK_TIMEOUT_MS 3000U
+#define EXPRESSION_SUBMISSION_TIMEOUT_MS 10000U
+#define EXPRESSION_CLASSIFY_BUDGET_PER_BEAT_MS 40U
+#define EXPRESSION_SUBMISSION_BURST 8U
+#define DELIVERY_EVENT_BURST 8U
 
 static void capture_runtime_settings(const EidolonApp *app, EidolonUserSettings *settings) {
     settings->overrides = 0U;
@@ -98,9 +102,8 @@ static float session_attention_direction(const EidolonSessionEntry *entry) {
 }
 
 #ifndef NDEBUG
-static void performance_preview(const EidolonDialogue *dialogue,
-                                const EidolonExpressionBeat *beat, char *output,
-                                size_t capacity) {
+static void performance_preview(const EidolonDialogue *dialogue, const EidolonExpressionBeat *beat,
+                                char *output, size_t capacity) {
     if (capacity == 0U) {
         return;
     }
@@ -132,17 +135,23 @@ static void performance_preview(const EidolonDialogue *dialogue,
 }
 #endif
 
-static void log_performance_plan(const EidolonDialogue *dialogue) {
-    const EidolonExpressionTrack *track = &dialogue->expression_track;
-    eidolon_log_write("latency",
-                      "session=%s phase=affect-ready detected_to_ready_ms=%llu beats=%zu",
-                      track->owner,
-                      (unsigned long long)(track->ready_ms - track->prepared_ms), track->count);
-    eidolon_log_write("performance",
-                      "track=%llu owner=%s ready beats=%zu latency_ms=%llu",
+static void log_performance_plan(EidolonDialogue *dialogue) {
+    EidolonExpressionTrack *track = &dialogue->expression_track;
+    if (track->logged_count >= track->count) {
+        return;
+    }
+    const uint64_t batch_started_ms =
+        track->batch_prepared_ms != 0U ? track->batch_prepared_ms : track->prepared_ms;
+    if (track->logged_count == 0U) {
+        eidolon_log_write(
+            "latency", "session=%s phase=affect-ready detected_to_ready_ms=%llu beats=%zu",
+            track->owner, (unsigned long long)(track->ready_ms - track->prepared_ms), track->count);
+    }
+    eidolon_log_write("performance", "track=%llu owner=%s ready beats=%zu new=%zu latency_ms=%llu",
                       (unsigned long long)track->track_id, track->owner, track->count,
-                      (unsigned long long)(track->ready_ms - track->prepared_ms));
-    for (size_t index = 0U; index < track->count; ++index) {
+                      track->count - track->logged_count,
+                      (unsigned long long)(track->ready_ms - batch_started_ms));
+    for (size_t index = track->logged_count; index < track->count; ++index) {
         const EidolonExpressionBeat *beat = &track->beats[index];
 #ifndef NDEBUG
         char preview[97];
@@ -164,11 +173,11 @@ static void log_performance_plan(const EidolonDialogue *dialogue) {
             beat->affect.valence, beat->affect.arousal, beat->affect.dominance,
             beat->affect.certainty, beat->affect.warmth, beat->affect.surprise,
             eidolon_expression_intent_name(beat->raw_expression),
-            eidolon_expression_intent_name(beat->expression),
-            beat->expression_held ? "yes" : "no", beat->previous_expression_advantage,
-            eidolon_expression_intent_name(beat->runner_up_expression),
-            beat->expression_margin, eidolon_performance_cue_name(beat->cue),
-            eidolon_cue_reason_name(beat->cue_reason), beat->intensity, preview);
+            eidolon_expression_intent_name(beat->expression), beat->expression_held ? "yes" : "no",
+            beat->previous_expression_advantage,
+            eidolon_expression_intent_name(beat->runner_up_expression), beat->expression_margin,
+            eidolon_performance_cue_name(beat->cue), eidolon_cue_reason_name(beat->cue_reason),
+            beat->intensity, preview);
 #else
         eidolon_log_write(
             "performance",
@@ -187,13 +196,14 @@ static void log_performance_plan(const EidolonDialogue *dialogue) {
             beat->affect.valence, beat->affect.arousal, beat->affect.dominance,
             beat->affect.certainty, beat->affect.warmth, beat->affect.surprise,
             eidolon_expression_intent_name(beat->raw_expression),
-            eidolon_expression_intent_name(beat->expression),
-            beat->expression_held ? "yes" : "no", beat->previous_expression_advantage,
-            eidolon_expression_intent_name(beat->runner_up_expression),
-            beat->expression_margin, eidolon_performance_cue_name(beat->cue),
-            eidolon_cue_reason_name(beat->cue_reason), beat->intensity);
+            eidolon_expression_intent_name(beat->expression), beat->expression_held ? "yes" : "no",
+            beat->previous_expression_advantage,
+            eidolon_expression_intent_name(beat->runner_up_expression), beat->expression_margin,
+            eidolon_performance_cue_name(beat->cue), eidolon_cue_reason_name(beat->cue_reason),
+            beat->intensity);
 #endif
     }
+    track->logged_count = track->count;
 }
 
 static void apply_performance_event(EidolonApp *app, EidolonDialogue *dialogue,
@@ -242,6 +252,29 @@ static void activate_dialogue_performance(EidolonApp *app, EidolonDialogue *dial
     }
 }
 
+static void activate_dialogue_delivery(EidolonApp *app, EidolonDialogue *dialogue, float attention,
+                                       uint64_t now_ms) {
+    if (dialogue == NULL) {
+        return;
+    }
+    EidolonDeliveryMark events[DELIVERY_EVENT_BURST];
+    const size_t offset = eidolon_dialogue_revealed_text_offset(dialogue);
+    const size_t count = eidolon_delivery_track_collect(&dialogue->delivery_track, offset, events,
+                                                        SDL_arraysize(events));
+    for (size_t index = 0U; index < count; ++index) {
+        const float direction =
+            attention < 0.0F ? -events[index].direction : events[index].direction;
+        eidolon_portrait_set_attention(app->portrait, attention);
+        eidolon_portrait_deliver(app->portrait, events[index].cue, events[index].intensity,
+                                 direction, now_ms);
+        eidolon_log_write(
+            "delivery", "owner=%s offset=%zu cue=%s intensity=%.2f direction=%.0f",
+            dialogue->expression_track.owner[0] != '\0' ? dialogue->expression_track.owner : "live",
+            events[index].text_offset, eidolon_delivery_cue_name(events[index].cue),
+            events[index].intensity, direction);
+    }
+}
+
 static void fallback_dialogue_performance(EidolonApp *app, EidolonDialogue *dialogue,
                                           float attention, uint64_t now_ms, const char *reason) {
     eidolon_expression_track_fallback(&dialogue->expression_track, dialogue->text);
@@ -254,6 +287,48 @@ static void fallback_dialogue_performance(EidolonApp *app, EidolonDialogue *dial
                       dialogue->expression_track.owner, reason);
 }
 
+static bool submit_dialogue_performance(EidolonApp *app, EidolonDialogue *dialogue,
+                                        uint64_t now_ms) {
+    EidolonExpressionTrack *track = &dialogue->expression_track;
+    char text[EIDOLON_EXPRESSION_BEAT_TEXT_CAPACITY];
+    size_t submitted = 0U;
+    while (track->next_submit_index < track->count && submitted < EXPRESSION_SUBMISSION_BURST) {
+        const size_t index = track->next_submit_index;
+        if (!eidolon_expression_track_copy_text(track, index, dialogue->text, text, sizeof(text))) {
+            return false;
+        }
+        app->next_affect_sequence += 1U;
+        if (app->next_affect_sequence == 0U) {
+            app->next_affect_sequence += 1U;
+        }
+        if (!eidolon_affect_client_submit(app->affect_client, app->next_affect_sequence, text)) {
+            if (!track->submission_deferred) {
+                eidolon_log_write("performance",
+                                  "track=%llu owner=%s submissions deferred queued=%zu/%zu",
+                                  (unsigned long long)track->track_id, track->owner,
+                                  track->next_submit_index, track->count);
+                track->submission_deferred = true;
+            }
+            return true;
+        }
+        if (!eidolon_expression_track_set_sequence(track, index, app->next_affect_sequence)) {
+            return false;
+        }
+        track->beats[index].submitted_ms = now_ms;
+        track->next_submit_index += 1U;
+        submitted += 1U;
+    }
+    if (track->next_submit_index == track->count && !track->submission_complete) {
+        track->submission_complete = true;
+        track->submission_deferred = false;
+        track->deadline_ms = now_ms + EXPRESSION_TRACK_TIMEOUT_MS +
+                             (uint64_t)track->count * EXPRESSION_CLASSIFY_BUDGET_PER_BEAT_MS;
+        eidolon_log_write("performance", "track=%llu owner=%s queued beats=%zu",
+                          (unsigned long long)track->track_id, track->owner, track->count);
+    }
+    return true;
+}
+
 static void prepare_dialogue_performance(EidolonApp *app, EidolonDialogue *dialogue,
                                          EidolonState state, float attention, const char *owner,
                                          uint64_t now_ms) {
@@ -261,38 +336,68 @@ static void prepare_dialogue_performance(EidolonApp *app, EidolonDialogue *dialo
     app->next_performance_track_id += 1U;
     dialogue->expression_track.track_id = app->next_performance_track_id;
     dialogue->expression_track.prepared_ms = now_ms;
+    dialogue->expression_track.batch_prepared_ms = now_ms;
     SDL_strlcpy(dialogue->expression_track.owner, owner != NULL ? owner : "unknown",
                 sizeof(dialogue->expression_track.owner));
     if (dialogue->expression_track.count == 0U) {
         eidolon_dialogue_resume(dialogue, now_ms);
         return;
     }
-    dialogue->expression_track.deadline_ms = now_ms + EXPRESSION_TRACK_TIMEOUT_MS;
+    dialogue->expression_track.deadline_ms = now_ms + EXPRESSION_SUBMISSION_TIMEOUT_MS;
+    eidolon_log_write(
+        "performance", "track=%llu owner=%s compiled beats=%zu delivery=%zu bytes=%zu",
+        (unsigned long long)dialogue->expression_track.track_id, dialogue->expression_track.owner,
+        dialogue->expression_track.count, dialogue->delivery_track.count, strlen(dialogue->text));
     if (app->affect_client == NULL) {
         fallback_dialogue_performance(app, dialogue, attention, now_ms, "worker unavailable");
         return;
     }
-    char text[EIDOLON_EXPRESSION_BEAT_TEXT_CAPACITY];
-    for (size_t index = 0U; index < dialogue->expression_track.count; ++index) {
-        app->next_affect_sequence += 1U;
-        if (app->next_affect_sequence == 0U) {
-            app->next_affect_sequence += 1U;
-        }
-        if (!eidolon_expression_track_set_sequence(&dialogue->expression_track, index,
-                                                   app->next_affect_sequence) ||
-            !eidolon_expression_track_copy_text(&dialogue->expression_track, index,
-                                                dialogue->text, text, sizeof(text)) ||
-            !eidolon_affect_client_submit(app->affect_client, app->next_affect_sequence, text)) {
-            fallback_dialogue_performance(app, dialogue, attention, now_ms,
-                                          "classification queue full");
-            return;
-        }
-        dialogue->expression_track.beats[index].submitted_ms = now_ms;
+    if (!submit_dialogue_performance(app, dialogue, now_ms)) {
+        fallback_dialogue_performance(app, dialogue, attention, now_ms,
+                                      "classification submission failed");
     }
-    eidolon_log_write("performance", "track=%llu owner=%s compiled beats=%zu bytes=%zu",
+}
+
+static void begin_stream_performance(EidolonApp *app, EidolonDialogue *dialogue, EidolonState state,
+                                     const char *owner, uint64_t now_ms) {
+    eidolon_expression_track_compile(&dialogue->expression_track, "", state);
+    app->next_performance_track_id += 1U;
+    dialogue->expression_track.track_id = app->next_performance_track_id;
+    dialogue->expression_track.prepared_ms = now_ms;
+    dialogue->expression_track.batch_prepared_ms = now_ms;
+    SDL_strlcpy(dialogue->expression_track.owner, owner != NULL ? owner : "unknown",
+                sizeof(dialogue->expression_track.owner));
+    eidolon_log_write("performance", "track=%llu owner=%s stream opened",
                       (unsigned long long)dialogue->expression_track.track_id,
-                      dialogue->expression_track.owner, dialogue->expression_track.count,
-                      strlen(dialogue->text));
+                      dialogue->expression_track.owner);
+}
+
+static void extend_stream_performance(EidolonApp *app, EidolonDialogue *dialogue,
+                                      EidolonState state, float attention, bool completed,
+                                      uint64_t now_ms) {
+    const size_t previous_count = dialogue->expression_track.count;
+    if (!eidolon_expression_track_extend(&dialogue->expression_track, dialogue->text, state,
+                                         completed)) {
+        return;
+    }
+    dialogue->expression_track.batch_prepared_ms = now_ms;
+    dialogue->expression_track.deadline_ms = now_ms + EXPRESSION_SUBMISSION_TIMEOUT_MS;
+    eidolon_log_write(
+        "performance", "track=%llu owner=%s stream extended beats=%zu->%zu final=%s bytes=%zu",
+        (unsigned long long)dialogue->expression_track.track_id, dialogue->expression_track.owner,
+        previous_count, dialogue->expression_track.count, completed ? "yes" : "no",
+        strlen(dialogue->text));
+    if (dialogue->expression_track.count == 0U) {
+        return;
+    }
+    if (app->affect_client == NULL) {
+        fallback_dialogue_performance(app, dialogue, attention, now_ms, "worker unavailable");
+        return;
+    }
+    if (!submit_dialogue_performance(app, dialogue, now_ms)) {
+        fallback_dialogue_performance(app, dialogue, attention, now_ms,
+                                      "classification submission failed");
+    }
 }
 
 static bool apply_classification(EidolonApp *app, EidolonDialogue *dialogue, uint64_t sequence,
@@ -316,8 +421,8 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
     uint64_t sequence = 0U;
     float probabilities[EIDOLON_GOEMOTIONS_COUNT];
     while (eidolon_affect_client_poll(app->affect_client, &sequence, probabilities)) {
-        bool applied = apply_classification(app, &app->dialogue, sequence, probabilities, -1.0F,
-                                            now_ms);
+        bool applied =
+            apply_classification(app, &app->dialogue, sequence, probabilities, -1.0F, now_ms);
         for (size_t index = 0U; !applied && index < EIDOLON_SESSION_CAPACITY; ++index) {
             EidolonSessionEntry *entry = &app->session_registry.entries[index];
             if (entry->occupied) {
@@ -328,17 +433,37 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
     }
 
     if (app->dialogue.expression_track.waiting &&
+        !app->dialogue.expression_track.submission_complete &&
+        !submit_dialogue_performance(app, &app->dialogue, now_ms)) {
+        fallback_dialogue_performance(app, &app->dialogue, -1.0F, now_ms,
+                                      "classification submission failed");
+    }
+    for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
+        EidolonSessionEntry *entry = &app->session_registry.entries[index];
+        if (entry->occupied && entry->dialogue.expression_track.waiting &&
+            !entry->dialogue.expression_track.submission_complete &&
+            !submit_dialogue_performance(app, &entry->dialogue, now_ms)) {
+            fallback_dialogue_performance(app, &entry->dialogue, session_attention_direction(entry),
+                                          now_ms, "classification submission failed");
+        }
+    }
+
+    if (app->dialogue.expression_track.waiting &&
         now_ms >= app->dialogue.expression_track.deadline_ms) {
         fallback_dialogue_performance(app, &app->dialogue, -1.0F, now_ms,
-                                      "classification timeout");
+                                      app->dialogue.expression_track.submission_complete
+                                          ? "classification timeout"
+                                          : "classification submission timeout");
     }
     for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
         EidolonSessionEntry *entry = &app->session_registry.entries[index];
         if (entry->occupied && entry->dialogue.expression_track.waiting &&
             now_ms >= entry->dialogue.expression_track.deadline_ms) {
-            fallback_dialogue_performance(app, &entry->dialogue,
-                                          session_attention_direction(entry), now_ms,
-                                          "classification timeout");
+            fallback_dialogue_performance(app, &entry->dialogue, session_attention_direction(entry),
+                                          now_ms,
+                                          entry->dialogue.expression_track.submission_complete
+                                              ? "classification timeout"
+                                              : "classification submission timeout");
         }
     }
 }
@@ -731,7 +856,8 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         app->conversation_sources =
             eidolon_conversation_sources_create(EIDOLON_PROVIDER_CONFIG_PATH);
         if (app->conversation_sources == NULL) {
-            eidolon_log_write("provider", "live provider manager unavailable; legacy inputs remain");
+            eidolon_log_write("provider",
+                              "live provider manager unavailable; legacy inputs remain");
         } else {
             eidolon_session_registry_set_legacy_transcripts(
                 &app->session_registry,
@@ -1470,8 +1596,7 @@ void eidolon_app_run(EidolonApp *app) {
         const uint64_t now_ms = SDL_GetTicks();
         EidolonConversationEvent conversation_event;
         bool conversation_layout_changed = false;
-        while (eidolon_conversation_sources_poll(app->conversation_sources,
-                                                 &conversation_event)) {
+        while (eidolon_conversation_sources_poll(app->conversation_sources, &conversation_event)) {
             const EidolonSessionPoll live = eidolon_session_registry_apply_event(
                 &app->session_registry, &conversation_event, now_ms);
             conversation_layout_changed = conversation_layout_changed || live.changed;
@@ -1482,20 +1607,33 @@ void eidolon_app_run(EidolonApp *app) {
                 const EidolonAffect responding = eidolon_affect_for_state(EIDOLON_STATE_REVIEW);
                 eidolon_affect_controller_perform(&app->affect, &responding,
                                                   EIDOLON_EXPRESSION_RESPONDING, 0.65F, now_ms);
-            } else if (live.new_message && live.message_session != NULL) {
+                begin_stream_performance(app, &live.message_session->dialogue, app->state,
+                                         live.message_session->id, now_ms);
+            }
+            if (live.stream_delta && live.message_session != NULL) {
+                const float attention = session_attention_direction(live.message_session);
+                extend_stream_performance(app, &live.message_session->dialogue, app->state,
+                                          attention, false, now_ms);
+            }
+            if (live.message_completed && live.message_session != NULL) {
                 eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
                 const float attention = session_attention_direction(live.message_session);
                 eidolon_portrait_set_attention(app->portrait, attention);
-                prepare_dialogue_performance(app, &live.message_session->dialogue, app->state,
-                                             attention, live.message_session->id, now_ms);
+                if (live.new_message) {
+                    prepare_dialogue_performance(app, &live.message_session->dialogue, app->state,
+                                                 attention, live.message_session->id, now_ms);
+                } else {
+                    extend_stream_performance(app, &live.message_session->dialogue, app->state,
+                                              attention, true, now_ms);
+                }
             }
         }
 
         EidolonState received_state;
         char received_text[EIDOLON_IPC_TEXT_CAPACITY + 1];
-        const bool legacy_hooks = app->conversation_sources == NULL ||
-                                  eidolon_conversation_sources_legacy_hooks(
-                                      app->conversation_sources);
+        const bool legacy_hooks =
+            app->conversation_sources == NULL ||
+            eidolon_conversation_sources_legacy_hooks(app->conversation_sources);
         while (eidolon_ipc_server_poll(&app->ipc, &received_state, received_text,
                                        sizeof(received_text))) {
             if (!legacy_hooks) {
@@ -1521,28 +1659,24 @@ void eidolon_app_run(EidolonApp *app) {
             eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
             eidolon_portrait_set_attention(app->portrait,
                                            session_attention_direction(sessions.message_session));
-            prepare_dialogue_performance(
-                app, &sessions.message_session->dialogue, app->state,
-                session_attention_direction(sessions.message_session),
-                sessions.message_session->id, now_ms);
+            prepare_dialogue_performance(app, &sessions.message_session->dialogue, app->state,
+                                         session_attention_direction(sessions.message_session),
+                                         sessions.message_session->id, now_ms);
         }
         if (sessions.page_advanced && sessions.advanced_session != NULL) {
             eidolon_portrait_set_attention(app->portrait,
                                            session_attention_direction(sessions.advanced_session));
-            activate_dialogue_performance(
-                app, &sessions.advanced_session->dialogue,
-                session_attention_direction(sessions.advanced_session), now_ms);
-        }
-        if (sessions.speech_beat > 0.0F) {
-            eidolon_portrait_set_attention(app->portrait,
-                                           session_attention_direction(sessions.speaking_session));
-            eidolon_portrait_speak(app->portrait, sessions.speech_beat, now_ms);
+            activate_dialogue_performance(app, &sessions.advanced_session->dialogue,
+                                          session_attention_direction(sessions.advanced_session),
+                                          now_ms);
         }
         for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
             EidolonSessionEntry *entry = &app->session_registry.entries[index];
             if (entry->visible) {
                 activate_dialogue_performance(app, &entry->dialogue,
                                               session_attention_direction(entry), now_ms);
+                activate_dialogue_delivery(app, &entry->dialogue,
+                                           session_attention_direction(entry), now_ms);
             }
         }
         if (sessions.changed || conversation_layout_changed) {
@@ -1554,18 +1688,12 @@ void eidolon_app_run(EidolonApp *app) {
         }
         eidolon_animation_update(&app->animation, app->state, now_ms);
         if (eidolon_session_registry_visible_count(&app->session_registry) == 0U) {
-            const size_t previous_revealed = app->dialogue.revealed;
             eidolon_dialogue_update(&app->dialogue, now_ms);
-            const float local_speech_beat =
-                eidolon_dialogue_reveal_emphasis(&app->dialogue, previous_revealed);
-            if (local_speech_beat > 0.0F) {
-                eidolon_portrait_set_attention(app->portrait, -1.0F);
-                eidolon_portrait_speak(app->portrait, local_speech_beat, now_ms);
-            }
             if (eidolon_dialogue_autoplay(&app->dialogue, now_ms)) {
                 activate_dialogue_performance(app, &app->dialogue, -1.0F, now_ms);
             }
             activate_dialogue_performance(app, &app->dialogue, -1.0F, now_ms);
+            activate_dialogue_delivery(app, &app->dialogue, -1.0F, now_ms);
         }
         service_expression_director(app, now_ms);
         eidolon_affect_controller_update(&app->affect, 1.0F / (float)PRESENTATION_RATE_HZ, now_ms);

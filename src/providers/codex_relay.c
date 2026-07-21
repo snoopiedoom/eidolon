@@ -27,6 +27,7 @@
 #define CODEX_RELAY_EXECUTABLE_CAPACITY 512U
 #define CODEX_RELAY_HTTP_CAPACITY 8192U
 #define CODEX_RELAY_PIPE_BUFFER_CAPACITY 8192U
+#define CODEX_RELAY_OBSERVE_LIMIT (1024U * 1024U)
 
 struct EidolonCodexRelay {
     EidolonConversationBus *bus;
@@ -157,9 +158,9 @@ static bool websocket_send_frame(WebSocketEndpoint *endpoint, uint8_t opcode,
     return sent;
 }
 
-static bool websocket_read(void *context, uint8_t *message, size_t capacity, size_t *length) {
+static bool websocket_read(void *context, EidolonRelayMessage *message) {
     WebSocketEndpoint *endpoint = context;
-    size_t used = 0U;
+    message->length = 0U;
     bool fragmented = false;
     for (;;) {
         const SOCKET client = relay_client(endpoint->relay);
@@ -216,18 +217,23 @@ static bool websocket_read(void *context, uint8_t *message, size_t capacity, siz
             continue;
         }
         if ((opcode == 0U && !fragmented) || (opcode != 0U && opcode != 1U) ||
-            (opcode == 1U && fragmented) || payload_length > (uint64_t)(capacity - used)) {
+            (opcode == 1U && fragmented) ||
+            payload_length > (uint64_t)(EIDOLON_RELAY_MESSAGE_LIMIT - message->length)) {
+            eidolon_log_write("provider", "codex relay rejected client WebSocket frame bytes=%llu",
+                              (unsigned long long)payload_length);
             return false;
         }
-        if (!socket_receive_exact(client, message + used, (size_t)payload_length)) {
+        const size_t required = message->length + (size_t)payload_length;
+        if (!eidolon_relay_message_reserve(message, required) ||
+            (payload_length > 0U && !socket_receive_exact(client, message->data + message->length,
+                                                          (size_t)payload_length))) {
             return false;
         }
         for (size_t index = 0U; index < (size_t)payload_length; ++index) {
-            message[used + index] ^= mask[index % 4U];
+            message->data[message->length + index] ^= mask[index % 4U];
         }
-        used += (size_t)payload_length;
+        message->length = required;
         if (final) {
-            *length = used;
             return true;
         }
         fragmented = true;
@@ -257,34 +263,48 @@ static bool write_handle_all(HANDLE handle, const uint8_t *data, size_t length) 
     return true;
 }
 
-static bool stdio_read(void *context, uint8_t *message, size_t capacity, size_t *length) {
+static bool append_stdio_message(EidolonRelayMessage *message, const uint8_t *data, size_t length) {
+    if (length > EIDOLON_RELAY_MESSAGE_LIMIT - message->length) {
+        return false;
+    }
+    const size_t required = message->length + length;
+    if (!eidolon_relay_message_reserve(message, required)) {
+        return false;
+    }
+    if (length > 0U) {
+        memcpy(message->data + message->length, data, length);
+    }
+    message->length = required;
+    return true;
+}
+
+static bool stdio_read(void *context, EidolonRelayMessage *message) {
     StdioEndpoint *endpoint = context;
-    size_t used = 0U;
+    message->length = 0U;
     for (;;) {
         for (size_t index = endpoint->buffered_start; index < endpoint->buffered_length; ++index) {
             if (endpoint->buffered[index] != '\n') {
                 continue;
             }
             const size_t available = index - endpoint->buffered_start;
-            if (used + available > capacity) {
+            if (!append_stdio_message(message, endpoint->buffered + endpoint->buffered_start,
+                                      available)) {
+                eidolon_log_write("provider", "codex app-server message exceeded %u MiB",
+                                  (unsigned int)(EIDOLON_RELAY_MESSAGE_LIMIT / (1024U * 1024U)));
                 return false;
             }
-            memcpy(message + used, endpoint->buffered + endpoint->buffered_start, available);
-            used += available;
             endpoint->buffered_start = index + 1U;
-            if (used > 0U && message[used - 1U] == '\r') {
-                --used;
+            if (message->length > 0U && message->data[message->length - 1U] == '\r') {
+                --message->length;
             }
-            *length = used;
             return true;
         }
         const size_t available = endpoint->buffered_length - endpoint->buffered_start;
-        if (used + available > capacity) {
+        if (!append_stdio_message(message, endpoint->buffered + endpoint->buffered_start,
+                                  available)) {
+            eidolon_log_write("provider", "codex app-server message exceeded %u MiB",
+                              (unsigned int)(EIDOLON_RELAY_MESSAGE_LIMIT / (1024U * 1024U)));
             return false;
-        }
-        if (available > 0U) {
-            memcpy(message + used, endpoint->buffered + endpoint->buffered_start, available);
-            used += available;
         }
         endpoint->buffered_start = 0U;
         endpoint->buffered_length = 0U;
@@ -593,6 +613,11 @@ static void emit_source_state(EidolonCodexRelay *relay, bool connected) {
 
 static void observe_codex(void *context, const uint8_t *message, size_t length) {
     EidolonCodexRelay *relay = context;
+    if (length > CODEX_RELAY_OBSERVE_LIMIT) {
+        eidolon_log_write("provider", "codex relay forwarded large server message bytes=%llu",
+                          (unsigned long long)length);
+        return;
+    }
     char *frame = SDL_malloc(length + 1U);
     if (frame == NULL) {
         return;

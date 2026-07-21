@@ -12,22 +12,23 @@ typedef struct FakeBridge {
 
 typedef struct FakeEndpoint {
     FakeBridge *bridge;
-    const char *input;
-    char output[64];
+    const uint8_t *input;
+    size_t input_length;
+    EidolonRelayMessage output;
     bool read;
 } FakeEndpoint;
 
 typedef struct FakeTap {
-    char message[64];
+    EidolonRelayMessage message;
 } FakeTap;
 
-static bool fake_read(void *context, uint8_t *message, size_t capacity, size_t *length) {
+static bool fake_read(void *context, EidolonRelayMessage *message) {
     FakeEndpoint *endpoint = context;
     if (!endpoint->read) {
         endpoint->read = true;
-        *length = strlen(endpoint->input);
-        assert(*length <= capacity);
-        memcpy(message, endpoint->input, *length);
+        assert(eidolon_relay_message_reserve(message, endpoint->input_length));
+        memcpy(message->data, endpoint->input, endpoint->input_length);
+        message->length = endpoint->input_length;
         return true;
     }
     while (SDL_GetAtomicInt(&endpoint->bridge->writes) < 2 &&
@@ -39,9 +40,9 @@ static bool fake_read(void *context, uint8_t *message, size_t capacity, size_t *
 
 static bool fake_write(void *context, const uint8_t *message, size_t length) {
     FakeEndpoint *endpoint = context;
-    assert(length + 1U <= sizeof(endpoint->output));
-    memcpy(endpoint->output, message, length);
-    endpoint->output[length] = '\0';
+    assert(eidolon_relay_message_reserve(&endpoint->output, length));
+    memcpy(endpoint->output.data, message, length);
+    endpoint->output.length = length;
     (void)SDL_AddAtomicInt(&endpoint->bridge->writes, 1);
     return true;
 }
@@ -53,16 +54,31 @@ static void fake_interrupt(void *context) {
 
 static void fake_tap(void *context, const uint8_t *message, size_t length) {
     FakeTap *tap = context;
-    assert(length + 1U <= sizeof(tap->message));
-    memcpy(tap->message, message, length);
-    tap->message[length] = '\0';
+    assert(eidolon_relay_message_reserve(&tap->message, length));
+    memcpy(tap->message.data, message, length);
+    tap->message.length = length;
 }
 
 int main(void) {
     assert(SDL_Init(0));
+    static const char request[] = "client request";
+    const size_t response_length = 2U * 1024U * 1024U;
+    uint8_t *response = SDL_malloc(response_length);
+    assert(response != NULL);
+    for (size_t index = 0U; index < response_length; ++index) {
+        response[index] = (uint8_t)(index % 251U);
+    }
     FakeBridge bridge = {0};
-    FakeEndpoint left = {.bridge = &bridge, .input = "client request"};
-    FakeEndpoint right = {.bridge = &bridge, .input = "server response"};
+    FakeEndpoint left = {
+        .bridge = &bridge,
+        .input = (const uint8_t *)request,
+        .input_length = sizeof(request) - 1U,
+    };
+    FakeEndpoint right = {
+        .bridge = &bridge,
+        .input = response,
+        .input_length = response_length,
+    };
     FakeTap observed = {0};
     const EidolonRelayEndpoint left_endpoint = {
         .context = &left,
@@ -79,10 +95,17 @@ int main(void) {
     (void)eidolon_relay_bridge_run(
         &left_endpoint, &right_endpoint, (EidolonRelayObservation){0},
         (EidolonRelayObservation){.context = &observed, .tap = fake_tap});
-    assert(strcmp(right.output, "client request") == 0);
-    assert(strcmp(left.output, "server response") == 0);
-    assert(strcmp(observed.message, "server response") == 0);
+    assert(right.output.length == sizeof(request) - 1U);
+    assert(memcmp(right.output.data, request, right.output.length) == 0);
+    assert(left.output.length == response_length);
+    assert(memcmp(left.output.data, response, response_length) == 0);
+    assert(observed.message.length == response_length);
+    assert(memcmp(observed.message.data, response, response_length) == 0);
     assert(SDL_GetAtomicInt(&bridge.interruptions) == 2);
+    eidolon_relay_message_free(&left.output);
+    eidolon_relay_message_free(&right.output);
+    eidolon_relay_message_free(&observed.message);
+    SDL_free(response);
     SDL_Quit();
     return 0;
 }

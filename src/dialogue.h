@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "delivery.h"
 #include "expression_director.h"
 
 #define EIDOLON_DIALOGUE_TEXT_CAPACITY 4096
@@ -31,6 +32,7 @@ typedef struct EidolonDialogue {
     uint64_t page_complete_tick_ms;
     EidolonDialogueMovement movement;
     unsigned int hold_ms;
+    EidolonDeliveryTrack delivery_track;
     EidolonExpressionTrack expression_track;
 } EidolonDialogue;
 
@@ -43,8 +45,6 @@ void eidolon_dialogue_resume(EidolonDialogue *dialogue, uint64_t now_ms);
 void eidolon_dialogue_advance(EidolonDialogue *dialogue, uint64_t now_ms);
 bool eidolon_dialogue_autoplay(EidolonDialogue *dialogue, uint64_t now_ms);
 float eidolon_dialogue_indicator_alpha(const EidolonDialogue *dialogue, uint64_t now_ms);
-float eidolon_dialogue_reveal_emphasis(const EidolonDialogue *dialogue,
-                                       size_t previous_revealed);
 bool eidolon_dialogue_is_active(const EidolonDialogue *dialogue);
 bool eidolon_dialogue_has_next_page(const EidolonDialogue *dialogue);
 bool eidolon_dialogue_has_unread(const EidolonDialogue *dialogue);

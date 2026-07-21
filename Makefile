@@ -13,6 +13,7 @@ COMMON_SOURCES := \
 	src/bubble_layout.c \
 	src/conversation.c \
 	src/conversation_sources.c \
+	src/delivery.c \
 	src/dialogue.c \
 	src/draw.c \
 	src/expression_director.c \
@@ -28,6 +29,7 @@ COMMON_SOURCES := \
 	src/pose.c \
 	src/pose_solver.c \
 	src/portrait.c \
+	src/portrait_motion.c \
 	src/relay_core.c \
 	src/providers/codex_relay.c \
 	src/providers/codex_stream.c \
@@ -155,10 +157,14 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check imgui-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check editor-config imgui-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
+
+editor-config:
+	$(PYTHON) tools/generate_compile_commands.py --make "$(MAKE)" --mode "$(MODE)" \
+		--target "$(MODE_TARGET)" --output "$(CURDIR)/compile_commands.json"
 
 text-setup:
 	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/setup_text_windows.ps1"
@@ -287,6 +293,7 @@ TEST_DIR := $(BUILD_ROOT)/tests/$(MODE)
 ANIMATION_TEST := $(TEST_DIR)/animation_test$(EXE)
 STATE_TEST := $(TEST_DIR)/state_test$(EXE)
 DIALOGUE_TEST := $(TEST_DIR)/dialogue_test$(EXE)
+DELIVERY_TEST := $(TEST_DIR)/delivery_test$(EXE)
 HOOK_OUTPUT_TEST := $(TEST_DIR)/hook_output_test$(EXE)
 MOTION_TEST := $(TEST_DIR)/motion_test$(EXE)
 MOTION_CONFIG_TEST := $(TEST_DIR)/motion_config_test$(EXE)
@@ -295,6 +302,7 @@ IK_TEST := $(TEST_DIR)/ik_test$(EXE)
 HUMANOID_TEST := $(TEST_DIR)/humanoid_test$(EXE)
 POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
 PORTRAIT_TEST := $(TEST_DIR)/portrait_test$(EXE)
+PORTRAIT_MOTION_TEST := $(TEST_DIR)/portrait_motion_test$(EXE)
 AFFECT_TEST := $(TEST_DIR)/affect_test$(EXE)
 AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
 EXPRESSION_DIRECTOR_TEST := $(TEST_DIR)/expression_director_test$(EXE)
@@ -324,7 +332,12 @@ $(STATE_TEST): tests/state_test.c src/state.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c | $(TEST_RUNTIME)
+$(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c src/delivery.c \
+		src/expression_director.c src/affect.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(DELIVERY_TEST): tests/delivery_test.c src/delivery.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
@@ -358,7 +371,12 @@ $(POSE_SOLVER_TEST): tests/pose_solver_test.c src/pose_solver.c src/humanoid.c s
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(PORTRAIT_TEST): tests/portrait_test.c src/portrait.c src/affect.c src/state.c src/log.c | $(TEST_RUNTIME)
+$(PORTRAIT_TEST): tests/portrait_test.c src/portrait.c src/portrait_motion.c src/affect.c \
+		src/state.c src/log.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(PORTRAIT_MOTION_TEST): tests/portrait_motion_test.c src/portrait_motion.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
@@ -383,7 +401,7 @@ $(BUBBLE_LAYOUT_TEST): tests/bubble_layout_test.c src/bubble_layout.c | $(TEST_R
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(SESSION_REGISTRY_TEST): tests/session_registry_test.c src/session_registry.c src/dialogue.c \
-		src/log.c | $(TEST_RUNTIME)
+		src/delivery.c src/expression_director.c src/affect.c src/log.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
@@ -422,14 +440,15 @@ provider-live-test: $(LIVE_SOURCE_TEST)
 codex-relay-test: $(CODEX_RELAY_TEST)
 	"$(CODEX_RELAY_TEST)"
 
-check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
+check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
-	$(PORTRAIT_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
+	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
+	$(DELIVERY_TEST)
 	$(HOOK_OUTPUT_TEST)
 	$(MOTION_TEST)
 	$(MOTION_CONFIG_TEST)
@@ -438,6 +457,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(HOOK_OUTPUT_TEST) $(MO
 	$(HUMANOID_TEST)
 	$(POSE_SOLVER_TEST)
 	$(PORTRAIT_TEST)
+	$(PORTRAIT_MOTION_TEST)
 	$(AFFECT_TEST)
 	$(AFFECT_TOKENIZER_TEST)
 	$(EXPRESSION_DIRECTOR_TEST)
@@ -514,6 +534,7 @@ help:
 	@echo "make                 build debug Eidolon with clang"
 	@echo "make MODE=release    build optimized Eidolon with clang"
 	@echo "make check           build and run unit tests"
+	@echo "make editor-config   regenerate compile_commands.json for clangd/VS Code"
 	@echo "make imgui-smoke     build and run Dear ImGui through its generated C API"
 	@echo "make provider-live-test PROVIDER=codex PROVIDER_URL=ws://...  probe a running provider"
 	@echo "make codex-relay-test  launch a hidden app-server and verify the in-path relay"

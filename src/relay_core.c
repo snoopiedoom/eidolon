@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <string.h>
+
 typedef struct RelayBridge RelayBridge;
 
 typedef struct RelayDirection {
@@ -18,6 +20,42 @@ struct RelayBridge {
     SDL_AtomicInt stopping;
 };
 
+bool eidolon_relay_message_reserve(EidolonRelayMessage *message, size_t capacity) {
+    if (message == NULL || capacity > EIDOLON_RELAY_MESSAGE_LIMIT) {
+        return false;
+    }
+    if (capacity <= message->capacity) {
+        return true;
+    }
+    size_t grown =
+        message->capacity > 0U ? message->capacity : EIDOLON_RELAY_MESSAGE_INITIAL_CAPACITY;
+    while (grown < capacity) {
+        const size_t increment = grown < EIDOLON_RELAY_MESSAGE_RETAIN_LIMIT
+                                     ? grown
+                                     : SDL_min(grown / 2U, (size_t)(16U * 1024U * 1024U));
+        if (increment > EIDOLON_RELAY_MESSAGE_LIMIT - grown) {
+            grown = EIDOLON_RELAY_MESSAGE_LIMIT;
+            break;
+        }
+        grown += increment;
+    }
+    uint8_t *data = SDL_realloc(message->data, grown);
+    if (data == NULL) {
+        return false;
+    }
+    message->data = data;
+    message->capacity = grown;
+    return true;
+}
+
+void eidolon_relay_message_free(EidolonRelayMessage *message) {
+    if (message == NULL) {
+        return;
+    }
+    SDL_free(message->data);
+    memset(message, 0, sizeof(*message));
+}
+
 static void stop_bridge(RelayBridge *bridge) {
     if (!SDL_CompareAndSwapAtomicInt(&bridge->stopping, 0, 1)) {
         return;
@@ -28,26 +66,26 @@ static void stop_bridge(RelayBridge *bridge) {
 
 static int SDLCALL pump_direction(void *userdata) {
     RelayDirection *direction = userdata;
-    uint8_t *message = SDL_malloc(EIDOLON_RELAY_MESSAGE_CAPACITY);
-    if (message == NULL) {
-        stop_bridge(direction->bridge);
-        return 0;
-    }
+    EidolonRelayMessage message = {0};
     while (SDL_GetAtomicInt(&direction->bridge->stopping) == 0) {
-        size_t length = 0U;
-        if (!direction->source->read(direction->source->context, message,
-                                     EIDOLON_RELAY_MESSAGE_CAPACITY, &length)) {
+        message.length = 0U;
+        if (!direction->source->read(direction->source->context, &message)) {
             break;
         }
         if (direction->observation.tap != NULL) {
-            direction->observation.tap(direction->observation.context, message, length);
+            direction->observation.tap(direction->observation.context, message.data,
+                                       message.length);
         }
-        if (!direction->destination->write(direction->destination->context, message, length)) {
+        if (!direction->destination->write(direction->destination->context, message.data,
+                                           message.length)) {
             break;
+        }
+        if (message.capacity > EIDOLON_RELAY_MESSAGE_RETAIN_LIMIT) {
+            eidolon_relay_message_free(&message);
         }
     }
     direction->clean = SDL_GetAtomicInt(&direction->bridge->stopping) != 0;
-    SDL_free(message);
+    eidolon_relay_message_free(&message);
     stop_bridge(direction->bridge);
     return 0;
 }

@@ -1,0 +1,11 @@
+CompileFlags:
+  CompilationDatabase: .
+
+InlayHints:
+  Enabled: false
+
+Completion:
+  AllScopes: true
+  ArgumentLists: None
+  HeaderInsertion: Never
+  CodePatterns: All

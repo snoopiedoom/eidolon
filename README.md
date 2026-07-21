@@ -8,6 +8,20 @@ model, or conversation runtime.
 
 ![Bunny Asuna presenting two active Codex sessions](screen0.png)
 
+# v1 goals:
+
+- attach to an existing Codex or OpenCode session;
+- display the correct session identity;
+- represent its live operational state faithfully;
+- speak and animate naturally around actual responses;
+- handle multiple sessions without confusion;
+- remain unobtrusive while the terminal carries dense work;
+- survive restart without feeling reset;
+- permit a few surgical interventions such as approve, cancel, or redirect;
+- consume very little while idle;
+- require no explanation after installation.
+
+
 ## What works
 
 - three interchangeable character providers: v2 sprite atlases, full-canvas 2D portraits, and

@@ -1,0 +1,9 @@
+{
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+        "--background-index",
+        "--completion-style=detailed",
+        "--header-insertion=never"
+    ],
+    "clangd.onConfigChanged": "restart"
+}

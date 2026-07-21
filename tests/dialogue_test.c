@@ -76,14 +76,13 @@ int main(void) {
 
     eidolon_dialogue_set(&dialogue, "oh, really?!", 4000U);
     eidolon_dialogue_update(&dialogue, 5000U);
-    assert(eidolon_dialogue_reveal_emphasis(&dialogue, 0U) == 1.0F);
-    assert(eidolon_dialogue_reveal_emphasis(&dialogue, dialogue.revealed) == 0.0F);
 
     eidolon_dialogue_set(&dialogue, "ready, set, go", 6000U);
-    dialogue.expression_track.waiting = true;
+    eidolon_expression_track_compile(&dialogue.expression_track, dialogue.text,
+                                     EIDOLON_STATE_REVIEW);
     eidolon_dialogue_update(&dialogue, 7000U);
     assert(dialogue.revealed == 0U);
-    dialogue.expression_track.waiting = false;
+    eidolon_expression_track_fallback(&dialogue.expression_track, dialogue.text);
     eidolon_dialogue_resume(&dialogue, 7000U);
     eidolon_dialogue_update(&dialogue, 7024U);
     assert(dialogue.revealed == 1U);

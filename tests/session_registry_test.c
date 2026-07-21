@@ -57,8 +57,7 @@ bool eidolon_transcript_read_agent_output(const char *path, char *output, size_t
 }
 
 bool eidolon_transcript_read_agent_output_info(const char *path, char *output, size_t capacity,
-                                               char *source_timestamp,
-                                               size_t timestamp_capacity) {
+                                               char *source_timestamp, size_t timestamp_capacity) {
     const bool found = eidolon_transcript_read_agent_output(path, output, capacity);
     if (source_timestamp != NULL && timestamp_capacity > 0U) {
         SDL_strlcpy(source_timestamp, "2026-07-20T10:00:00Z", timestamp_capacity);
@@ -99,8 +98,7 @@ int main(void) {
     assert(registry.entries[0].first_glyph_ms == 44U);
 
     poll = eidolon_session_registry_poll(&registry, 500U);
-    assert(poll.speech_beat == 1.0F);
-    assert(poll.speaking_session == &registry.entries[0]);
+    assert(!poll.new_message);
 
     EidolonConversationEvent delta = {.type = EIDOLON_CONVERSATION_TEXT_DELTA};
     SDL_strlcpy(delta.provider, "opencode", sizeof(delta.provider));
@@ -126,6 +124,48 @@ int main(void) {
     assert(poll.message_completed);
     assert(!poll.new_message);
     assert(strcmp(poll.message_session->dialogue.text, "hello world!") == 0);
+
+    EidolonSessionRegistry *timeouts = SDL_calloc(1U, sizeof(*timeouts));
+    assert(timeouts != NULL);
+    eidolon_session_registry_set_legacy_transcripts(timeouts, false);
+    EidolonConversationEvent first = {.type = EIDOLON_CONVERSATION_MESSAGE_COMPLETED};
+    SDL_strlcpy(first.provider, "opencode", sizeof(first.provider));
+    SDL_strlcpy(first.session_id, "quiet-first", sizeof(first.session_id));
+    SDL_strlcpy(first.text, "first remains unread", sizeof(first.text));
+    poll = eidolon_session_registry_apply_event(timeouts, &first, 1000U);
+    EidolonSessionEntry *first_entry = poll.message_session;
+    assert(first_entry != NULL && first_entry->visible);
+
+    EidolonConversationEvent second = {.type = EIDOLON_CONVERSATION_MESSAGE_COMPLETED};
+    SDL_strlcpy(second.provider, "opencode", sizeof(second.provider));
+    SDL_strlcpy(second.session_id, "active-second", sizeof(second.session_id));
+    SDL_strlcpy(second.text, "second", sizeof(second.text));
+    poll = eidolon_session_registry_apply_event(timeouts, &second, 4000U);
+    EidolonSessionEntry *second_entry = poll.message_session;
+    assert(second_entry != NULL && second_entry->visible);
+
+    poll = eidolon_session_registry_poll(timeouts, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS - 1U);
+    assert(!poll.changed);
+    assert(first_entry->visible);
+    assert(second_entry->visible);
+
+    poll = eidolon_session_registry_poll(timeouts, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS);
+    assert(poll.changed);
+    assert(!first_entry->visible);
+    assert(first_entry->layout_slot == -1);
+    assert(second_entry->visible);
+
+    EidolonConversationEvent renewed = {.type = EIDOLON_CONVERSATION_TEXT_DELTA};
+    SDL_strlcpy(renewed.provider, "opencode", sizeof(renewed.provider));
+    SDL_strlcpy(renewed.session_id, "quiet-first", sizeof(renewed.session_id));
+    SDL_strlcpy(renewed.message_id, "renewed-message", sizeof(renewed.message_id));
+    SDL_strlcpy(renewed.text, "back", sizeof(renewed.text));
+    poll = eidolon_session_registry_apply_event(timeouts, &renewed, 6001U);
+    assert(poll.changed);
+    assert(first_entry->visible);
+    assert(first_entry->last_activity_ms == 6001U);
+    eidolon_session_registry_destroy(timeouts);
+    SDL_free(timeouts);
 
     EidolonSessionRegistry asynchronous = {0};
     slow_discovery = true;
