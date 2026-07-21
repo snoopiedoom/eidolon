@@ -5,6 +5,8 @@ These documents define behavior that should survive implementation rewrites.
 - [Expression performance](expression-performance.md)
 - [Procedural motion](procedural-motion.md)
 - [Multi-session dialogue](session-dialogue.md)
+- [Presence contract](presence-contract.md)
+- [Body capabilities](body-capabilities.md)
 
 ## Specification template
 

@@ -1,37 +1,29 @@
 # Eidolon
 
-**A native desktop stage for conversational agents.**
+**The embodiment layer for your agent.**
 
-Eidolon turns local agent sessions into animated characters with JRPG dialogue, semantic
-expressions, and a transparent click-through overlay. It owns presentation—not the agent's persona,
-model, or conversation runtime.
+Eidolon gives existing agents a native, persistent presence while real work happens.
+
+The terminal remains the interface to the work.
+Eidolon becomes the interface to the worker.
+
+Today, Eidolon observes existing Codex and OpenCode sessions and turns their real activity into
+dialogue, expression, and motion. It does not replace the agent runtime or the terminal.
 
 ![Bunny Asuna presenting two active Codex sessions](screen0.png)
 
-# v1 goals:
-
-- attach to an existing Codex or OpenCode session;
-- display the correct session identity;
-- represent its live operational state faithfully;
-- speak and animate naturally around actual responses;
-- handle multiple sessions without confusion;
-- remain unobtrusive while the terminal carries dense work;
-- survive restart without feeling reset;
-- permit a few surgical interventions such as approve, cancel, or redirect;
-- consume very little while idle;
-- require no explanation after installation.
-
+V1 proves that an agent doing real work can visibly feel like one persistent persona. See the
+[canonical V1 goal](docs/v1-goal.md) for the acceptance sequence.
 
 ## What works
 
-- three interchangeable character providers: v2 sprite atlases, full-canvas 2D portraits, and
-  skinned 3D models;
-- one independently scrolling dialogue bubble per active provider session, with stable placement
+- three body renderers: v2 sprite atlases, full-canvas 2D portraits, and skinned 3D models;
+- one independently scrolling dialogue bubble per active agent session, with stable placement
   and real session titles;
-- normalized provider adapters, an OpenCode SSE stream, a live in-path Codex CLI relay, and
+- normalized agent adapters, an OpenCode SSE stream, a live in-path Codex CLI relay, and
   optional completion-only Codex transcript and hook fallbacks;
-- complete-message expression planning with a local GoEmotions worker, deterministic fallback, and
-  source-offset timing;
+- semantic expression planning over stable streamed prefixes, deterministic delivery timing,
+  completion repair, and a local GoEmotions worker with lifecycle fallback;
 - Unicode dialogue through SDL_ttf with bundled MesloLGS Nerd Font Mono and Windows CJK/emoji
   fallbacks;
 - procedural portrait acting: breathing, semantic posture, speech beats, attention, and damped
@@ -94,14 +86,18 @@ character-defined default without freezing a copy of that default into the user 
 ## Design
 
 ```text
-provider streams / in-path relays / optional legacy readers
-                     ↓
-normalized events → independent session dialogue
-            ↓
-semantic beats + affect / expression intent
-            ↓
-sprite | 2D portrait | procedural 3D provider
-            ↓
+configured Codex / OpenCode session source
+                    ↓
+vendor-specific agent adapter
+                    ↓
+normalized source + session events
+                    ↓
+session registry
+                    ↓
+lifecycle state + semantic expression + delivery cues
+                    ↓
+selected sprite | portrait | 3D body renderer
+                    ↓
 transparent SDL composition + native hit testing
 ```
 
@@ -111,16 +107,19 @@ language decisions stay separate from frame-rate motion and drawing.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Product brief](docs/product-brief.md)
+- [V1 goal](docs/v1-goal.md)
+- [Current project state](docs/project-state.md)
 - [Architecture](docs/architecture.md)
 - [Building, testing, and debugging](docs/development.md)
 - [Configuration](docs/configuration.md)
-- [Conversation providers and session integration](docs/integrations.md)
+- [Agent adapters and session integration](docs/integrations.md)
 - [Character and asset pipeline](docs/assets.md)
 - [Design specifications](docs/design/README.md)
-- [Current project state and next work](docs/project-state.md)
 
-Eidolon is an experimental hobby project. Character assets remain the responsibility of the local
-user and are not part of the reusable engine repository.
+Eidolon is an early-stage native project with a working Windows daily-driver path and unfinished
+product packaging. Character assets remain the responsibility of the local user and are not part
+of the reusable engine repository.
 
 ## License
 

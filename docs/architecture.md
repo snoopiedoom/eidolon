@@ -1,25 +1,29 @@
 # Runtime architecture
 
-Eidolon is a presentation runtime for local conversational agents. It does not own the agent's
-persona, model, prompts, or conversation state. It observes local session output, derives visual
-intent, and renders that intent through one character provider.
+The current Eidolon runtime is an embodiment and presentation layer for external conversational
+agents. It does not currently own persona persistence, model inference, prompts, or canonical
+conversation state. It observes local session output, derives performance intent, and projects that
+intent through one body renderer.
 
-## System flow
+Future persona-platform work must remain separable from body rendering, configured session sources,
+and agent adapters rather than being folded into the presentation thread.
+
+## Current system flow
 
 ```text
-provider transports | in-path relays | optional legacy readers
-                         ↓
- provider parsers → normalized conversation events
-                ↓
- session registry keyed by (provider, session id)
-                ↓
- semantic expression planner + deterministic delivery track
-                ↓
- bounded portrait spring | sprite | 2D portrait | procedural 3D
-                ↓
-       SDL transparent composition
-                ↓
-  native click-through / desktop compositor
+configured Codex / OpenCode session source
+                    ↓
+vendor-specific agent adapter
+                    ↓
+normalized source + session events
+                    ↓
+session registry
+                    ↓
+lifecycle state + semantic expression + delivery cues
+                    ↓
+selected sprite | portrait | 3D body renderer
+                    ↓
+transparent SDL composition + native hit testing
 ```
 
 Language-scale work must never block presentation. Session discovery, transcript parsing, and local
@@ -30,15 +34,16 @@ snapshots and prepared expression tracks.
 
 - `app`: lifecycle, event routing, display scale, timing, renderer selection, and composition-level
   state;
-- `conversation_sources`: provider catalog, configuration, capability state, and event bus;
-- `providers/*_stream`: one vendor protocol parser per provider, producing only normalized events;
+- `conversation_sources`: adapter catalog, configured source state, capability state, and event bus;
+- `providers/*_stream`: one vendor protocol parser per session source, producing only normalized
+  events; `providers` is the legacy source-directory name;
 - `providers/live_source`: blocking network transports isolated on cancellable worker threads;
 - `relay_core`: transport-neutral bounded bidirectional forwarding, passive observation, and
   symmetric endpoint interruption;
 - `providers/codex_relay`: localhost WebSocket ownership, hidden Codex stdio app-server lifetime,
   framing, and server-to-client protocol observation;
-- `session_registry`: provider-neutral session identity, optional transcript cursor, activity,
-  independent dialogue state, and deterministic eviction;
+- `session_registry`: normalized session identity, optional transcript cursor, activity, independent
+  dialogue state, and deterministic eviction;
 - `bubble_layout`: pure placement from character, window, and bubble geometry;
 - `dialogue`: UTF-8 text validation, reveal, wrapping, scrolling, and pagination for one bubble;
 - `delivery`: deterministic phrase, cadence, contrast, hesitation, and punctuation marks attached to
@@ -47,7 +52,7 @@ snapshots and prepared expression tracks.
   activation, expression stabilization, and performance cues;
 - `affect` / `affect_client`: lifecycle fallback, GoEmotions projection, continuous affect axes,
   asynchronous worker transport, and stale-result rejection;
-- `animation`: provider-independent v2 sprite-atlas playback;
+- `animation`: adapter-independent v2 sprite-atlas playback;
 - `portrait`: portrait textures, expression selection, framing, and composed whole-image acting;
 - `portrait_motion`: bounded spring state for delivery impulses, independent from classifier latency;
 - `model`: GLB resources, hierarchy evaluation, D3D11 drawing, and GPU skinning;
@@ -63,9 +68,9 @@ snapshots and prepared expression tracks.
 Do not duplicate these collections in `app.c`. In particular, session paths, titles, dialogue
 objects, and activity timestamps belong to `session_registry`.
 
-## Character providers
+## Body renderers
 
-The active provider is selected at runtime:
+The active body renderer is selected at runtime:
 
 - **Sprite** plays Codex-compatible v2 sprite sheets through `animation`.
 - **2D portrait** displays one full-canvas transparent expression image at a time. Expression art
@@ -74,8 +79,22 @@ The active provider is selected at runtime:
 - **3D model** evaluates a skinned GLB hierarchy and procedural pose state, then renders into an
   SDL-owned GPU texture.
 
-Provider selection must not initialize expensive inactive providers unnecessarily. When the 2D
-portrait is selected successfully, 3D initialization is skipped.
+Body selection must not initialize expensive inactive renderers unnecessarily. When the 2D
+portrait is selected successfully, 3D initialization is skipped. The current global
+`preferred_renderer` setting is an implementation seam; the intended product model is a character
+package with a default body variant and optional advanced overrides.
+
+The intended character-package boundary is not yet the current selection path:
+
+```text
+renderer-neutral performance intent + character package
+                         ↓
+body capability projection and deterministic fallback mapping
+                         ↓
+package-selected body variant
+                         ↓
+visible geometry + face/head bounds + click regions
+```
 
 ## Affect and expression boundary
 
@@ -122,7 +141,7 @@ The first live delta opens the bubble immediately with a responding intent. Norm
 sentences and contrast clauses become stable beats as soon as they close; unfinished tails and
 modifier fragments such as `wait.` remain provisional until their thought arrives. Extending a track
 preserves committed classifier results and activation state. Reveal continues through ready text and
-waits only if it physically reaches an unclassified beat boundary. The provider's completion
+waits only if it physically reaches an unclassified beat boundary. The adapter's completion
 snapshot finalizes the provisional tail and repairs dropped or truncated deltas without replaying
 old expressions.
 

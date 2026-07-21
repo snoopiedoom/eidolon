@@ -50,8 +50,8 @@ similar) attach to the thought they modify. A standalone heart attaches to the p
 A live message owns one persistent track. Completed sentences and contrast clauses extend it as
 stable prefixes; an unfinished tail and a trailing modifier fragment remain provisional. Extension
 never resubmits or reactivates compatible committed beats. A completion event classifies the final
-tail. If a provider repairs earlier source text, incompatible uncommitted work is rebuilt and stale
-sequence results are rejected.
+tail. If an agent adapter repairs earlier source text, incompatible uncommitted work is rebuilt and
+stale sequence results are rejected.
 
 Segmentation must retain original byte spans. Rendering may wrap or scroll the text afterward, but
 it cannot rewrite performance timing.

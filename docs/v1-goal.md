@@ -5,7 +5,7 @@ The first serious release should prove that an agent doing real work can visibly
 ## Acceptance sequence
 
 1. Attach to an existing Codex or OpenCode session.
-2. Display the correct provider, session identity, and title.
+2. Display the correct session source, adapter kind, session identity, and title.
 3. Represent live operational state faithfully.
 4. Animate and speak naturally around actual agent responses.
 5. Handle multiple concurrent sessions without confusing their state.

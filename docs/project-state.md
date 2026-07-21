@@ -1,13 +1,43 @@
 # Project state
 
-Updated 2026-07-20. This file records the current implementation frontier and restart checklist.
+Updated 2026-07-21. This file records the current implementation frontier and restart checklist.
 Stable design and operating knowledge belongs in the other documents; this file may change as
 milestones move.
 
+## V1 scorecard
+
+`[x]` means verified, `[~]` means partial or still awaiting interactive proof, and `[ ]` means the
+product capability is absent.
+
+- [x] Codex session attachment — the explicit CLI relay and independent transcript fallback are
+  verified; ChatGPT Desktop's private session remains fallback-only.
+- [~] OpenCode session attachment — the adapter and deterministic SSE probe work, but the installed
+  local server is blocked before an ordinary end-to-end user workflow.
+- [~] source/session identity — registry keys distinguish adapter kind and session id, with real
+  titles and deterministic fallbacks, but explicit source-instance identity is not implemented.
+- [~] faithful operational-state representation — turn and response lifecycle exists, but the
+  presence vocabulary does not yet represent reading, editing, tools, approval, blockage, and
+  interruption comprehensively.
+- [~] natural response animation — streamed semantic beats, delivery motion, and atomic expression
+  changes are implemented; broader interactive tuning and shared-character arbitration remain.
+- [ ] speech — visual dialogue exists, but audio speech and lip synchronization do not.
+- [~] concurrent sessions — independent bubbles work; explicit shared-character performance
+  ownership remains unimplemented.
+- [~] unobtrusive terminal coexistence — transparent click-through and non-intrusive QA exist, but
+  final desktop feel remains owner-verified.
+- [ ] restart continuity — preferences and discovered sessions recover, but no product-level
+  acceptance case yet proves that the same persona and presentation survive restart.
+- [ ] approve/cancel/pause/redirect interaction — relay traffic can carry upstream controls, but
+  Eidolon exposes no owned intervention surface.
+- [ ] measured idle resource budget — performance invariants exist without a recorded idle budget
+  and repeatable measurement gate.
+- [ ] installer-grade onboarding — setup remains a developer workflow rather than an installable
+  product experience.
+
 ## Current product
 
-Bunny Asuna is the daily-driver 2D provider: ten full-canvas expressions, full/bust framing,
-Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible provider
+Bunny Asuna is the daily-driver portrait body: ten full-canvas expressions, full/bust framing,
+Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible agent
 session. The Mutsuki Dress v2 sprite remains a fallback. Rio's procedural 3D renderer remains
 selectable and is deliberately initialized only when requested.
 
@@ -18,8 +48,9 @@ overrides with reset-to-inheritance semantics.
 ## Verified implementation
 
 - Windows debug and release builds compile cleanly with Clang;
-- all seventeen ordinary C regression executables pass;
-- provider-neutral events feed sessions keyed by `(provider, session id)`;
+- all ordinary C regression executables included in `make check` pass;
+- normalized events feed sessions keyed by the legacy `(provider, session id)` fields, where
+  `provider` currently records adapter kind rather than a source instance;
 - the Codex in-path relay passed a live hidden handshake through localhost WebSocket framing, a
   relay-owned stdio app-server child, JSONL forwarding, and symmetric teardown;
 - the transport-neutral relay core has deterministic bidirectional forwarding and observation
@@ -50,13 +81,15 @@ overrides with reset-to-inheritance semantics.
   on the user's desktop.
 - Confirm hard-cut expression art plus merged semantic fragments against another mixed-emotion
   response and retain the new performance log if timing still feels wrong.
-- Switch all three providers through settings and confirm scale, framing, rotation, and restart
+- Switch all three body renderers through settings and confirm scale, framing, rotation, and restart
   persistence.
 
 ## Known limitations
 
-- the settings model selectors still expose one hard-coded model per provider instead of manifest
-  discovery;
+- the settings `model` selector exposes one registered body asset per renderer instead of
+  manifest-backed character discovery;
+- registry identity uses adapter kind rather than an explicit source-instance id, so two configured
+  sources using the same adapter kind can collide on a shared session id;
 - the five-minute quiet-session retirement timeout is compiled policy rather than configuration;
 - simultaneous session reveals lack explicit shared-character performance ownership and can still
   depend on update order;
@@ -68,24 +101,25 @@ overrides with reset-to-inheritance semantics.
   behind the body, and attentive/playful are unconvincing;
 - planted feet, wrist orientation, lower-body IK, gaze/blink behavior, and secondary physics remain
   future 3D milestones;
-- ChatGPT Desktop chat and ZCode expose no verified attachable local stream, so their adapters
+- ChatGPT Desktop chat and ZCode expose no verified attachable local stream, so their agent adapters
   correctly remain unavailable rather than scraping or injecting into their processes;
 - the packaged desktop app's private Codex stdio app-server cannot be shared safely; the relay
-  supports a CLI explicitly started with `--remote`, while Desktop remains on transcript fallback;
-- streamed text currently uses a responding expression until completion; incremental semantic-beat
-  classification at sentence boundaries is not implemented yet.
+  supports a CLI explicitly started with `--remote`, while Desktop remains on transcript fallback.
 
 ## Next priorities
 
 1. collect interactive confirmation for the Win32 click-border fix and hard-cut expressions;
-2. classify completed semantic beats incrementally while provider deltas continue arriving;
-3. add provider status/configuration controls to settings without moving ownership into the UI;
+2. improve bubble placement from renderer-neutral visible-body and face/head geometry while
+   preserving stable session slots and usable display bounds;
+3. add source-instance identity and source/adapter status controls without moving ownership into the
+   UI;
 4. add explicit shared-character performance ownership for concurrent bubbles;
-5. replace hard-coded settings model entries with manifest-backed discovery;
+5. replace the hard-coded body-asset selector with character-package discovery;
 6. make session retirement policy configurable;
-7. tune affect targets and continuity thresholds from real expression traces;
-8. calibrate the four initial Rio semantic poses before adding transition dynamics;
-9. consider expression annotation/detection only after the downloaded portrait catalog is present.
+7. expand normalized operational state toward the presence contract;
+8. tune affect targets and continuity thresholds from real expression traces;
+9. calibrate the four initial Rio semantic poses before adding transition dynamics;
+10. consider expression annotation/detection only after the downloaded portrait catalog is present.
 
 ## Restart checklist
 

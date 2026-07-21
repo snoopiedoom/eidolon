@@ -90,9 +90,12 @@ sliders for pose authoring; raw neutral values are diagnostics, not a semantic p
 Press `F5` to force-reload character and motion configuration even when file timestamps or hashes
 have not changed.
 
-## Conversation providers
+## Agent adapters
 
 `config/providers.cfg` owns opt-in live transports and independent legacy fallbacks. The Codex
 relay, passive Codex app-server client, OpenCode SSE client, transcript reader, and hook IPC each
-have separate switches. Provider configuration is currently read at startup rather than
-hot-reloaded. See [Integrations](integrations.md) for supported topologies and launch commands.
+have separate switches. The filename and source symbols retain the legacy `provider` name. In
+product terminology, each configured transport is a session source using the corresponding agent
+adapter; neither is a model provider or body renderer. Source configuration is currently read at
+startup rather than hot-reloaded. See [Integrations](integrations.md) for supported topologies and
+launch commands.

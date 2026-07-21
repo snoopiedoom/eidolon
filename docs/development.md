@@ -123,5 +123,4 @@ VSync state. Collect that line first when diagnosing desktop-wide lag.
 - do not commit build output, downloads, logs, extracted game assets, or source archives;
 - do not seize the desktop, mouse, or focus for visual testing;
 - prefer ownership and scheduling fixes over patches that conceal the symptom;
-- update the document that owns a changed boundary;
-- the repository's first commit is named exactly `init`.
+- update the document that owns a changed boundary.

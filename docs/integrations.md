@@ -1,22 +1,31 @@
-# Conversation providers and session integration
+# Agent adapters and session integration
 
-Eidolon is not a Codex client. Provider adapters translate vendor-specific transports into one
-small conversation contract; the session registry, dialogue engine, affect system, and renderers
-never parse vendor payloads.
+Eidolon is not a Codex client. A configured session source is one external runtime endpoint or
+connection. It uses an agent adapter—the parser and transport implementation for Codex, OpenCode,
+or another runtime—to translate vendor-specific traffic into one small conversation contract. The
+session registry, dialogue engine, affect system, and renderers never parse vendor payloads.
 
 ## Normalized contract
 
-Every provider event carries a provider id, session id, optional turn/message ids, title, UTF-8
-text, phase, and source timestamp. The event kinds are source connection changes, session metadata,
-turn start/completion, text delta, and message completion.
+The intended durable normalized envelope identifies `source_id` and `adapter_kind`.
+Session-scoped events also carry `session_id`, followed as applicable by turn/message ids, title,
+UTF-8 text, phase, source-local sequence/revision, and diagnostic timestamps. Event kinds cover
+source connection changes, session metadata, turn start/completion, text deltas, and message
+completion.
 
-Session identity is the pair `(provider, session id)`. File paths, titles, transport connections,
-and bubble slots are mutable metadata. Two vendors may use the same session id without collision.
+Session identity is conceptually `(source_id, session_id)`; `adapter_kind` describes how that source
+is interpreted. File paths, titles, transport connections, and bubble slots are mutable metadata.
+Two configured sources may reuse the same session id without collision.
 
-Provider parsers live in `src/providers/*_stream.c`. Blocking transports live behind
-`src/providers/live_source.c` and publish into the bounded thread-safe event bus. Adding a provider
-requires a parser, a transport start function when a supported live transport exists, one provider
-catalog entry, configuration keys, fixtures, and this capability table. It must not add vendor
+The current implementation still keys `(provider, session id)`, where `provider` is effectively the
+adapter kind. That is sufficient for one configured source of each adapter kind, but two Codex or
+two OpenCode source instances can collide. Adding explicit source-instance identity is an
+implementation gap, not a renderer concern.
+
+Adapter parsers live in `src/providers/*_stream.c`. Blocking transports live behind
+`src/providers/live_source.c` and publish into the bounded thread-safe event bus. Adding an adapter
+kind requires a parser and transport implementation. Adding a configured source instance requires
+a stable source id, catalog/configuration entry, and connection settings. Neither may add vendor
 branches to the renderer or dialogue engine.
 
 ## Capability state
@@ -37,9 +46,9 @@ process's private pipe. An enabled adapter without a supported transport reports
 
 ## Configuration
 
-Shipped provider configuration lives in `config/providers.cfg`. Live transports are opt-in so a
-normal Eidolon launch does not create noisy connection retries when no shared provider server is
-running.
+Shipped source and adapter configuration lives in `config/providers.cfg`; the filename is a legacy
+implementation name. Live transports are opt-in so a normal Eidolon launch does not create noisy
+connection retries when no shared agent server is running.
 
 ```text
 version = 1
@@ -161,9 +170,12 @@ UTF-8 dialogue and preserve the reveal cursor; they do not restart the message o
 The completed-message snapshot is authoritative and repairs a missed event-bus delta. Queue
 overflow rejects a delta and increments a counter instead of corrupting order.
 
-Live text begins with a generic responding expression. Full-message sources still use the prepared
-semantic-beat planner. Incremental beat classification synchronized to streamed sentence
-boundaries remains the next expression-system step.
+Live text begins with a generic responding expression. Stable completed prefixes such as closed
+sentences and contrast clauses extend the persistent semantic track while the remaining response
+streams. Committed classification results and activation state survive compatible extensions;
+unfinished tails remain provisional. Completion finalizes the tail and repairs missing or
+truncated deltas. Reveal continues through ready text and gates only when it reaches an unclassified
+semantic boundary. Deterministic delivery marks remain independent from classifier latency.
 
 ## Legacy Codex accessors
 
@@ -181,4 +193,4 @@ The hook command remains best-effort and cosmetic:
 ```
 
 Sample definitions live in `hooks/codex-hooks.windows.json` and `hooks/codex-hooks.json`. Existing
-hook configuration must be merged, not overwritten. A provider failure never fails an agent turn.
+hook configuration must be merged, not overwritten. An adapter failure never fails an agent turn.

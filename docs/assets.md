@@ -3,7 +3,13 @@
 Eidolon treats downloaded or extracted character art as local runtime input. Reusable manifests,
 import/export tools, and renderer code belong in Git; game assets do not.
 
-## Character portrait catalog
+This document separates the generic body contract from project-specific acquisition and repair:
+
+- generic sprite-atlas, portrait-set, and 3D runtime requirements apply to any character;
+- Blue Archive downloading and Rio authoring are local importer examples;
+- extracted game assets are not assumed to be commercially redistributable.
+
+## Project-specific: Blue Archive portrait catalog
 
 The Blue Archive wiki's `Category:Character_sprites` currently follows two filename forms:
 
@@ -51,13 +57,13 @@ pipeline can annotate the numbered portraits without coupling acquisition to a c
 
 Run the offline grouping tests with `make character-sprites-check`.
 
-## Sprite atlases
+## Generic sprite-atlas requirements
 
-The fallback provider consumes Codex-compatible v2 8x11 sprite sheets. `animation.c` owns atlas
+The fallback body renderer consumes Codex-compatible v2 8x11 sprite sheets. `animation.c` owns atlas
 rows, frame timing, and lifecycle state selection. A sprite package is presentation-only and cannot
 restyle dialogue surfaces owned by Eidolon.
 
-## 2D portraits
+## Generic portrait-set requirements
 
 A portrait character is a directory of full-canvas transparent images plus a strict manifest in
 `config/character.cfg`. Images for one model should share dimensions and alignment so expression
@@ -67,7 +73,7 @@ vary between images.
 The current Bunny Asuna source canvases are 927x1280 and use a 390,0,350,420 portrait crop. Runtime
 expression art changes atomically; whole-image procedural motion is applied afterward.
 
-## 3D authoring pipeline
+## Generic 3D runtime requirements
 
 FBX is authoring input; GLB is runtime input. Blender owns import repair, deterministic export, and
 visual QA. The C runtime uses `cgltf`; `ufbx` remains an optional validation fallback rather than a
@@ -85,7 +91,7 @@ make model-mouth-calibrate BLENDER=C:/Blender/blender.exe
 
 Audit output and previews live under `build/model-audit`.
 
-### Rio runtime asset
+## Project-specific: Rio authoring and repair
 
 The canonical body source is `CH0331_Mesh.fbx`: five meshes, 10,842 vertices, and a 127-bone body
 and facial rig. The separate halo attaches to `Bip001 Head`. The source provides no authored actions
