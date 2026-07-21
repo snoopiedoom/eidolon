@@ -203,7 +203,8 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     shadow.x += 3.0F;
     shadow.y += 4.0F;
     const DialogueThemeStyle style = dialogue_theme_style(app->dialogue_theme);
-    const bool points_right = bubble->x + bubble->w * 0.5F < (float)app->window_width * 0.5F;
+    const bool points_right =
+        bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
     const float tail_y = bubble->y + bubble->h * 0.68F;
 
     fill_rounded_rect(app->renderer, &shadow, style.radius, style.shadow);
@@ -273,11 +274,9 @@ static void draw_scene(EidolonApp *app) {
         for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
             const EidolonSessionEntry *session =
                 eidolon_session_registry_at_slot_const(&app->session_registry, slot);
-            if (session != NULL) {
-                const SDL_FRect bubble = eidolon_bubble_layout_rect(
-                    app->window_width, app->window_height, slot, visible_sessions);
-                draw_dialogue_bubble(app, &bubble, &session->dialogue, session->title,
-                                     TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
+            if (session != NULL && app->bubble_rect_valid[slot]) {
+                draw_dialogue_bubble(app, &app->bubble_rects[slot], &session->dialogue,
+                                     session->title, TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
                                      TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot);
             }
         }
@@ -291,11 +290,7 @@ static void draw_scene(EidolonApp *app) {
     }
 
     if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
-        const float width = eidolon_portrait_display_width(app->portrait) * app->model_scale;
-        const float height = eidolon_portrait_display_height(app->portrait) * app->model_scale;
-        const SDL_FRect destination = eidolon_bubble_layout_character(
-            app->window_width, app->window_height, width, height, visible_sessions);
-        if (!eidolon_portrait_draw(app->portrait, app->renderer, &destination, SDL_GetTicks())) {
+        if (!eidolon_portrait_draw(app->portrait, app->renderer, &app->body_rect, SDL_GetTicks())) {
             static bool portrait_draw_reported = false;
             if (!portrait_draw_reported) {
                 eidolon_log_write("renderer", "portrait draw failed: %s", SDL_GetError());
@@ -305,14 +300,8 @@ static void draw_scene(EidolonApp *app) {
     } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
                eidolon_model_texture(app->model) != NULL) {
         SDL_Texture *model_texture = eidolon_model_texture(app->model);
-        const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * app->model_scale;
-        const SDL_FRect destination = {
-            (float)app->window_width - model_size,
-            (float)app->window_height - model_size,
-            model_size,
-            model_size,
-        };
-        const bool rendered = SDL_RenderTexture(app->renderer, model_texture, NULL, &destination);
+        const bool rendered =
+            SDL_RenderTexture(app->renderer, model_texture, NULL, &app->body_rect);
         static bool model_draw_reported = false;
         if (!rendered && !model_draw_reported) {
             eidolon_log_write("renderer", "model texture draw success=%s error=%s",
@@ -321,15 +310,7 @@ static void draw_scene(EidolonApp *app) {
         }
     } else if (app->render_mode == EIDOLON_RENDER_MODE_SPRITE && app->atlas != NULL) {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
-        const float width = (float)EIDOLON_CELL_WIDTH * app->model_scale;
-        const float height = (float)EIDOLON_CELL_HEIGHT * app->model_scale;
-        const SDL_FRect destination = {
-            (float)app->window_width - 18.0F - width,
-            (float)app->window_height - 24.0F - height,
-            width,
-            height,
-        };
-        SDL_RenderTexture(app->renderer, app->atlas, &source, &destination);
+        SDL_RenderTexture(app->renderer, app->atlas, &source, &app->body_rect);
     }
 }
 

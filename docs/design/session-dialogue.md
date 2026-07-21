@@ -54,6 +54,12 @@ canvas when tighter bounds exist. Face/head geometry may carry a stronger avoida
 ordinary body overlap. The one-bubble case chooses the best available side for the current geometry
 instead of blindly choosing the first enumerated slot.
 
+Before placement, the app resolves one explicit usable-bounds policy. The default follows the
+monitor containing most of the visible character, with hysteresis at seams. Primary-monitor,
+virtual-desktop, and custom rectangular bounds are deliberate user choices. Monitor indices are not
+durable configuration. A topology change or character drag may select a new avatar monitor, but a
+new bubble alone may not escape into another display.
+
 A visible session keeps its slot while that slot remains viable. Adding or retiring another bubble
 must not reshuffle every survivor, but preserving an obsolete slot may not cover the face or push a
 bubble outside the active display's usable bounds. Bubble growth must not produce left/right
@@ -113,6 +119,10 @@ bubble, shadow, and character pixels remain interactive.
 - face/head avoidance outweighs ordinary body overlap where both cannot be avoided;
 - the one-bubble case chooses the best available side for current geometry;
 - bubbles remain inside the active display's usable bounds at every supported presentation scale;
+- avatar-monitor bounds keep every bubble on the character's selected monitor even when another
+  display offers an otherwise valid candidate;
+- primary, virtual-desktop, and custom rectangular policies produce deterministic bounds, including
+  negative desktop coordinates;
 - body, framing, or scale changes preserve stable session ordering where possible;
 - bubble growth cannot cause left/right oscillation;
 - multiple bubbles may compact without covering the face merely to retain an obsolete slot;

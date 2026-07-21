@@ -9,6 +9,7 @@
 
 #include "affect.h"
 #include "affect_client.h"
+#include "bubble_layout.h"
 #include "conversation_sources.h"
 #include "dialogue.h"
 #include "model.h"
@@ -114,6 +115,15 @@ typedef struct EidolonApp {
     float window_coordinate_scale;
     int window_width;
     int window_height;
+    SDL_FRect body_rect;
+    bool body_rect_initialized;
+    SDL_FRect bubble_rects[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    EidolonBubbleSide bubble_sides[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    bool bubble_rect_valid[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    EidolonBubbleBoundsMode bubble_bounds_mode;
+    SDL_Rect bubble_custom_bounds;
+    SDL_Rect bubble_resolved_bounds;
+    SDL_DisplayID bubble_display_id;
     char user_settings_path[EIDOLON_USER_SETTINGS_PATH_CAPACITY];
     EidolonUserSettings system_settings;
     EidolonUserSettings user_settings;

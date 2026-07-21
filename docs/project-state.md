@@ -93,6 +93,8 @@ overrides with reset-to-inheritance semantics.
 - the five-minute quiet-session retirement timeout is compiled policy rather than configuration;
 - simultaneous session reveals lack explicit shared-character performance ownership and can still
   depend on update order;
+- monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
+  renderer reports tighter visible geometry;
 - expression target projection needs more interactive tuning across real dialogue;
 - portable Linux font fallback and feature parity remain unfinished;
 - the complete character-sprite download is intentionally not part of Git and has not been run as
@@ -109,8 +111,8 @@ overrides with reset-to-inheritance semantics.
 ## Next priorities
 
 1. collect interactive confirmation for the Win32 click-border fix and hard-cut expressions;
-2. improve bubble placement from renderer-neutral visible-body and face/head geometry while
-   preserving stable session slots and usable display bounds;
+2. interactively verify monitor-aware bubble placement, stable slots, drag-release reflow, and
+   mixed-DPI anchoring across sprite, portrait, and 3D bodies;
 3. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
 4. add explicit shared-character performance ownership for concurrent bubbles;

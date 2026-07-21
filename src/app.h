@@ -20,6 +20,8 @@ void eidolon_app_reload_configs(EidolonApp *app);
 void eidolon_app_set_dialogue_theme(EidolonApp *app, EidolonDialogueTheme theme);
 void eidolon_app_set_dialogue_movement(EidolonApp *app, EidolonDialogueMovement movement);
 void eidolon_app_set_dialogue_hold_ms(EidolonApp *app, unsigned int hold_ms);
+void eidolon_app_set_bubble_bounds_mode(EidolonApp *app, EidolonBubbleBoundsMode mode);
+void eidolon_app_set_bubble_custom_bounds(EidolonApp *app, SDL_Rect bounds);
 bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField field);
 void eidolon_app_set_model_scale(EidolonApp *app, float scale);
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side);

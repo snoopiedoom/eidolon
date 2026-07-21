@@ -30,6 +30,11 @@ static void capture_runtime_settings(const EidolonApp *app, EidolonUserSettings 
     settings->dialogue_theme = (int)app->dialogue_theme;
     settings->dialogue_movement = (int)app->dialogue_movement;
     settings->dialogue_hold_ms = app->dialogue_hold_ms;
+    settings->bubble_bounds_mode = (int)app->bubble_bounds_mode;
+    settings->bubble_custom_x = app->bubble_custom_bounds.x;
+    settings->bubble_custom_y = app->bubble_custom_bounds.y;
+    settings->bubble_custom_width = app->bubble_custom_bounds.w;
+    settings->bubble_custom_height = app->bubble_custom_bounds.h;
 }
 
 static void schedule_user_settings_save(EidolonApp *app) {
@@ -75,6 +80,13 @@ static void mark_user_settings_dirty(EidolonApp *app, EidolonUserSettingField fi
     case EIDOLON_USER_SETTING_DIALOGUE_HOLD:
         app->user_settings.dialogue_hold_ms = app->dialogue_hold_ms;
         break;
+    case EIDOLON_USER_SETTING_BUBBLE_BOUNDS:
+        app->user_settings.bubble_bounds_mode = (int)app->bubble_bounds_mode;
+        app->user_settings.bubble_custom_x = app->bubble_custom_bounds.x;
+        app->user_settings.bubble_custom_y = app->bubble_custom_bounds.y;
+        app->user_settings.bubble_custom_width = app->bubble_custom_bounds.w;
+        app->user_settings.bubble_custom_height = app->bubble_custom_bounds.h;
+        break;
     }
     app->user_settings.overrides |= (uint32_t)field;
     schedule_user_settings_save(app);
@@ -97,8 +109,16 @@ static void flush_user_settings(EidolonApp *app, bool force) {
                       app->user_settings_path, app->user_settings.overrides);
 }
 
-static float session_attention_direction(const EidolonSessionEntry *entry) {
-    return entry != NULL && (entry->layout_slot & 1) != 0 ? 1.0F : -1.0F;
+static float session_attention_direction(const EidolonApp *app, const EidolonSessionEntry *entry) {
+    if (entry == NULL || entry->layout_slot < 0 ||
+        entry->layout_slot >= (int)EIDOLON_VISIBLE_SESSION_CAPACITY) {
+        return -1.0F;
+    }
+    const int slot = entry->layout_slot;
+    if (app->bubble_rect_valid[slot]) {
+        return app->bubble_sides[slot] == EIDOLON_BUBBLE_SIDE_RIGHT ? 1.0F : -1.0F;
+    }
+    return (slot & 1) != 0 ? 1.0F : -1.0F;
 }
 
 #ifndef NDEBUG
@@ -427,7 +447,7 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
             EidolonSessionEntry *entry = &app->session_registry.entries[index];
             if (entry->occupied) {
                 applied = apply_classification(app, &entry->dialogue, sequence, probabilities,
-                                               session_attention_direction(entry), now_ms);
+                                               session_attention_direction(app, entry), now_ms);
             }
         }
     }
@@ -443,8 +463,9 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
         if (entry->occupied && entry->dialogue.expression_track.waiting &&
             !entry->dialogue.expression_track.submission_complete &&
             !submit_dialogue_performance(app, &entry->dialogue, now_ms)) {
-            fallback_dialogue_performance(app, &entry->dialogue, session_attention_direction(entry),
-                                          now_ms, "classification submission failed");
+            fallback_dialogue_performance(app, &entry->dialogue,
+                                          session_attention_direction(app, entry), now_ms,
+                                          "classification submission failed");
         }
     }
 
@@ -459,8 +480,8 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
         EidolonSessionEntry *entry = &app->session_registry.entries[index];
         if (entry->occupied && entry->dialogue.expression_track.waiting &&
             now_ms >= entry->dialogue.expression_track.deadline_ms) {
-            fallback_dialogue_performance(app, &entry->dialogue, session_attention_direction(entry),
-                                          now_ms,
+            fallback_dialogue_performance(app, &entry->dialogue,
+                                          session_attention_direction(app, entry), now_ms,
                                           entry->dialogue.expression_track.submission_complete
                                               ? "classification timeout"
                                               : "classification submission timeout");
@@ -614,6 +635,357 @@ static bool ensure_model(EidolonApp *app) {
     return true;
 }
 
+static void body_dimensions(const EidolonApp *app, float scale, float *width, float *height) {
+    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
+        *width = eidolon_portrait_display_width(app->portrait) * scale;
+        *height = eidolon_portrait_display_height(app->portrait) * scale;
+        return;
+    }
+    if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D) {
+        *width = EIDOLON_MODEL_DISPLAY_SIZE * scale;
+        *height = *width;
+        return;
+    }
+    *width = (float)EIDOLON_CELL_WIDTH * scale;
+    *height = (float)EIDOLON_CELL_HEIGHT * scale;
+}
+
+static SDL_FRect legacy_body_rect(const EidolonApp *app, float scale, int canvas_width,
+                                  int canvas_height, size_t visible_count) {
+    float width = 0.0F;
+    float height = 0.0F;
+    body_dimensions(app, scale, &width, &height);
+    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
+        return eidolon_bubble_layout_character(canvas_width, canvas_height, width, height,
+                                               visible_count);
+    }
+    if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D) {
+        return (SDL_FRect){(float)canvas_width - width, (float)canvas_height - height, width,
+                           height};
+    }
+    return (SDL_FRect){(float)canvas_width - 18.0F - width, (float)canvas_height - 24.0F - height,
+                       width, height};
+}
+
+static SDL_FPoint current_body_global_center(const EidolonApp *app) {
+    int window_x = 0;
+    int window_y = 0;
+    SDL_GetWindowPosition(app->window, &window_x, &window_y);
+    const SDL_FRect body =
+        app->body_rect_initialized
+            ? app->body_rect
+            : legacy_body_rect(app, app->model_scale, app->window_width, app->window_height,
+                               eidolon_session_registry_visible_count(&app->session_registry));
+    return (SDL_FPoint){
+        (float)window_x + (body.x + body.w * 0.5F) * app->window_coordinate_scale,
+        (float)window_y + (body.y + body.h * 0.5F) * app->window_coordinate_scale,
+    };
+}
+
+static void restore_body_global_center(EidolonApp *app, SDL_FPoint center) {
+    if (!app->body_rect_initialized || app->window_coordinate_scale <= 0.0F) {
+        return;
+    }
+    int window_x = 0;
+    int window_y = 0;
+    SDL_GetWindowPosition(app->window, &window_x, &window_y);
+    app->body_rect.x =
+        (center.x - (float)window_x) / app->window_coordinate_scale - app->body_rect.w * 0.5F;
+    app->body_rect.y =
+        (center.y - (float)window_y) / app->window_coordinate_scale - app->body_rect.h * 0.5F;
+}
+
+static bool apply_window_geometry(EidolonApp *app, SDL_Rect window_bounds) {
+    if (window_bounds.w <= 0 || window_bounds.h <= 0) {
+        return false;
+    }
+    if (!SDL_SetWindowSize(app->window, window_bounds.w, window_bounds.h)) {
+        eidolon_log_write("layout", "could not resize overlay: %s", SDL_GetError());
+        return false;
+    }
+    if (!app->snapshot_mode &&
+        !SDL_SetWindowPosition(app->window, window_bounds.x, window_bounds.y)) {
+        eidolon_log_write("layout", "could not position overlay: %s", SDL_GetError());
+        return false;
+    }
+    app->window_width =
+        SDL_max(1, (int)SDL_ceilf((float)window_bounds.w / app->window_coordinate_scale));
+    app->window_height =
+        SDL_max(1, (int)SDL_ceilf((float)window_bounds.h / app->window_coordinate_scale));
+    return true;
+}
+
+static float display_intersection_area(SDL_FRect body, SDL_Rect display) {
+    const float left = SDL_max(body.x, (float)display.x);
+    const float top = SDL_max(body.y, (float)display.y);
+    const float right = SDL_min(body.x + body.w, (float)(display.x + display.w));
+    const float bottom = SDL_min(body.y + body.h, (float)(display.y + display.h));
+    return SDL_max(0.0F, right - left) * SDL_max(0.0F, bottom - top);
+}
+
+static SDL_DisplayID avatar_display(EidolonApp *app, SDL_FRect body) {
+    int count = 0;
+    SDL_DisplayID *displays = SDL_GetDisplays(&count);
+    if (displays == NULL || count <= 0) {
+        SDL_free(displays);
+        return SDL_GetPrimaryDisplay();
+    }
+
+    SDL_DisplayID best = displays[0];
+    float best_area = -1.0F;
+    float previous_area = -1.0F;
+    for (int index = 0; index < count; ++index) {
+        SDL_Rect bounds;
+        if (!SDL_GetDisplayBounds(displays[index], &bounds)) {
+            continue;
+        }
+        const float area = display_intersection_area(body, bounds);
+        if (area > best_area) {
+            best = displays[index];
+            best_area = area;
+        }
+        if (displays[index] == app->bubble_display_id) {
+            previous_area = area;
+        }
+    }
+    const float body_area = body.w * body.h;
+    if (app->bubble_display_id != 0U && previous_area >= 0.0F &&
+        best_area <= previous_area + body_area * 0.15F) {
+        best = app->bubble_display_id;
+    }
+    SDL_free(displays);
+    return best;
+}
+
+static bool virtual_usable_bounds(SDL_Rect *result) {
+    int count = 0;
+    SDL_DisplayID *displays = SDL_GetDisplays(&count);
+    if (displays == NULL || count <= 0) {
+        SDL_free(displays);
+        return false;
+    }
+    bool found = false;
+    SDL_Rect bounds = {0};
+    for (int index = 0; index < count; ++index) {
+        SDL_Rect usable;
+        if (!SDL_GetDisplayUsableBounds(displays[index], &usable)) {
+            continue;
+        }
+        if (!found) {
+            bounds = usable;
+            found = true;
+            continue;
+        }
+        const int left = SDL_min(bounds.x, usable.x);
+        const int top = SDL_min(bounds.y, usable.y);
+        const int right = SDL_max(bounds.x + bounds.w, usable.x + usable.w);
+        const int bottom = SDL_max(bounds.y + bounds.h, usable.y + usable.h);
+        bounds = (SDL_Rect){left, top, right - left, bottom - top};
+    }
+    SDL_free(displays);
+    if (found) {
+        *result = bounds;
+    }
+    return found;
+}
+
+static bool resolve_bubble_bounds(EidolonApp *app, SDL_FRect body, SDL_Rect *result) {
+    if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM) {
+        if (app->bubble_custom_bounds.w > 0 && app->bubble_custom_bounds.h > 0) {
+            *result = app->bubble_custom_bounds;
+            app->bubble_display_id = 0U;
+            return true;
+        }
+        return false;
+    }
+    if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_VIRTUAL) {
+        app->bubble_display_id = 0U;
+        return virtual_usable_bounds(result);
+    }
+
+    const SDL_DisplayID display = app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_PRIMARY
+                                      ? SDL_GetPrimaryDisplay()
+                                      : avatar_display(app, body);
+    if (display == 0U || !SDL_GetDisplayUsableBounds(display, result)) {
+        return false;
+    }
+    app->bubble_display_id = display;
+    return true;
+}
+
+static void clear_bubble_rects(EidolonApp *app) {
+    for (size_t slot = 0U; slot < EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+        app->bubble_rect_valid[slot] = false;
+        app->bubble_sides[slot] = EIDOLON_BUBBLE_SIDE_NONE;
+    }
+}
+
+static void apply_legacy_layout(EidolonApp *app, float scale, SDL_FPoint body_center,
+                                size_t visible_count) {
+    float body_width = 0.0F;
+    float body_height = 0.0F;
+    body_dimensions(app, scale, &body_width, &body_height);
+    int logical_width = EIDOLON_WINDOW_WIDTH;
+    int logical_height = EIDOLON_WINDOW_HEIGHT;
+    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
+        logical_width = SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf(body_width + 24.0F));
+        logical_height = SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf(body_height + 24.0F));
+        eidolon_bubble_layout_canvas(body_width, body_height, visible_count, &logical_width,
+                                     &logical_height);
+    } else {
+        logical_width =
+            SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf((float)EIDOLON_WINDOW_WIDTH -
+                                                         EIDOLON_MODEL_DISPLAY_SIZE + body_width));
+        logical_height = SDL_max(EIDOLON_WINDOW_HEIGHT,
+                                 (int)SDL_ceilf((float)EIDOLON_WINDOW_HEIGHT -
+                                                EIDOLON_MODEL_DISPLAY_SIZE + body_height));
+    }
+    const SDL_FRect local_body =
+        legacy_body_rect(app, scale, logical_width, logical_height, visible_count);
+    const int native_width =
+        SDL_max(1, (int)SDL_ceilf((float)logical_width * app->window_coordinate_scale));
+    const int native_height =
+        SDL_max(1, (int)SDL_ceilf((float)logical_height * app->window_coordinate_scale));
+    const SDL_Rect window_bounds = {
+        (int)SDL_roundf(body_center.x -
+                        (local_body.x + local_body.w * 0.5F) * app->window_coordinate_scale),
+        (int)SDL_roundf(body_center.y -
+                        (local_body.y + local_body.h * 0.5F) * app->window_coordinate_scale),
+        native_width,
+        native_height,
+    };
+    if (!apply_window_geometry(app, window_bounds)) {
+        return;
+    }
+    app->body_rect = local_body;
+    app->body_rect_initialized = true;
+    clear_bubble_rects(app);
+    for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+        if (eidolon_session_registry_at_slot(&app->session_registry, slot) == NULL) {
+            continue;
+        }
+        app->bubble_rects[slot] =
+            eidolon_bubble_layout_rect(logical_width, logical_height, slot, visible_count);
+        app->bubble_sides[slot] =
+            (slot & 1) == 0 ? EIDOLON_BUBBLE_SIDE_LEFT : EIDOLON_BUBBLE_SIDE_RIGHT;
+        app->bubble_rect_valid[slot] = true;
+    }
+}
+
+static void reflow_overlay_layout(EidolonApp *app, float scale) {
+    if (app->window == NULL || app->window_coordinate_scale <= 0.0F) {
+        return;
+    }
+    const SDL_FPoint body_center = current_body_global_center(app);
+    const size_t visible_count = eidolon_session_registry_visible_count(&app->session_registry);
+    if (app->snapshot_mode || visible_count == 0U) {
+        apply_legacy_layout(app, scale, body_center, visible_count);
+        return;
+    }
+
+    float body_width = 0.0F;
+    float body_height = 0.0F;
+    body_dimensions(app, scale, &body_width, &body_height);
+    const float coordinate_scale = app->window_coordinate_scale;
+    const SDL_FRect global_body = {
+        body_center.x - body_width * coordinate_scale * 0.5F,
+        body_center.y - body_height * coordinate_scale * 0.5F,
+        body_width * coordinate_scale,
+        body_height * coordinate_scale,
+    };
+    SDL_Rect usable_bounds;
+    if (!resolve_bubble_bounds(app, global_body, &usable_bounds)) {
+        eidolon_log_write("layout", "could not resolve bubble bounds; using legacy layout");
+        apply_legacy_layout(app, scale, body_center, visible_count);
+        return;
+    }
+
+    int old_window_x = 0;
+    int old_window_y = 0;
+    SDL_GetWindowPosition(app->window, &old_window_x, &old_window_y);
+    EidolonBubbleLayoutInput input = {
+        .usable_bounds = {(float)usable_bounds.x, (float)usable_bounds.y, (float)usable_bounds.w,
+                          (float)usable_bounds.h},
+        .body_render_bounds = global_body,
+        .visible_body_bounds = global_body,
+        .spacing_scale = coordinate_scale,
+        .has_face_bounds = true,
+        .face_bounds = {global_body.x, global_body.y, global_body.w, global_body.h * 0.45F},
+        .bubble_count = visible_count,
+    };
+    int slot_map[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    size_t bubble_index = 0U;
+    for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+        if (eidolon_session_registry_at_slot(&app->session_registry, slot) == NULL) {
+            continue;
+        }
+        slot_map[bubble_index] = slot;
+        EidolonBubbleLayoutItem *item = &input.bubbles[bubble_index];
+        item->width = EIDOLON_BUBBLE_WIDTH * coordinate_scale;
+        item->height = EIDOLON_BUBBLE_HEIGHT * coordinate_scale;
+        if (app->bubble_rect_valid[slot]) {
+            item->has_previous = true;
+            item->previous_rect = (SDL_FRect){
+                (float)old_window_x + app->bubble_rects[slot].x * coordinate_scale,
+                (float)old_window_y + app->bubble_rects[slot].y * coordinate_scale,
+                app->bubble_rects[slot].w * coordinate_scale,
+                app->bubble_rects[slot].h * coordinate_scale,
+            };
+            item->previous_side = app->bubble_sides[slot];
+        }
+        ++bubble_index;
+    }
+
+    EidolonBubbleLayoutResult layout;
+    if (!eidolon_bubble_layout_solve(&input, &layout)) {
+        eidolon_log_write("layout", "monitor-aware solve failed; using legacy layout");
+        apply_legacy_layout(app, scale, body_center, visible_count);
+        return;
+    }
+    const int window_x = (int)SDL_floorf(layout.canvas_bounds.x);
+    const int window_y = (int)SDL_floorf(layout.canvas_bounds.y);
+    const SDL_Rect window_bounds = {
+        window_x,
+        window_y,
+        SDL_max(1, (int)SDL_ceilf(layout.canvas_bounds.x + layout.canvas_bounds.w) - window_x),
+        SDL_max(1, (int)SDL_ceilf(layout.canvas_bounds.y + layout.canvas_bounds.h) - window_y),
+    };
+    if (!apply_window_geometry(app, window_bounds)) {
+        return;
+    }
+
+    app->body_rect = (SDL_FRect){
+        (global_body.x - (float)window_x) / coordinate_scale,
+        (global_body.y - (float)window_y) / coordinate_scale,
+        global_body.w / coordinate_scale,
+        global_body.h / coordinate_scale,
+    };
+    app->body_rect_initialized = true;
+    clear_bubble_rects(app);
+    for (size_t index = 0U; index < layout.bubble_count; ++index) {
+        const int slot = slot_map[index];
+        app->bubble_rects[slot] = (SDL_FRect){
+            (layout.bubbles[index].rect.x - (float)window_x) / coordinate_scale,
+            (layout.bubbles[index].rect.y - (float)window_y) / coordinate_scale,
+            layout.bubbles[index].rect.w / coordinate_scale,
+            layout.bubbles[index].rect.h / coordinate_scale,
+        };
+        app->bubble_sides[slot] = layout.bubbles[index].side;
+        app->bubble_rect_valid[slot] = true;
+    }
+    app->bubble_resolved_bounds = usable_bounds;
+    app->hit_test_initialized = false;
+#ifndef NDEBUG
+    eidolon_log_write(
+        "layout",
+        "mode=%s bounds=%d,%d %dx%d body=%.0f,%.0f %.0fx%.0f bubbles=%zu window=%d,%d %dx%d",
+        eidolon_bubble_bounds_mode_name(app->bubble_bounds_mode), usable_bounds.x, usable_bounds.y,
+        usable_bounds.w, usable_bounds.h, global_body.x, global_body.y, global_body.w,
+        global_body.h, layout.bubble_count, window_bounds.x, window_bounds.y, window_bounds.w,
+        window_bounds.h);
+#endif
+}
+
 static void set_initial_position(SDL_Window *window) {
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
     SDL_Rect bounds;
@@ -629,7 +1001,8 @@ static void set_initial_position(SDL_Window *window) {
                           bounds.y + bounds.h - height - margin);
 }
 
-static void update_display_metrics(EidolonApp *app) {
+static bool update_display_metrics(EidolonApp *app) {
+    const float previous_coordinate_scale = app->window_coordinate_scale;
     float display_scale = SDL_GetWindowDisplayScale(app->window);
     if (display_scale <= 0.0F) {
         display_scale = 1.0F;
@@ -645,6 +1018,7 @@ static void update_display_metrics(EidolonApp *app) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not apply display scale: %s",
                     SDL_GetError());
     }
+    return SDL_fabsf(previous_coordinate_scale - app->window_coordinate_scale) > 0.0001F;
 }
 
 static void apply_settings_layer(EidolonApp *app, const EidolonUserSettings *settings) {
@@ -699,6 +1073,15 @@ static void apply_settings_layer(EidolonApp *app, const EidolonUserSettings *set
         eidolon_app_set_dialogue_movement(app,
                                           (EidolonDialogueMovement)settings->dialogue_movement);
     }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_BUBBLE_BOUNDS) &&
+        settings->bubble_bounds_mode >= 0 &&
+        settings->bubble_bounds_mode < (int)EIDOLON_BUBBLE_BOUNDS_COUNT) {
+        eidolon_app_set_bubble_custom_bounds(
+            app, (SDL_Rect){settings->bubble_custom_x, settings->bubble_custom_y,
+                            settings->bubble_custom_width, settings->bubble_custom_height});
+        eidolon_app_set_bubble_bounds_mode(app,
+                                           (EidolonBubbleBoundsMode)settings->bubble_bounds_mode);
+    }
     app->user_settings_applying = was_applying;
 }
 
@@ -717,6 +1100,8 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     app->primary_session_slot = -1;
     app->render_mode = EIDOLON_RENDER_MODE_PORTRAIT;
     app->model_render_resolution = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
+    app->bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_AVATAR;
+    app->bubble_custom_bounds = (SDL_Rect){0, 0, 1920, 1080};
     eidolon_user_settings_defaults(&app->system_settings);
     eidolon_user_settings_defaults(&app->user_settings);
     eidolon_motion_config_defaults(&app->motion_config);
@@ -797,7 +1182,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         SDL_ClearError();
     }
     if (!app->snapshot_mode) {
-        update_display_metrics(app);
+        (void)update_display_metrics(app);
     }
 
     if (!ensure_portrait(app)) {
@@ -965,56 +1350,8 @@ void eidolon_app_select_portrait(EidolonApp *app, int expression) {
 void eidolon_app_set_model_scale(EidolonApp *app, float scale) {
     const float clamped = SDL_clamp(scale, EIDOLON_MODEL_SCALE_MIN, EIDOLON_MODEL_SCALE_MAX);
     const bool changed = app->model_scale != clamped;
-    int logical_width = 0;
-    int logical_height = 0;
-    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
-        const float portrait_width = eidolon_portrait_display_width(app->portrait) * clamped;
-        const float portrait_height = eidolon_portrait_display_height(app->portrait) * clamped;
-        logical_width = SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf(portrait_width + 24.0F));
-        logical_height = SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf(portrait_height + 24.0F));
-        size_t visible = eidolon_session_registry_visible_count(&app->session_registry);
-        if (visible == 0U && eidolon_portrait_face_mode(app->portrait)) {
-            visible = 1U;
-        }
-        eidolon_bubble_layout_canvas(portrait_width, portrait_height, visible, &logical_width,
-                                     &logical_height);
-    } else {
-        const float model_size = EIDOLON_MODEL_DISPLAY_SIZE * clamped;
-        logical_width =
-            SDL_max(EIDOLON_WINDOW_WIDTH, (int)SDL_ceilf((float)EIDOLON_WINDOW_WIDTH -
-                                                         EIDOLON_MODEL_DISPLAY_SIZE + model_size));
-        logical_height =
-            SDL_max(EIDOLON_WINDOW_HEIGHT, (int)SDL_ceilf((float)EIDOLON_WINDOW_HEIGHT -
-                                                          EIDOLON_MODEL_DISPLAY_SIZE + model_size));
-    }
-    const int native_width =
-        SDL_max(1, (int)SDL_ceilf((float)logical_width * app->window_coordinate_scale));
-    const int native_height =
-        SDL_max(1, (int)SDL_ceilf((float)logical_height * app->window_coordinate_scale));
-
-    int old_x = 0;
-    int old_y = 0;
-    int old_width = 0;
-    int old_height = 0;
-    SDL_GetWindowPosition(app->window, &old_x, &old_y);
-    SDL_GetWindowSize(app->window, &old_width, &old_height);
-
-    if (old_width != native_width || old_height != native_height) {
-        if (!SDL_SetWindowSize(app->window, native_width, native_height)) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not resize overlay: %s",
-                        SDL_GetError());
-            return;
-        }
-        if (!SDL_SetWindowPosition(app->window, old_x + old_width - native_width,
-                                   old_y + old_height - native_height)) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not preserve overlay anchor: %s",
-                        SDL_GetError());
-        }
-    }
     app->model_scale = clamped;
-    app->window_width = logical_width;
-    app->window_height = logical_height;
-    app->hit_test_initialized = false;
+    reflow_overlay_layout(app, clamped);
     if (changed) {
         mark_user_settings_dirty(app, EIDOLON_USER_SETTING_DISPLAY_SCALE);
     }
@@ -1171,11 +1508,10 @@ bool eidolon_app_copy_semantic_pose(EidolonApp *app) {
 }
 
 static SDL_FRect portrait_character_rect(const EidolonApp *app) {
-    const float width = eidolon_portrait_display_width(app->portrait) * app->model_scale;
-    const float height = eidolon_portrait_display_height(app->portrait) * app->model_scale;
-    const size_t visible = eidolon_session_registry_visible_count(&app->session_registry);
-    return eidolon_bubble_layout_character(app->window_width, app->window_height, width, height,
-                                           visible);
+    return app->body_rect_initialized
+               ? app->body_rect
+               : legacy_body_rect(app, app->model_scale, app->window_width, app->window_height,
+                                  eidolon_session_registry_visible_count(&app->session_registry));
 }
 
 void eidolon_app_set_portrait_framing(EidolonApp *app, bool face_mode) {
@@ -1258,6 +1594,35 @@ void eidolon_app_set_dialogue_hold_ms(EidolonApp *app, unsigned int hold_ms) {
     }
 }
 
+void eidolon_app_set_bubble_bounds_mode(EidolonApp *app, EidolonBubbleBoundsMode mode) {
+    if (mode < 0 || mode >= EIDOLON_BUBBLE_BOUNDS_COUNT) {
+        return;
+    }
+    const bool changed = app->bubble_bounds_mode != mode;
+    app->bubble_bounds_mode = mode;
+    app->bubble_display_id = 0U;
+    reflow_overlay_layout(app, app->model_scale);
+    if (changed) {
+        mark_user_settings_dirty(app, EIDOLON_USER_SETTING_BUBBLE_BOUNDS);
+    }
+}
+
+void eidolon_app_set_bubble_custom_bounds(EidolonApp *app, SDL_Rect bounds) {
+    if (bounds.w <= 0 || bounds.h <= 0) {
+        return;
+    }
+    const bool changed =
+        app->bubble_custom_bounds.x != bounds.x || app->bubble_custom_bounds.y != bounds.y ||
+        app->bubble_custom_bounds.w != bounds.w || app->bubble_custom_bounds.h != bounds.h;
+    app->bubble_custom_bounds = bounds;
+    if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM) {
+        reflow_overlay_layout(app, app->model_scale);
+    }
+    if (changed) {
+        mark_user_settings_dirty(app, EIDOLON_USER_SETTING_BUBBLE_BOUNDS);
+    }
+}
+
 bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField field) {
     if (!eidolon_user_settings_is_overridden(&app->user_settings, field)) {
         return false;
@@ -1306,6 +1671,15 @@ bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField fie
     case EIDOLON_USER_SETTING_DIALOGUE_HOLD:
         eidolon_app_set_dialogue_hold_ms(app, app->system_settings.dialogue_hold_ms);
         break;
+    case EIDOLON_USER_SETTING_BUBBLE_BOUNDS:
+        eidolon_app_set_bubble_custom_bounds(app,
+                                             (SDL_Rect){app->system_settings.bubble_custom_x,
+                                                        app->system_settings.bubble_custom_y,
+                                                        app->system_settings.bubble_custom_width,
+                                                        app->system_settings.bubble_custom_height});
+        eidolon_app_set_bubble_bounds_mode(
+            app, (EidolonBubbleBoundsMode)app->system_settings.bubble_bounds_mode);
+        break;
     }
     app->user_settings_applying = false;
     schedule_user_settings_save(app);
@@ -1334,18 +1708,10 @@ static bool point_in_rect(float x, float y, const SDL_FRect *rect) {
 }
 
 static SDL_FRect character_rect(const EidolonApp *app) {
-    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT) {
-        return portrait_character_rect(app);
-    }
-    if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D) {
-        const float size = EIDOLON_MODEL_DISPLAY_SIZE * app->model_scale;
-        return (SDL_FRect){(float)app->window_width - size, (float)app->window_height - size, size,
-                           size};
-    }
-    const float width = (float)EIDOLON_CELL_WIDTH * app->model_scale;
-    const float height = (float)EIDOLON_CELL_HEIGHT * app->model_scale;
-    return (SDL_FRect){(float)app->window_width - 18.0F - width,
-                       (float)app->window_height - 24.0F - height, width, height};
+    return app->body_rect_initialized
+               ? app->body_rect
+               : legacy_body_rect(app, app->model_scale, app->window_width, app->window_height,
+                                  eidolon_session_registry_visible_count(&app->session_registry));
 }
 
 static void begin_primary_interaction(EidolonApp *app, const SDL_MouseButtonEvent *button) {
@@ -1359,9 +1725,9 @@ static void begin_primary_interaction(EidolonApp *app, const SDL_MouseButtonEven
         if (eidolon_session_registry_at_slot(&app->session_registry, slot) == NULL) {
             continue;
         }
-        const SDL_FRect bubble =
-            eidolon_bubble_layout_rect(app->window_width, app->window_height, slot, visible);
-        if (button->x >= bubble.x && button->x < bubble.x + bubble.w && button->y >= bubble.y &&
+        const SDL_FRect bubble = app->bubble_rects[slot];
+        if (app->bubble_rect_valid[slot] && button->x >= bubble.x &&
+            button->x < bubble.x + bubble.w && button->y >= bubble.y &&
             button->y < bubble.y + bubble.h) {
             app->primary_interaction = EIDOLON_PRIMARY_INTERACTION_SESSION_BUBBLE;
             app->primary_session_slot = slot;
@@ -1412,17 +1778,17 @@ static void update_primary_interaction(EidolonApp *app, const SDL_MouseMotionEve
 static void end_primary_interaction(EidolonApp *app) {
     if (app->primary_interaction == EIDOLON_PRIMARY_INTERACTION_CHARACTER_DRAG) {
         SDL_CaptureMouse(false);
+        if (app->primary_moved) {
+            reflow_overlay_layout(app, app->model_scale);
+        }
     }
     app->primary_interaction = EIDOLON_PRIMARY_INTERACTION_NONE;
     app->primary_session_slot = -1;
 }
 
 static bool point_in_model_rect(const EidolonApp *app, float x, float y) {
-    const float size = EIDOLON_MODEL_DISPLAY_SIZE * app->model_scale;
-    const float left = (float)app->window_width - size;
-    const float top = (float)app->window_height - size;
-    return app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D && app->model != NULL && x >= left &&
-           y >= top && x < left + size && y < top + size;
+    return app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D && app->model != NULL &&
+           point_in_rect(x, y, &app->body_rect);
 }
 
 static void end_model_rotation_drag(EidolonApp *app) {
@@ -1496,10 +1862,26 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
             handle_key(app, event->key.key);
         }
         break;
-    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
+        const SDL_FPoint body_center = current_body_global_center(app);
+        if (update_display_metrics(app)) {
+            restore_body_global_center(app, body_center);
+            eidolon_app_set_model_scale(app, app->model_scale);
+        }
+        break;
+    }
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-        update_display_metrics(app);
-        eidolon_app_set_model_scale(app, app->model_scale);
+        app->hit_test_initialized = false;
+        break;
+    case SDL_EVENT_DISPLAY_ADDED:
+    case SDL_EVENT_DISPLAY_REMOVED:
+    case SDL_EVENT_DISPLAY_MOVED:
+    case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
+    case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+    case SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED:
+    case SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED:
+        app->bubble_display_id = 0U;
+        reflow_overlay_layout(app, app->model_scale);
         break;
     case SDL_EVENT_RENDER_TARGETS_RESET:
         app->hit_test_initialized = false;
@@ -1537,7 +1919,7 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
                         &app->session_registry, app->primary_session_slot);
                     if (entry != NULL) {
                         activate_dialogue_performance(app, &entry->dialogue,
-                                                      session_attention_direction(entry),
+                                                      session_attention_direction(app, entry),
                                                       SDL_GetTicks());
                     }
                 }
@@ -1602,7 +1984,7 @@ void eidolon_app_run(EidolonApp *app) {
             conversation_layout_changed = conversation_layout_changed || live.changed;
             if (live.stream_started && live.message_session != NULL) {
                 eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
-                const float attention = session_attention_direction(live.message_session);
+                const float attention = session_attention_direction(app, live.message_session);
                 eidolon_portrait_set_attention(app->portrait, attention);
                 const EidolonAffect responding = eidolon_affect_for_state(EIDOLON_STATE_REVIEW);
                 eidolon_affect_controller_perform(&app->affect, &responding,
@@ -1611,13 +1993,13 @@ void eidolon_app_run(EidolonApp *app) {
                                          live.message_session->id, now_ms);
             }
             if (live.stream_delta && live.message_session != NULL) {
-                const float attention = session_attention_direction(live.message_session);
+                const float attention = session_attention_direction(app, live.message_session);
                 extend_stream_performance(app, &live.message_session->dialogue, app->state,
                                           attention, false, now_ms);
             }
             if (live.message_completed && live.message_session != NULL) {
                 eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
-                const float attention = session_attention_direction(live.message_session);
+                const float attention = session_attention_direction(app, live.message_session);
                 eidolon_portrait_set_attention(app->portrait, attention);
                 if (live.new_message) {
                     prepare_dialogue_performance(app, &live.message_session->dialogue, app->state,
@@ -1657,26 +2039,26 @@ void eidolon_app_run(EidolonApp *app) {
             eidolon_session_registry_poll(&app->session_registry, now_ms);
         if (sessions.new_message) {
             eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
-            eidolon_portrait_set_attention(app->portrait,
-                                           session_attention_direction(sessions.message_session));
+            eidolon_portrait_set_attention(
+                app->portrait, session_attention_direction(app, sessions.message_session));
             prepare_dialogue_performance(app, &sessions.message_session->dialogue, app->state,
-                                         session_attention_direction(sessions.message_session),
+                                         session_attention_direction(app, sessions.message_session),
                                          sessions.message_session->id, now_ms);
         }
         if (sessions.page_advanced && sessions.advanced_session != NULL) {
-            eidolon_portrait_set_attention(app->portrait,
-                                           session_attention_direction(sessions.advanced_session));
-            activate_dialogue_performance(app, &sessions.advanced_session->dialogue,
-                                          session_attention_direction(sessions.advanced_session),
-                                          now_ms);
+            eidolon_portrait_set_attention(
+                app->portrait, session_attention_direction(app, sessions.advanced_session));
+            activate_dialogue_performance(
+                app, &sessions.advanced_session->dialogue,
+                session_attention_direction(app, sessions.advanced_session), now_ms);
         }
         for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
             EidolonSessionEntry *entry = &app->session_registry.entries[index];
             if (entry->visible) {
                 activate_dialogue_performance(app, &entry->dialogue,
-                                              session_attention_direction(entry), now_ms);
+                                              session_attention_direction(app, entry), now_ms);
                 activate_dialogue_delivery(app, &entry->dialogue,
-                                           session_attention_direction(entry), now_ms);
+                                           session_attention_direction(app, entry), now_ms);
             }
         }
         if (sessions.changed || conversation_layout_changed) {

@@ -22,6 +22,7 @@ ImGui does not create `imgui.ini`; Eidolon has one persistence system.
 
 - `preferred_renderer`: `sprite`, `portrait`, or `model_3d`;
 - `display_scale`: presentation multiplier;
+- `bubble_bounds_mode`: `avatar`, `primary`, `virtual`, or `custom`;
 - `model_render_resolution`: independent square 3D target size;
 - `model_yaw_degrees`, `model_pitch_degrees`, `model_roll_degrees`.
 
@@ -38,9 +39,17 @@ The file is sparse and may additionally contain:
 - `portrait_face_mode`;
 - `dialogue_theme`;
 - `dialogue_movement`;
-- `dialogue_hold_ms`.
+- `dialogue_hold_ms`;
+- `bubble_custom_x`, `bubble_custom_y`, `bubble_custom_width`, and
+  `bubble_custom_height`.
 
 The settings UI shows the effective default and its source beside each persisted field.
+
+Bubble placement treats the mode and custom rectangle as one override. `avatar` constrains bubbles
+to the usable work area containing most of the visible character and uses hysteresis near monitor
+seams. `primary` pins bubbles to the primary work area. `virtual` permits the bounding rectangle of
+all usable displays. `custom` uses the persisted rectangle; negative coordinates are valid. Reset
+returns the complete policy to its inherited default.
 
 ## 2D character manifest
 

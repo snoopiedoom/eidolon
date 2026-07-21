@@ -17,6 +17,11 @@ static void parses_complete_settings(void) {
                                "dialogue_theme = 1\n"
                                "dialogue_movement = 0\n"
                                "dialogue_hold_ms = 1750\n"
+                               "bubble_bounds_mode = custom\n"
+                               "bubble_custom_x = -1920\n"
+                               "bubble_custom_y = 0\n"
+                               "bubble_custom_width = 1920\n"
+                               "bubble_custom_height = 1040\n"
                                "future_option = ignored\n";
     EidolonUserSettings settings;
     eidolon_user_settings_defaults(&settings);
@@ -32,12 +37,18 @@ static void parses_complete_settings(void) {
     assert(settings.dialogue_theme == 1);
     assert(settings.dialogue_movement == 0);
     assert(settings.dialogue_hold_ms == 1750U);
+    assert(settings.bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM);
+    assert(settings.bubble_custom_x == -1920);
+    assert(settings.bubble_custom_y == 0);
+    assert(settings.bubble_custom_width == 1920);
+    assert(settings.bubble_custom_height == 1040);
     assert(settings.overrides ==
            (EIDOLON_USER_SETTING_RENDER_MODE | EIDOLON_USER_SETTING_DISPLAY_SCALE |
             EIDOLON_USER_SETTING_PORTRAIT_FACE_MODE | EIDOLON_USER_SETTING_MODEL_RENDER_RESOLUTION |
             EIDOLON_USER_SETTING_MODEL_YAW | EIDOLON_USER_SETTING_MODEL_PITCH |
             EIDOLON_USER_SETTING_MODEL_ROLL | EIDOLON_USER_SETTING_DIALOGUE_THEME |
-            EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT | EIDOLON_USER_SETTING_DIALOGUE_HOLD));
+            EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT | EIDOLON_USER_SETTING_DIALOGUE_HOLD |
+            EIDOLON_USER_SETTING_BUBBLE_BOUNDS));
 }
 
 static void rejects_invalid_file_without_partial_apply(void) {
@@ -72,11 +83,16 @@ static void saves_and_loads_round_trip(void) {
     expected.dialogue_theme = 1;
     expected.dialogue_movement = 1;
     expected.dialogue_hold_ms = 2250U;
+    expected.bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_CUSTOM;
+    expected.bubble_custom_x = -2560;
+    expected.bubble_custom_y = 40;
+    expected.bubble_custom_width = 2560;
+    expected.bubble_custom_height = 1400;
     expected.overrides =
         EIDOLON_USER_SETTING_RENDER_MODE | EIDOLON_USER_SETTING_DISPLAY_SCALE |
         EIDOLON_USER_SETTING_PORTRAIT_FACE_MODE | EIDOLON_USER_SETTING_MODEL_RENDER_RESOLUTION |
         EIDOLON_USER_SETTING_DIALOGUE_THEME | EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT |
-        EIDOLON_USER_SETTING_DIALOGUE_HOLD;
+        EIDOLON_USER_SETTING_DIALOGUE_HOLD | EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
     char error[EIDOLON_USER_SETTINGS_ERROR_CAPACITY];
     assert(eidolon_user_settings_save(EIDOLON_TEST_SETTINGS_PATH, &expected, error, sizeof(error)));
 
@@ -90,6 +106,11 @@ static void saves_and_loads_round_trip(void) {
     assert(actual.dialogue_theme == expected.dialogue_theme);
     assert(actual.dialogue_movement == expected.dialogue_movement);
     assert(actual.dialogue_hold_ms == expected.dialogue_hold_ms);
+    assert(actual.bubble_bounds_mode == expected.bubble_bounds_mode);
+    assert(actual.bubble_custom_x == expected.bubble_custom_x);
+    assert(actual.bubble_custom_y == expected.bubble_custom_y);
+    assert(actual.bubble_custom_width == expected.bubble_custom_width);
+    assert(actual.bubble_custom_height == expected.bubble_custom_height);
     assert(actual.overrides == expected.overrides);
     assert(SDL_RemovePath(EIDOLON_TEST_SETTINGS_PATH));
 }

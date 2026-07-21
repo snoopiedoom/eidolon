@@ -289,6 +289,49 @@ static const char *theme_name(EidolonDialogueTheme theme) {
     return theme == EIDOLON_DIALOGUE_THEME_ACADEMY_HEART ? "academy heart" : "classic";
 }
 
+static void draw_bubble_bounds_settings(EidolonApp *app) {
+    ImGui_SeparatorText("placement bounds");
+    if (ImGui_BeginCombo("monitor policy", eidolon_bubble_bounds_mode_name(app->bubble_bounds_mode),
+                         0)) {
+        for (int value = 0; value < (int)EIDOLON_BUBBLE_BOUNDS_COUNT; ++value) {
+            const EidolonBubbleBoundsMode mode = (EidolonBubbleBoundsMode)value;
+            if (ImGui_SelectableEx(eidolon_bubble_bounds_mode_name(mode),
+                                   mode == app->bubble_bounds_mode, 0, (ImVec2){0.0F, 0.0F})) {
+                eidolon_app_set_bubble_bounds_mode(app, mode);
+            }
+        }
+        ImGui_EndCombo();
+    }
+    reset_setting_button(app, EIDOLON_USER_SETTING_BUBBLE_BOUNDS, "reset##bubble_bounds");
+    ImGui_Text("default: %s  |  source: %s",
+               eidolon_bubble_bounds_mode_name(
+                   (EidolonBubbleBoundsMode)app->system_settings.bubble_bounds_mode),
+               setting_source(app, EIDOLON_USER_SETTING_BUBBLE_BOUNDS));
+
+    if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM) {
+        SDL_Rect bounds = app->bubble_custom_bounds;
+        bool changed = ImGui_InputInt("custom x", &bounds.x);
+        changed = ImGui_InputInt("custom y", &bounds.y) || changed;
+        if (ImGui_InputInt("custom width", &bounds.w)) {
+            bounds.w = SDL_max(1, bounds.w);
+            changed = true;
+        }
+        if (ImGui_InputInt("custom height", &bounds.h)) {
+            bounds.h = SDL_max(1, bounds.h);
+            changed = true;
+        }
+        if (changed) {
+            eidolon_app_set_bubble_custom_bounds(app, bounds);
+        }
+    }
+    ImGui_Text("resolved: %d, %d  %d x %d", app->bubble_resolved_bounds.x,
+               app->bubble_resolved_bounds.y, app->bubble_resolved_bounds.w,
+               app->bubble_resolved_bounds.h);
+    ImGui_TextWrapped("avatar follows the character's monitor. primary pins bubbles to the primary "
+                      "work area. virtual permits the combined desktop. custom uses the rectangle "
+                      "above.");
+}
+
 static void draw_dialogue_tab(EidolonApp *app) {
     if (ImGui_BeginCombo("theme", theme_name(app->dialogue_theme), 0)) {
         for (int value = 0; value < (int)EIDOLON_DIALOGUE_THEME_COUNT; ++value) {
@@ -304,6 +347,10 @@ static void draw_dialogue_tab(EidolonApp *app) {
     ImGui_Text("default: %s  |  source: %s",
                theme_name((EidolonDialogueTheme)app->system_settings.dialogue_theme),
                setting_source(app, EIDOLON_USER_SETTING_DIALOGUE_THEME));
+
+    draw_bubble_bounds_settings(app);
+
+    ImGui_SeparatorText("text delivery");
 
     if (ImGui_BeginCombo("text movement", eidolon_dialogue_movement_name(app->dialogue_movement),
                          0)) {
@@ -363,6 +410,10 @@ static void draw_diagnostics_tab(const EidolonApp *app) {
     ImGui_Text("evidence: %.3f", app->affect.evidence);
     ImGui_Text("motion revision: %llu", (unsigned long long)app->motion_config_watch.revision);
     ImGui_Text("user override fields: 0x%x", app->user_settings.overrides);
+    ImGui_Text("bubble bounds: %s  %d,%d %dx%d",
+               eidolon_bubble_bounds_mode_name(app->bubble_bounds_mode),
+               app->bubble_resolved_bounds.x, app->bubble_resolved_bounds.y,
+               app->bubble_resolved_bounds.w, app->bubble_resolved_bounds.h);
     ImGui_TextWrapped("user settings: %s",
                       app->user_settings_path[0] != '\0' ? app->user_settings_path : "disabled");
     if (app->motion_config_watch.error[0] != '\0') {

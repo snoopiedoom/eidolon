@@ -9,6 +9,14 @@
 #define EIDOLON_USER_SETTINGS_PATH_CAPACITY 1024U
 #define EIDOLON_USER_SETTINGS_ERROR_CAPACITY 256U
 
+typedef enum EidolonBubbleBoundsMode {
+    EIDOLON_BUBBLE_BOUNDS_AVATAR = 0,
+    EIDOLON_BUBBLE_BOUNDS_PRIMARY,
+    EIDOLON_BUBBLE_BOUNDS_VIRTUAL,
+    EIDOLON_BUBBLE_BOUNDS_CUSTOM,
+    EIDOLON_BUBBLE_BOUNDS_COUNT,
+} EidolonBubbleBoundsMode;
+
 typedef enum EidolonUserSettingField {
     EIDOLON_USER_SETTING_RENDER_MODE = 1U << 0,
     EIDOLON_USER_SETTING_DISPLAY_SCALE = 1U << 1,
@@ -20,6 +28,7 @@ typedef enum EidolonUserSettingField {
     EIDOLON_USER_SETTING_DIALOGUE_THEME = 1U << 7,
     EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT = 1U << 8,
     EIDOLON_USER_SETTING_DIALOGUE_HOLD = 1U << 9,
+    EIDOLON_USER_SETTING_BUBBLE_BOUNDS = 1U << 10,
 } EidolonUserSettingField;
 
 typedef struct EidolonUserSettings {
@@ -34,8 +43,14 @@ typedef struct EidolonUserSettings {
     int dialogue_theme;
     int dialogue_movement;
     unsigned int dialogue_hold_ms;
+    int bubble_bounds_mode;
+    int bubble_custom_x;
+    int bubble_custom_y;
+    int bubble_custom_width;
+    int bubble_custom_height;
 } EidolonUserSettings;
 
+const char *eidolon_bubble_bounds_mode_name(EidolonBubbleBoundsMode mode);
 void eidolon_user_settings_defaults(EidolonUserSettings *settings);
 bool eidolon_user_settings_is_overridden(const EidolonUserSettings *settings,
                                          EidolonUserSettingField field);

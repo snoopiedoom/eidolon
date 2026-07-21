@@ -105,6 +105,45 @@ static const char *render_mode_name(int value) {
     }
 }
 
+static bool parse_bubble_bounds_mode(const char *text, int *value) {
+    if (SDL_strcasecmp(text, "avatar") == 0) {
+        *value = EIDOLON_BUBBLE_BOUNDS_AVATAR;
+        return true;
+    }
+    if (SDL_strcasecmp(text, "primary") == 0) {
+        *value = EIDOLON_BUBBLE_BOUNDS_PRIMARY;
+        return true;
+    }
+    if (SDL_strcasecmp(text, "virtual") == 0) {
+        *value = EIDOLON_BUBBLE_BOUNDS_VIRTUAL;
+        return true;
+    }
+    if (SDL_strcasecmp(text, "custom") == 0) {
+        *value = EIDOLON_BUBBLE_BOUNDS_CUSTOM;
+        return true;
+    }
+    if (!parse_int(text, value)) {
+        return false;
+    }
+    return *value >= 0 && *value < (int)EIDOLON_BUBBLE_BOUNDS_COUNT;
+}
+
+const char *eidolon_bubble_bounds_mode_name(EidolonBubbleBoundsMode mode) {
+    switch (mode) {
+    case EIDOLON_BUBBLE_BOUNDS_AVATAR:
+        return "avatar";
+    case EIDOLON_BUBBLE_BOUNDS_PRIMARY:
+        return "primary";
+    case EIDOLON_BUBBLE_BOUNDS_VIRTUAL:
+        return "virtual";
+    case EIDOLON_BUBBLE_BOUNDS_CUSTOM:
+        return "custom";
+    case EIDOLON_BUBBLE_BOUNDS_COUNT:
+        return "invalid";
+    }
+    return "invalid";
+}
+
 bool eidolon_user_settings_is_overridden(const EidolonUserSettings *settings,
                                          EidolonUserSettingField field) {
     return settings != NULL && (settings->overrides & (uint32_t)field) != 0U;
@@ -119,6 +158,9 @@ void eidolon_user_settings_defaults(EidolonUserSettings *settings) {
         .dialogue_theme = 0,
         .dialogue_movement = 2,
         .dialogue_hold_ms = 3000U,
+        .bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_AVATAR,
+        .bubble_custom_width = 1920,
+        .bubble_custom_height = 1080,
     };
 }
 
@@ -220,12 +262,42 @@ bool eidolon_user_settings_parse(const char *text, size_t length, EidolonUserSet
             if (parsed) {
                 candidate.overrides |= EIDOLON_USER_SETTING_DIALOGUE_HOLD;
             }
+        } else if (strcmp(key, "bubble_bounds_mode") == 0) {
+            parsed = parse_bubble_bounds_mode(value, &candidate.bubble_bounds_mode);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+            }
+        } else if (strcmp(key, "bubble_custom_x") == 0) {
+            parsed = parse_int(value, &candidate.bubble_custom_x);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+            }
+        } else if (strcmp(key, "bubble_custom_y") == 0) {
+            parsed = parse_int(value, &candidate.bubble_custom_y);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+            }
+        } else if (strcmp(key, "bubble_custom_width") == 0) {
+            parsed = parse_int(value, &candidate.bubble_custom_width);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+            }
+        } else if (strcmp(key, "bubble_custom_height") == 0) {
+            parsed = parse_int(value, &candidate.bubble_custom_height);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+            }
         }
         if (!parsed) {
             set_error(error, error_capacity, "line %zu: invalid value for %s", line_number, key);
             valid = false;
             break;
         }
+    }
+    if (valid && candidate.bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM &&
+        (candidate.bubble_custom_width <= 0 || candidate.bubble_custom_height <= 0)) {
+        set_error(error, error_capacity, "custom bubble bounds require positive width and height");
+        valid = false;
     }
     if (valid && (!version_seen || version != EIDOLON_USER_SETTINGS_VERSION)) {
         set_error(error, error_capacity, "unsupported or missing settings version");
@@ -311,6 +383,15 @@ bool eidolon_user_settings_save(const char *path, const EidolonUserSettings *set
     }
     if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_DIALOGUE_HOLD)) {
         APPEND_SETTING("dialogue_hold_ms = %u\n", settings->dialogue_hold_ms);
+    }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_BUBBLE_BOUNDS)) {
+        APPEND_SETTING(
+            "bubble_bounds_mode = %s\n",
+            eidolon_bubble_bounds_mode_name((EidolonBubbleBoundsMode)settings->bubble_bounds_mode));
+        APPEND_SETTING("bubble_custom_x = %d\n", settings->bubble_custom_x);
+        APPEND_SETTING("bubble_custom_y = %d\n", settings->bubble_custom_y);
+        APPEND_SETTING("bubble_custom_width = %d\n", settings->bubble_custom_width);
+        APPEND_SETTING("bubble_custom_height = %d\n", settings->bubble_custom_height);
     }
 #undef APPEND_SETTING
 
