@@ -11,7 +11,14 @@ Windows requires:
 - an SDL3 development package containing `include/SDL3`, `lib/x64/SDL3.lib`, and `SDL3.dll`;
 - the Windows SDK's x64 `fxc.exe` for D3D11 shaders;
 - Blender for the 3D authoring pipeline only;
-- ordinary vendored source directories under `lib/`, never Git submodules.
+- initialized dependency trees under `lib/`; substantial upstream libraries use pinned Git
+  submodules.
+
+Initialize submodules after cloning or pulling a revision that changes them:
+
+```powershell
+git submodule update --init --recursive
+```
 
 The Makefile defaults `SDL3_ROOT` to `C:/dev/SDL3`. Override it instead of changing the Makefile:
 
@@ -43,7 +50,7 @@ make editor-config
 ```
 
 `compile_commands.json` is produced from a dry run of the real Make recipes, so clangd receives the
-same language standards, preprocessor definitions, SDL3/SDL_ttf paths, and vendored-library include
+same language standards, preprocessor definitions, SDL3/SDL_ttf paths, and dependency include
 paths as Clang. The generated file contains machine-local absolute paths and is intentionally
 ignored by Git. Regenerate it after changing compiler flags, dependency roots, build mode, or
 machines; use `make editor-config MODE=release` when release-only definitions matter.
@@ -117,7 +124,8 @@ VSync state. Collect that line first when diagnosing desktop-wide lag.
 ## Working conventions
 
 - use GNU Make for Eidolon;
-- keep dependencies as ordinary vendored source, not submodules;
+- keep substantial upstream libraries as pinned submodules rather than importing their source into
+  Eidolon's history;
 - preserve unrelated or pre-existing dirty changes;
 - inspect `git status --short` before modifying repository state;
 - do not commit build output, downloads, logs, extracted game assets, or source archives;

@@ -43,7 +43,13 @@ Requirements:
 - LLVM/Clang and GNU Make;
 - an SDL3 development package;
 - a Windows SDK containing `fxc.exe`;
-- the ordinary vendored source trees under `lib/`.
+- the pinned dependency trees under `lib/`.
+
+Initialize dependency submodules after cloning:
+
+```powershell
+git submodule update --init --recursive
+```
 
 On Windows, SDL3 defaults to `C:/dev/SDL3`; override `SDL3_ROOT` when necessary.
 

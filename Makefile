@@ -1,5 +1,6 @@
 CC := clang
 CXX := clang++
+AR := llvm-ar
 MODE ?= debug
 BLENDER ?= blender
 PYTHON ?= python
@@ -158,7 +159,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check editor-config imgui-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -267,6 +268,119 @@ $(IMGUI_SMOKE): $(IMGUI_SMOKE_OBJECT) $(IMGUI_OBJECTS)
 
 imgui-smoke: $(IMGUI_SMOKE)
 	"$(IMGUI_SMOKE)"
+
+ifeq ($(OS),Windows_NT)
+BGFX_DIR := lib/bgfx
+BX_DIR := lib/bx
+BIMG_DIR := lib/bimg
+BGFX_BUILD_DIR := $(BUILD_ROOT)/bgfx/$(MODE)
+BGFX_OBJ_DIR := $(BGFX_BUILD_DIR)/obj
+BGFX_LIB := $(BGFX_BUILD_DIR)/libeidolon-bgfx.a
+BGFX_SMOKE := $(BGFX_BUILD_DIR)/bgfx_smoke.exe
+BGFX_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/bgfx_smoke.o
+BGFX_INTEROP_SMOKE := $(BGFX_BUILD_DIR)/bgfx_interop_smoke.exe
+BGFX_INTEROP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/bgfx_interop_smoke.o
+BGFX_DCOMP_SMOKE := $(BGFX_BUILD_DIR)/bgfx_dcomp_smoke.exe
+BGFX_DCOMP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/bgfx_dcomp_smoke.o
+BGFX_OBJECTS := \
+	$(BGFX_OBJ_DIR)/bx.o \
+	$(BGFX_OBJ_DIR)/bimg.o \
+	$(BGFX_OBJ_DIR)/bgfx.o
+BGFX_DEPS := $(BGFX_OBJECTS:.o=.d) $(BGFX_SMOKE_OBJECT:.o=.d) \
+	$(BGFX_INTEROP_SMOKE_OBJECT:.o=.d) $(BGFX_DCOMP_SMOKE_OBJECT:.o=.d)
+BGFX_CPPFLAGS := \
+	-I$(BGFX_DIR)/include \
+	-I$(BGFX_DIR)/3rdparty \
+	-I$(BGFX_DIR)/3rdparty/directx-headers/include/directx \
+	-I$(BX_DIR)/include \
+	-I$(BX_DIR)/include/compat/msvc \
+	-I$(BX_DIR)/3rdparty \
+	-I$(BIMG_DIR)/include \
+	-DBGFX_CONFIG_RENDERER_DIRECT3D11=1 \
+	-DBGFX_CONFIG_VIDEO=0 \
+	-DBIMG_CONFIG_DECODE_ASTC=0 \
+	-D_CRT_SECURE_NO_WARNINGS
+BGFX_CXXFLAGS := -std=c++20 -MMD -MP \
+	-msse4.2 -Wno-microsoft-enum-value -Wno-microsoft-const-init
+
+ifeq ($(MODE),release)
+BGFX_CPPFLAGS += -DBX_CONFIG_DEBUG=0
+BGFX_CXXFLAGS += -O2 -DNDEBUG
+else
+BGFX_CPPFLAGS += -DBX_CONFIG_DEBUG=1
+BGFX_CXXFLAGS += -O0 -g
+endif
+
+$(BGFX_OBJ_DIR)/bx.o: $(BX_DIR)/src/amalgamated.cpp
+	$(make-dir)
+	$(CXX) $(BGFX_CPPFLAGS) $(BGFX_CXXFLAGS) -c $< -o $@
+
+$(BGFX_OBJ_DIR)/bimg.o: $(BIMG_DIR)/src/image.cpp
+	$(make-dir)
+	$(CXX) $(BGFX_CPPFLAGS) $(BGFX_CXXFLAGS) -c $< -o $@
+
+$(BGFX_OBJ_DIR)/bgfx.o: $(BGFX_DIR)/src/amalgamated.cpp
+	$(make-dir)
+	$(CXX) $(BGFX_CPPFLAGS) $(BGFX_CXXFLAGS) -c $< -o $@
+
+$(BGFX_LIB): $(BGFX_OBJECTS)
+	$(make-dir)
+	$(AR) rcs $@ $^
+
+$(BGFX_SMOKE_OBJECT): tests/bgfx_smoke.c
+	$(make-dir)
+	$(CC) -I"$(SDL3_ROOT)/include" -I$(BGFX_DIR)/include -I$(BX_DIR)/include \
+		$(CFLAGS) -c $< -o $@
+
+$(BGFX_INTEROP_SMOKE_OBJECT): tests/bgfx_interop_smoke.c
+	$(make-dir)
+	$(CC) -I"$(SDL3_ROOT)/include" -I$(BGFX_DIR)/include -I$(BX_DIR)/include \
+		$(CFLAGS) -c $< -o $@
+
+$(BGFX_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+	$(make-dir)
+	$(CXX) -I$(BGFX_DIR)/include -I$(BX_DIR)/include $(BGFX_CXXFLAGS) \
+		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
+		-Wno-language-extension-token -c $< -o $@
+
+$(BGFX_SMOKE): $(BGFX_SMOKE_OBJECT) $(BGFX_LIB)
+	$(make-dir)
+	$(CXX) $(LDFLAGS) $^ -lSDL3 -ld3d11 -ldxgi -ldxguid -ld3dcompiler \
+		-lgdi32 -lpsapi -luser32 -lole32 -o $@
+	$(copy-runtime)
+
+bgfx-smoke: $(BGFX_SMOKE)
+	"$(BGFX_SMOKE)"
+
+$(BGFX_INTEROP_SMOKE): $(BGFX_INTEROP_SMOKE_OBJECT) $(BGFX_LIB)
+	$(make-dir)
+	$(CXX) $(LDFLAGS) $^ -lSDL3 -ld3d11 -ldxgi -ldxguid -ld3dcompiler \
+		-lgdi32 -lpsapi -luser32 -lole32 -o $@
+	$(copy-runtime)
+
+bgfx-interop-smoke: $(BGFX_INTEROP_SMOKE)
+	"$(BGFX_INTEROP_SMOKE)"
+
+$(BGFX_DCOMP_SMOKE): $(BGFX_DCOMP_SMOKE_OBJECT) $(BGFX_LIB)
+	$(make-dir)
+	$(CXX) $^ -ldcomp -ld3d11 -ldxgi -ldxguid -ld3dcompiler \
+		-lgdi32 -lpsapi -luser32 -lole32 -o $@
+
+bgfx-dcomp-smoke: $(BGFX_DCOMP_SMOKE)
+	"$(BGFX_DCOMP_SMOKE)" $(if $(filter 1,$(SHOW)),--show,)
+else
+bgfx-smoke:
+	@echo "The bgfx D3D11 smoke test is currently prepared for Windows only."
+	@false
+
+bgfx-interop-smoke:
+	@echo "The bgfx D3D11 interop smoke test is currently prepared for Windows only."
+	@false
+
+bgfx-dcomp-smoke:
+	@echo "The bgfx DirectComposition smoke test is currently prepared for Windows only."
+	@false
+endif
 
 shaders: $(SHADER_OUTPUTS)
 
@@ -543,6 +657,10 @@ help:
 	@echo "make check           build and run unit tests"
 	@echo "make editor-config   regenerate compile_commands.json for clangd/VS Code"
 	@echo "make imgui-smoke     build and run Dear ImGui through its generated C API"
+	@echo "make bgfx-smoke      build pinned bgfx submodules and run the hidden C99/D3D11 probe"
+	@echo "make bgfx-interop-smoke  verify bgfx renders into an Eidolon-owned D3D11 texture"
+	@echo "make bgfx-dcomp-smoke  verify two bgfx layers through DirectComposition"
+	@echo "make bgfx-dcomp-smoke SHOW=1  run the brief owner-controlled visual probe"
 	@echo "make provider-live-test PROVIDER=codex PROVIDER_URL=ws://...  probe a running provider"
 	@echo "make codex-relay-test  launch a hidden app-server and verify the in-path relay"
 	@echo "make text-setup      download verified SDL_ttf runtime/development files"
@@ -566,4 +684,4 @@ help:
 	@echo "make model-preview-glb  export and render the runtime GLB"
 	@echo "make clean           remove this platform's build directory"
 
--include $(DEPS) $(IMGUI_DEPS)
+-include $(DEPS) $(IMGUI_DEPS) $(BGFX_DEPS)

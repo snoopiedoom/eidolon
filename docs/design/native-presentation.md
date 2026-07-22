@@ -409,7 +409,8 @@ multiple windows:
 
 Its cost is architectural:
 
-- the implementation is C++ and brings `bx`, `bimg`, shader tools, and a GENie-based upstream build;
+- the current implementation requires C++20 and brings `bx`, `bimg`, shader tools, and an upstream
+  GENie build that Eidolon bypasses through supported amalgamated units;
 - bgfx owns a render thread, graphics device, command submission, and normal window framebuffer;
 - compositor integration still requires platform-specific hosts, input, surface roles, and
   lifecycle;
@@ -424,10 +425,27 @@ workflow:
 - [bgfx build documentation](https://bkaradzic.github.io/bgfx/build.html)
 - [bgfx internals and render-thread model](https://bkaradzic.github.io/bgfx/internals.html)
 
-**Decision:** do not adopt bgfx as the core rendering or presentation layer. It duplicates much of
-SDL_GPU while making native compositor interop less directly owned. It remains a valid experiment
-for a self-contained future body-renderer plugin if that plugin can deliver content through the
-same public interop contract.
+**Decision:** evaluate bgfx as an opt-in shared graphics backend, never as the presentation layer.
+The experiment must prove its C ABI, backend lifecycle, transparent offscreen rendering, and native
+target interop before it can affect production. Eidolon retains compositor ownership regardless of
+the result. A normal bgfx window swapchain is not evidence of DirectComposition or equivalent
+mobile/desktop compositor integration.
+
+The Windows experiment has now proven one narrower native-target contract: in documented
+single-threaded mode, Eidolon can obtain bgfx's D3D11 device, create and own a BGRA8 render-target
+texture, and pass that texture through bgfx's public external-texture argument. bgfx renders
+directly into it with no bridge copy. This proves same-device texture interop, premultiplied-alpha
+preservation, recreation, and lifetime ordering.
+
+The next Windows probe extends that contract to Eidolon-owned DirectComposition swapchains. bgfx
+can wrap and render directly into a premultiplied BGRA8 flip-sequential logical back buffer, reuse
+the wrapper after `Present`, rebind it as D3D11 flip-model presentation requires, and update body and
+bubble swapchains independently. DirectComposition then changes layer transform, offset, and
+opacity without another body submission. Test-only staging readbacks verify both content revisions;
+the measured presentation bridge has zero GPU copies and zero CPU readbacks. This proves the
+D3D11/DirectComposition bridge, not its production resilience: resize, output transfer, device
+loss, latency, idle behavior, and interactive quality remain gated separately. It also does not
+prove equivalent native-target contracts on other bgfx backends.
 
 ### Option E: platform-aligned native graphics
 
@@ -457,10 +475,11 @@ Eidolon adopts a hybrid stack:
 3. Windows keeps D3D11 during the DirectComposition migration because it already renders Rio and
    feeds composition swapchains directly;
 4. SDL_Renderer remains for settings, snapshots, fallback presentation, and temporary 2D bridges;
-5. SDL_GPU receives a later zero-copy interop spike and is the preferred shared-renderer candidate,
-   not an assumed decision;
+5. bgfx and SDL_GPU receive gated interop spikes as shared-renderer candidates; neither is an
+   assumed decision;
 6. Vulkan is used directly only where platform integration or measured workload justifies it;
-7. bgfx is not introduced into the core stack.
+7. no graphics abstraction enters the core stack until it preserves native presentation ownership
+   and avoids animated CPU readback.
 
 This deliberately optimizes for native composition first. A graphics migration can then be measured
 against a correct presentation architecture.
@@ -486,6 +505,12 @@ output-local hosts are preferable to one enormous virtual-desktop swapchain:
 - [CreateSwapChainForComposition](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgifactory2-createswapchainforcomposition)
 - [DirectComposition visual-tree example](https://learn.microsoft.com/en-us/windows/win32/directcomp/how-to--build-a-visual-tree)
 - [DXGI frame-latency waitable object](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_3/nf-dxgi1_3-idxgiswapchain2-getframelatencywaitableobject)
+
+Microsoft's `dcomp.h` exposes C++ COM interfaces rather than a C-compatible vtable declaration.
+The Windows backend is therefore a small C++ implementation behind the platform-neutral C ABI;
+Eidolon core, scene ownership, and every public presentation type remain C17. This is a language
+boundary around a platform header, not permission for native COM types or presentation policy to
+leak into the renderer.
 
 The host uses native hit testing to return transparent outside transformed input geometry. Crossing
 an output boundary transfers the logical layer to the adjacent host without resetting content or
@@ -647,14 +672,18 @@ uninitialized.
 
 ### Phase 5: graphics-backend spike
 
-- implement the smallest SDL_GPU offscreen body renderer;
+- build bgfx, bx, and bimg from pinned Git submodules behind an opt-in GNU Make target;
+- prove the bgfx C99 API against a hidden D3D11 window, then a transparent offscreen target and
+  DirectComposition bridge;
+- implement the smallest equivalent SDL_GPU offscreen body renderer;
 - test D3D12/DirectComposition, Vulkan/Wayland, Metal/Core Animation, and Android SurfaceControl
   interop separately;
 - measure CPU time, GPU time, memory, frame latency, power behavior, and implementation size against
   the native path;
-- accept SDL_GPU only for combinations that remain zero-copy and observable;
+- accept a shared backend only for combinations that remain zero-copy or have a measured,
+  acceptable GPU-only copy and remain observable;
 - test raw Vulkan only on Linux/Android unless a measured Windows requirement appears;
-- do not add bgfx to this gate.
+- keep every candidate opt-in until the measured adoption decision.
 
 Gate: the selected graphics backend improves portability or measured behavior without weakening
 presentation ownership.
@@ -769,5 +798,6 @@ Automated snapshots do not prove desktop feel.
 - the first supported Wayland compositor matrix and layer-shell fallback UX;
 - minimum Android API for the native compositor backend;
 - graphics device sharing across multiple hosts and targets;
-- whether SDL_GPU exposes sufficient stable interop by the time Phase 5 begins;
+- whether bgfx or SDL_GPU exposes the more maintainable native-target interop contract after the
+  Phase 5 comparison;
 - plug-in ABI and trust model for future third-party body renderers.

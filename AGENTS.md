@@ -2,7 +2,8 @@
 
 - Use GNU Make for Eidolon itself. Upstream build systems may be used only for quarantined host
   tools and third-party dependencies.
-- Keep dependencies as ordinary vendored source, not Git submodules.
+- Keep substantial upstream libraries as pinned Git submodules so their source and history stay
+  outside Eidolon's repository. Small single-file dependencies may remain ordinary vendored source.
 - The first commit in a new repository is always named exactly `init`.
 - Do not commit build output, downloaded compiler payloads, logs, or source-asset archives.
 - Before major subsystem, product-boundary, or roadmap work, read `docs/product-brief.md` and

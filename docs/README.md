@@ -36,6 +36,11 @@ particular implementation changes.
 - [Body capabilities](design/body-capabilities.md)
 - [Native presentation and graphics stack](design/native-presentation.md)
 
+## Active workstreams
+
+- [bgfx integration](workstreams/bgfx-integration.md) — current gate, dependency revisions,
+  evidence, and restart checklist for the shared-renderer experiment.
+
 New designs belong under `docs/design/`. Each specification should state the problem, goals,
 non-goals, ownership, data flow, invariants, failure behavior, and acceptance criteria. Temporary
 experiments and chronological session notes do not belong there; conclusions from them do.
