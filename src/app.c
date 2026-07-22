@@ -707,13 +707,31 @@ static bool apply_window_geometry(EidolonApp *app, SDL_Rect window_bounds) {
     if (window_bounds.w <= 0 || window_bounds.h <= 0) {
         return false;
     }
-    if (!SDL_SetWindowSize(app->window, window_bounds.w, window_bounds.h)) {
-        eidolon_log_write("layout", "could not resize overlay: %s", SDL_GetError());
-        return false;
+    int current_x = 0;
+    int current_y = 0;
+    int current_width = 0;
+    int current_height = 0;
+    const bool have_position = SDL_GetWindowPosition(app->window, &current_x, &current_y);
+    const bool have_size = SDL_GetWindowSize(app->window, &current_width, &current_height);
+    bool geometry_requested = false;
+    if (!have_size || current_width != window_bounds.w || current_height != window_bounds.h) {
+        if (!SDL_SetWindowSize(app->window, window_bounds.w, window_bounds.h)) {
+            eidolon_log_write("layout", "could not resize overlay: %s", SDL_GetError());
+            return false;
+        }
+        geometry_requested = true;
     }
     if (!app->snapshot_mode &&
-        !SDL_SetWindowPosition(app->window, window_bounds.x, window_bounds.y)) {
-        eidolon_log_write("layout", "could not position overlay: %s", SDL_GetError());
+        (!have_position || current_x != window_bounds.x || current_y != window_bounds.y)) {
+        if (!SDL_SetWindowPosition(app->window, window_bounds.x, window_bounds.y)) {
+            eidolon_log_write("layout", "could not position overlay: %s", SDL_GetError());
+            return false;
+        }
+        geometry_requested = true;
+    }
+    if (geometry_requested && !SDL_SyncWindow(app->window)) {
+        eidolon_log_write("layout", "overlay geometry synchronization timed out: %s",
+                          SDL_GetError());
         return false;
     }
     app->window_width =
@@ -2115,11 +2133,15 @@ void eidolon_app_run(EidolonApp *app) {
 
         const uint64_t now_ms = SDL_GetTicks();
         EidolonConversationEvent conversation_event;
-        bool conversation_layout_changed = false;
+        bool conversation_visibility_grew = false;
         while (eidolon_conversation_sources_poll(app->conversation_sources, &conversation_event)) {
+            const size_t visible_before_event =
+                eidolon_session_registry_visible_count(&app->session_registry);
             const EidolonSessionPoll live = eidolon_session_registry_apply_event(
                 &app->session_registry, &conversation_event, now_ms);
-            conversation_layout_changed = conversation_layout_changed || live.changed;
+            conversation_visibility_grew =
+                conversation_visibility_grew || eidolon_session_registry_visible_count(
+                                                    &app->session_registry) > visible_before_event;
             if (live.stream_started && live.message_session != NULL) {
                 eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
                 const float attention = session_attention_direction(app, live.message_session);
@@ -2173,8 +2195,14 @@ void eidolon_app_run(EidolonApp *app) {
         }
 
         poll_motion_config(app, now_ms);
+        const size_t visible_before_session_poll =
+            eidolon_session_registry_visible_count(&app->session_registry);
         const EidolonSessionPoll sessions =
             eidolon_session_registry_poll(&app->session_registry, now_ms);
+        const size_t visible_after_session_poll =
+            eidolon_session_registry_visible_count(&app->session_registry);
+        const bool session_visibility_shrank =
+            visible_after_session_poll < visible_before_session_poll;
         if (sessions.new_message) {
             eidolon_app_set_state(app, EIDOLON_STATE_REVIEW);
             eidolon_portrait_set_attention(
@@ -2190,21 +2218,31 @@ void eidolon_app_run(EidolonApp *app) {
                 app, &sessions.advanced_session->dialogue,
                 session_attention_direction(app, sessions.advanced_session), now_ms);
         }
+        bool visible_session_presenting = false;
         for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
             EidolonSessionEntry *entry = &app->session_registry.entries[index];
             if (entry->visible) {
+                visible_session_presenting = visible_session_presenting || entry->streaming ||
+                                             eidolon_dialogue_has_unread(&entry->dialogue);
                 activate_dialogue_performance(app, &entry->dialogue,
                                               session_attention_direction(app, entry), now_ms);
                 activate_dialogue_delivery(app, &entry->dialogue,
                                            session_attention_direction(app, entry), now_ms);
             }
         }
-        if (sessions.changed || conversation_layout_changed) {
-            eidolon_app_set_model_scale(app, app->model_scale);
-            app->hit_test_initialized = false;
-            if (eidolon_session_registry_visible_count(&app->session_registry) == 0U) {
-                eidolon_portrait_set_attention(app->portrait, 0.0F);
+        if (visible_after_session_poll > 0U && !visible_session_presenting) {
+            eidolon_portrait_set_attention(app->portrait, 0.0F);
+        }
+        if (sessions.changed || conversation_visibility_grew) {
+            if (!session_visibility_shrank || conversation_visibility_grew) {
+                eidolon_app_set_model_scale(app, app->model_scale);
+            } else {
+                eidolon_log_write(
+                    "layout",
+                    "bubble removal retained canvas visible=%zu->%zu to preserve presentation",
+                    visible_before_session_poll, visible_after_session_poll);
             }
+            app->hit_test_initialized = false;
         }
         eidolon_animation_update(&app->animation, app->state, now_ms);
         if (eidolon_session_registry_visible_count(&app->session_registry) == 0U) {
@@ -2278,6 +2316,9 @@ void eidolon_app_destroy(EidolonApp *app) {
     eidolon_model_destroy(app->model);
     eidolon_portrait_destroy(app->portrait);
     eidolon_text_renderer_destroy(app->text_renderer);
+    for (size_t index = 0U; index < SDL_arraysize(app->bubble_layers); ++index) {
+        SDL_DestroyTexture(app->bubble_layers[index]);
+    }
     SDL_DestroyTexture(app->atlas);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);

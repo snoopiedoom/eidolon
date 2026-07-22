@@ -125,6 +125,63 @@ int main(void) {
     assert(!poll.new_message);
     assert(strcmp(poll.message_session->dialogue.text, "hello world!") == 0);
 
+    EidolonConversationEvent connected = {.type = EIDOLON_CONVERSATION_SOURCE_CONNECTED};
+    SDL_strlcpy(connected.provider, "codex", sizeof(connected.provider));
+    (void)eidolon_session_registry_apply_event(&registry, &connected, 700U);
+
+    EidolonConversationEvent codex_delta = {.type = EIDOLON_CONVERSATION_TEXT_DELTA};
+    SDL_strlcpy(codex_delta.provider, "codex", sizeof(codex_delta.provider));
+    SDL_strlcpy(codex_delta.session_id, "01234567-89ab-cdef-8123-456789abcdef",
+                sizeof(codex_delta.session_id));
+    SDL_strlcpy(codex_delta.message_id, "current-live", sizeof(codex_delta.message_id));
+    SDL_strlcpy(codex_delta.text, "current live", sizeof(codex_delta.text));
+    poll = eidolon_session_registry_apply_event(&registry, &codex_delta, 701U);
+    assert(poll.stream_started);
+    assert(poll.message_session->live_owned);
+
+    fixture_stamp = 3U;
+    fixture_output = "stale previous response";
+    poll = eidolon_session_registry_poll(&registry, 702U);
+    assert(!poll.new_message);
+    assert(strcmp(registry.entries[0].last_output, "current live") == 0);
+    assert(strcmp(registry.entries[0].dialogue.text, "current live") == 0);
+
+    EidolonConversationEvent codex_completed = {
+        .type = EIDOLON_CONVERSATION_MESSAGE_COMPLETED,
+    };
+    SDL_strlcpy(codex_completed.provider, "codex", sizeof(codex_completed.provider));
+    SDL_strlcpy(codex_completed.session_id, "01234567-89ab-cdef-8123-456789abcdef",
+                sizeof(codex_completed.session_id));
+    SDL_strlcpy(codex_completed.message_id, "current-live", sizeof(codex_completed.message_id));
+    SDL_strlcpy(codex_completed.text, "current live response", sizeof(codex_completed.text));
+    poll = eidolon_session_registry_apply_event(&registry, &codex_completed, 703U);
+    assert(poll.message_completed);
+
+    fixture_stamp = 4U;
+    fixture_output = "stale previous response";
+    poll = eidolon_session_registry_poll(&registry, 704U);
+    assert(!poll.new_message);
+    assert(strcmp(registry.entries[0].dialogue.text, "current live response") == 0);
+
+    EidolonConversationEvent disconnected = {
+        .type = EIDOLON_CONVERSATION_SOURCE_DISCONNECTED,
+    };
+    SDL_strlcpy(disconnected.provider, "codex", sizeof(disconnected.provider));
+    (void)eidolon_session_registry_apply_event(&registry, &disconnected, 705U);
+    assert(!registry.entries[0].live_owned);
+    assert(!registry.entries[0].streaming);
+
+    fixture_output = "current live response";
+    poll = eidolon_session_registry_poll(&registry, 706U);
+    assert(!poll.new_message);
+    assert(strcmp(registry.entries[0].dialogue.text, "current live response") == 0);
+
+    fixture_stamp = 5U;
+    fixture_output = "fallback response";
+    poll = eidolon_session_registry_poll(&registry, 707U);
+    assert(poll.new_message);
+    assert(strcmp(registry.entries[0].dialogue.text, "fallback response") == 0);
+
     EidolonSessionRegistry *timeouts = SDL_calloc(1U, sizeof(*timeouts));
     assert(timeouts != NULL);
     eidolon_session_registry_set_legacy_transcripts(timeouts, false);
@@ -144,20 +201,21 @@ int main(void) {
     EidolonSessionEntry *second_entry = poll.message_session;
     assert(second_entry != NULL && second_entry->visible);
 
-    poll = eidolon_session_registry_poll(timeouts, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS - 1U);
+    const uint64_t transport_silent_ms =
+        1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS + 100U;
+    assert(first_entry->dismissal_started_ms == 0U);
+    assert(eidolon_session_entry_opacity(first_entry, transport_silent_ms) == 1.0F);
+    poll = eidolon_session_registry_poll(timeouts, transport_silent_ms);
     assert(!poll.changed);
     assert(first_entry->visible);
     assert(second_entry->visible);
+    assert(!eidolon_dialogue_has_unread(&first_entry->dialogue));
+    assert(first_entry->dismissal_started_ms == transport_silent_ms);
+    assert(eidolon_session_entry_opacity(first_entry, transport_silent_ms) == 1.0F);
 
-    poll = eidolon_session_registry_poll(timeouts, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS);
-    assert(!poll.changed);
-    assert(first_entry->visible);
-    assert(eidolon_session_entry_opacity(first_entry, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) ==
-           1.0F);
-    assert(second_entry->visible);
-
-    const uint64_t half_fade =
-        1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS / 2U;
+    const uint64_t half_fade = first_entry->dismissal_started_ms +
+                               EIDOLON_SESSION_BUBBLE_TIMEOUT_MS +
+                               EIDOLON_SESSION_BUBBLE_FADE_MS / 2U;
     poll = eidolon_session_registry_poll(timeouts, half_fade);
     assert(!poll.changed);
     assert(first_entry->visible);
@@ -174,11 +232,32 @@ int main(void) {
     assert(first_entry->visible);
     assert(first_entry->layout_slot == first_slot);
     assert(first_entry->last_activity_ms == half_fade + 1U);
+    assert(first_entry->dismissal_started_ms == 0U);
     assert(eidolon_session_entry_opacity(first_entry, half_fade + 1U) == 1.0F);
 
-    const uint64_t renewed_hide_ms = first_entry->last_activity_ms +
-                                     EIDOLON_SESSION_BUBBLE_TIMEOUT_MS +
-                                     EIDOLON_SESSION_BUBBLE_FADE_MS;
+    const uint64_t still_streaming_ms = first_entry->last_activity_ms +
+                                        EIDOLON_SESSION_BUBBLE_TIMEOUT_MS +
+                                        EIDOLON_SESSION_BUBBLE_FADE_MS + 100U;
+    (void)eidolon_session_registry_poll(timeouts, still_streaming_ms);
+    assert(first_entry->visible);
+    assert(first_entry->dismissal_started_ms == 0U);
+    assert(eidolon_session_entry_opacity(first_entry, still_streaming_ms) == 1.0F);
+
+    EidolonConversationEvent renewed_completed = {
+        .type = EIDOLON_CONVERSATION_MESSAGE_COMPLETED,
+    };
+    SDL_strlcpy(renewed_completed.provider, "opencode", sizeof(renewed_completed.provider));
+    SDL_strlcpy(renewed_completed.session_id, "quiet-first", sizeof(renewed_completed.session_id));
+    SDL_strlcpy(renewed_completed.message_id, "renewed-message",
+                sizeof(renewed_completed.message_id));
+    SDL_strlcpy(renewed_completed.text, "back", sizeof(renewed_completed.text));
+    const uint64_t renewed_completed_ms = still_streaming_ms + 1U;
+    (void)eidolon_session_registry_apply_event(timeouts, &renewed_completed, renewed_completed_ms);
+    (void)eidolon_session_registry_poll(timeouts, renewed_completed_ms);
+    assert(first_entry->dismissal_started_ms == renewed_completed_ms);
+
+    const uint64_t renewed_hide_ms =
+        renewed_completed_ms + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS;
     (void)eidolon_session_registry_poll(timeouts, renewed_hide_ms - 1U);
     assert(first_entry->visible);
     assert(eidolon_session_entry_opacity(first_entry, renewed_hide_ms - 1U) > 0.0F);

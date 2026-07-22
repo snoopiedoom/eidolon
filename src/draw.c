@@ -9,6 +9,7 @@
 
 #define TEXT_SLOT_DIALOGUE_TITLE_BASE 2U
 #define TEXT_SLOT_DIALOGUE_BODY_BASE 7U
+#define BUBBLE_LAYER_PADDING 32.0F
 
 typedef struct DialogueThemeStyle {
     SDL_Color shadow;
@@ -57,31 +58,35 @@ static void fill_rounded_rect(SDL_Renderer *renderer, const SDL_FRect *rect, flo
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 
-    SDL_FRect middle = {rect->x + radius, rect->y, rect->w - (radius * 2.0F), rect->h};
-    SDL_FRect center = {rect->x, rect->y + radius, rect->w, rect->h - (radius * 2.0F)};
-    SDL_RenderFillRect(renderer, &middle);
-    SDL_RenderFillRect(renderer, &center);
+    const float bounded_radius = SDL_min(radius, SDL_min(rect->w, rect->h) * 0.5F);
+    const SDL_FRect bands[] = {
+        {rect->x + bounded_radius, rect->y, rect->w - bounded_radius * 2.0F, bounded_radius},
+        {rect->x, rect->y + bounded_radius, rect->w, rect->h - bounded_radius * 2.0F},
+        {rect->x + bounded_radius, rect->y + rect->h - bounded_radius,
+         rect->w - bounded_radius * 2.0F, bounded_radius},
+    };
+    SDL_RenderFillRects(renderer, bands, SDL_arraysize(bands));
 
-    const int radius_i = (int)radius;
-    for (int y = -radius_i; y <= radius_i; ++y) {
-        const float yf = (float)y;
-        const float span = SDL_sqrtf((radius * radius) - (yf * yf));
+    const int radius_i = (int)SDL_ceilf(bounded_radius);
+    for (int row = 0; row < radius_i; ++row) {
+        const float yf = bounded_radius - ((float)row + 0.5F);
+        const float span = SDL_sqrtf(SDL_max(0.0F, bounded_radius * bounded_radius - yf * yf));
         SDL_FRect left = {
-            rect->x + radius - span,
-            rect->y + radius + yf,
+            rect->x + bounded_radius - span,
+            rect->y + (float)row,
             span,
             1.0F,
         };
         SDL_FRect right = {
-            rect->x + rect->w - radius,
-            rect->y + radius + yf,
+            rect->x + rect->w - bounded_radius,
+            rect->y + (float)row,
             span,
             1.0F,
         };
         SDL_RenderFillRect(renderer, &left);
         SDL_RenderFillRect(renderer, &right);
 
-        left.y = rect->y + rect->h - radius + yf;
+        left.y = rect->y + rect->h - (float)row - 1.0F;
         right.y = left.y;
         SDL_RenderFillRect(renderer, &left);
         SDL_RenderFillRect(renderer, &right);
@@ -135,9 +140,10 @@ static void draw_dialogue_text(EidolonApp *app, const EidolonDialogue *dialogue,
     SDL_RenderDebugText(app->renderer, x, y, line);
 }
 
-static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
-                                 const EidolonDialogue *dialogue, const char *title,
-                                 size_t title_slot, size_t body_slot, float opacity) {
+static void draw_dialogue_bubble_content(EidolonApp *app, const SDL_FRect *bubble,
+                                         const EidolonDialogue *dialogue, const char *title,
+                                         size_t title_slot, size_t body_slot, float opacity,
+                                         bool points_right) {
     if (opacity <= 0.0F) {
         return;
     }
@@ -153,8 +159,6 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     style.title = color_with_opacity(style.title, opacity);
     style.body = color_with_opacity(style.body, opacity);
     style.divider = color_with_opacity(style.divider, opacity);
-    const bool points_right =
-        bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
     const float tail_y = bubble->y + bubble->h * 0.68F;
 
     fill_rounded_rect(app->renderer, &shadow, style.radius, style.shadow);
@@ -215,6 +219,78 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     }
 }
 
+static bool ensure_bubble_layer(EidolonApp *app, size_t layer_slot, int width, int height) {
+    if (layer_slot >= SDL_arraysize(app->bubble_layers) || width <= 0 || height <= 0) {
+        return false;
+    }
+    if (app->bubble_layers[layer_slot] != NULL &&
+        (app->bubble_layer_widths[layer_slot] != width ||
+         app->bubble_layer_heights[layer_slot] != height)) {
+        SDL_DestroyTexture(app->bubble_layers[layer_slot]);
+        app->bubble_layers[layer_slot] = NULL;
+    }
+    if (app->bubble_layers[layer_slot] == NULL) {
+        const SDL_BlendMode premultiplied_blend = SDL_ComposeCustomBlendMode(
+            SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
+            SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
+        app->bubble_layers[layer_slot] = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ABGR8888,
+                                                           SDL_TEXTUREACCESS_TARGET, width, height);
+        if (app->bubble_layers[layer_slot] == NULL ||
+            !SDL_SetTextureBlendMode(app->bubble_layers[layer_slot], premultiplied_blend)) {
+            SDL_DestroyTexture(app->bubble_layers[layer_slot]);
+            app->bubble_layers[layer_slot] = NULL;
+            return false;
+        }
+        app->bubble_layer_widths[layer_slot] = width;
+        app->bubble_layer_heights[layer_slot] = height;
+    }
+    return true;
+}
+
+static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
+                                 const EidolonDialogue *dialogue, const char *title,
+                                 size_t title_slot, size_t body_slot, size_t layer_slot,
+                                 float opacity) {
+    if (opacity <= 0.0F) {
+        return;
+    }
+    const bool points_right =
+        bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
+    const int layer_width = (int)SDL_ceilf(bubble->w + BUBBLE_LAYER_PADDING * 2.0F);
+    const int layer_height = (int)SDL_ceilf(bubble->h + BUBBLE_LAYER_PADDING * 2.0F);
+    SDL_Texture *previous_target = SDL_GetRenderTarget(app->renderer);
+    if (ensure_bubble_layer(app, layer_slot, layer_width, layer_height) &&
+        SDL_SetRenderTarget(app->renderer, app->bubble_layers[layer_slot])) {
+        SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0);
+        SDL_RenderClear(app->renderer);
+        const SDL_FRect local_bubble = {
+            BUBBLE_LAYER_PADDING,
+            BUBBLE_LAYER_PADDING,
+            bubble->w,
+            bubble->h,
+        };
+        draw_dialogue_bubble_content(app, &local_bubble, dialogue, title, title_slot, body_slot,
+                                     1.0F, points_right);
+        if (SDL_SetRenderTarget(app->renderer, previous_target) &&
+            SDL_SetTextureColorModFloat(app->bubble_layers[layer_slot], opacity, opacity,
+                                        opacity) &&
+            SDL_SetTextureAlphaModFloat(app->bubble_layers[layer_slot], opacity)) {
+            const SDL_FRect destination = {
+                bubble->x - BUBBLE_LAYER_PADDING,
+                bubble->y - BUBBLE_LAYER_PADDING,
+                (float)layer_width,
+                (float)layer_height,
+            };
+            SDL_RenderTexture(app->renderer, app->bubble_layers[layer_slot], NULL, &destination);
+            return;
+        }
+    }
+
+    (void)SDL_SetRenderTarget(app->renderer, previous_target);
+    draw_dialogue_bubble_content(app, bubble, dialogue, title, title_slot, body_slot, opacity,
+                                 points_right);
+}
+
 static void draw_scene(EidolonApp *app) {
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0);
     SDL_RenderClear(app->renderer);
@@ -228,7 +304,7 @@ static void draw_scene(EidolonApp *app) {
             if (session != NULL && app->bubble_rect_valid[slot]) {
                 draw_dialogue_bubble(app, &app->bubble_rects[slot], &session->dialogue,
                                      session->title, TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
-                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot,
+                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot, (size_t)slot,
                                      eidolon_session_entry_opacity(session, now_ms));
             }
         }
@@ -236,7 +312,8 @@ static void draw_scene(EidolonApp *app) {
         const SDL_FRect bubble = {17.0F, 16.0F, EIDOLON_BUBBLE_WIDTH, EIDOLON_BUBBLE_HEIGHT};
         draw_dialogue_bubble(app, &bubble, &app->dialogue, "EIDOLON",
                              TEXT_SLOT_DIALOGUE_TITLE_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
-                             TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY, 1.0F);
+                             TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
+                             EIDOLON_VISIBLE_SESSION_CAPACITY, 1.0F);
     }
 
     if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {

@@ -225,7 +225,8 @@ static size_t list_known_transcripts(EidolonSessionRegistry *registry, EidolonTr
     for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY && count < capacity; ++index) {
         EidolonSessionEntry *entry = &registry->entries[index];
         uint64_t stamp = 0U;
-        if (!entry->occupied || !eidolon_platform_transcript_stamp(entry->path, &stamp)) {
+        if (!entry->occupied || entry->path[0] == '\0' ||
+            !eidolon_platform_transcript_stamp(entry->path, &stamp)) {
             continue;
         }
         SDL_strlcpy(files[count].path, entry->path, sizeof(files[count].path));
@@ -391,6 +392,7 @@ static EidolonSessionEntry *entry_for_event(EidolonSessionRegistry *registry,
 static void show_entry(EidolonSessionRegistry *registry, EidolonSessionEntry *entry,
                        uint64_t now_ms, EidolonSessionPoll *result) {
     entry->last_activity_ms = now_ms;
+    entry->dismissal_started_ms = 0U;
     if (!entry->visible) {
         entry->layout_slot = allocate_slot(registry, now_ms);
         entry->visible = true;
@@ -402,14 +404,28 @@ EidolonSessionPoll eidolon_session_registry_apply_event(EidolonSessionRegistry *
                                                         const EidolonConversationEvent *event,
                                                         uint64_t now_ms) {
     EidolonSessionPoll result = {0};
-    if (registry == NULL || event == NULL || event->type == EIDOLON_CONVERSATION_SOURCE_CONNECTED ||
-        event->type == EIDOLON_CONVERSATION_SOURCE_DISCONNECTED) {
+    if (registry == NULL || event == NULL) {
+        return result;
+    }
+    if (event->type == EIDOLON_CONVERSATION_SOURCE_CONNECTED) {
+        return result;
+    }
+    if (event->type == EIDOLON_CONVERSATION_SOURCE_DISCONNECTED) {
+        for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
+            EidolonSessionEntry *entry = &registry->entries[index];
+            if (entry->occupied && strcmp(entry->provider, event->provider) == 0) {
+                entry->live_owned = false;
+                entry->streaming = false;
+                entry->dismissal_started_ms = 0U;
+            }
+        }
         return result;
     }
     EidolonSessionEntry *entry = entry_for_event(registry, event);
     if (entry == NULL) {
         return result;
     }
+    entry->live_owned = true;
     if (event->title[0] != '\0') {
         SDL_strlcpy(entry->title, event->title, sizeof(entry->title));
     }
@@ -423,6 +439,7 @@ EidolonSessionPoll eidolon_session_registry_apply_event(EidolonSessionRegistry *
         break;
     case EIDOLON_CONVERSATION_TURN_STARTED:
         entry->last_activity_ms = now_ms;
+        entry->dismissal_started_ms = 0U;
         break;
     case EIDOLON_CONVERSATION_TEXT_DELTA: {
         const bool new_stream =
@@ -483,6 +500,7 @@ EidolonSessionPoll eidolon_session_registry_apply_event(EidolonSessionRegistry *
     case EIDOLON_CONVERSATION_TURN_COMPLETED:
         entry->streaming = false;
         entry->last_activity_ms = now_ms;
+        entry->dismissal_started_ms = 0U;
         break;
     case EIDOLON_CONVERSATION_SOURCE_CONNECTED:
     case EIDOLON_CONVERSATION_SOURCE_DISCONNECTED:
@@ -547,10 +565,15 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         }
         if (entry->path[0] == '\0') {
             SDL_strlcpy(entry->path, files[index].path, sizeof(entry->path));
-            entry->stamp = files[index].stamp;
+            if (!entry->live_owned) {
+                entry->stamp = files[index].stamp;
+            }
             continue;
         }
         if (entry->stamp == files[index].stamp) {
+            continue;
+        }
+        if (entry->live_owned) {
             continue;
         }
         entry->stamp = files[index].stamp;
@@ -569,6 +592,7 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         eidolon_dialogue_configure(&entry->dialogue, registry->dialogue_movement,
                                    registry->dialogue_hold_ms);
         entry->last_activity_ms = now_ms;
+        entry->dismissal_started_ms = 0U;
         entry->detected_ms = now_ms;
         entry->first_glyph_ms = 0U;
         entry->first_glyph_logged = false;
@@ -597,16 +621,6 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
     }
     for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
         EidolonSessionEntry *entry = &registry->entries[index];
-        const uint64_t quiet_ms =
-            now_ms >= entry->last_activity_ms ? now_ms - entry->last_activity_ms : 0U;
-        if (entry->visible &&
-            quiet_ms >= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS) {
-            entry->visible = false;
-            entry->layout_slot = -1;
-            result.changed = true;
-            eidolon_log_write("session", "bubble hidden provider=%s session=%s quiet_ms=%llu",
-                              entry->provider, entry->id, (unsigned long long)quiet_ms);
-        }
         if (entry->visible) {
             const size_t previous_revealed = entry->dialogue.revealed;
             eidolon_dialogue_update(&entry->dialogue, now_ms);
@@ -632,6 +646,24 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
                 result.page_advanced = true;
                 result.advanced_session = entry;
             }
+            if (!entry->streaming && !eidolon_dialogue_has_unread(&entry->dialogue) &&
+                entry->dismissal_started_ms == 0U) {
+                entry->dismissal_started_ms = now_ms;
+            }
+            const uint64_t dismissal_ms =
+                entry->dismissal_started_ms > 0U && now_ms >= entry->dismissal_started_ms
+                    ? now_ms - entry->dismissal_started_ms
+                    : 0U;
+            if (entry->dismissal_started_ms > 0U &&
+                dismissal_ms >=
+                    EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS) {
+                entry->visible = false;
+                entry->layout_slot = -1;
+                result.changed = true;
+                eidolon_log_write("session",
+                                  "bubble hidden provider=%s session=%s presentation_idle_ms=%llu",
+                                  entry->provider, entry->id, (unsigned long long)dismissal_ms);
+            }
         }
     }
     return result;
@@ -641,12 +673,14 @@ float eidolon_session_entry_opacity(const EidolonSessionEntry *entry, uint64_t n
     if (entry == NULL || !entry->visible) {
         return 0.0F;
     }
-    const uint64_t quiet_ms =
-        now_ms >= entry->last_activity_ms ? now_ms - entry->last_activity_ms : 0U;
-    if (quiet_ms <= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) {
+    if (entry->dismissal_started_ms == 0U || now_ms < entry->dismissal_started_ms) {
         return 1.0F;
     }
-    const uint64_t fade_ms = quiet_ms - EIDOLON_SESSION_BUBBLE_TIMEOUT_MS;
+    const uint64_t dismissal_ms = now_ms - entry->dismissal_started_ms;
+    if (dismissal_ms <= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) {
+        return 1.0F;
+    }
+    const uint64_t fade_ms = dismissal_ms - EIDOLON_SESSION_BUBBLE_TIMEOUT_MS;
     if (fade_ms >= EIDOLON_SESSION_BUBBLE_FADE_MS) {
         return 0.0F;
     }

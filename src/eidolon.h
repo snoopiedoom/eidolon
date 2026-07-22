@@ -61,6 +61,9 @@ typedef struct EidolonApp {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *atlas;
+    SDL_Texture *bubble_layers[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
+    int bubble_layer_widths[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
+    int bubble_layer_heights[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
     EidolonTextRenderer *text_renderer;
     EidolonModelRenderer *model;
     EidolonPortraitRenderer *portrait;

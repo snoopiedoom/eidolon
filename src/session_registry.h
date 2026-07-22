@@ -29,6 +29,7 @@ typedef struct EidolonSessionEntry {
     EidolonDialogue dialogue;
     uint64_t stamp;
     uint64_t last_activity_ms;
+    uint64_t dismissal_started_ms;
     uint64_t detected_ms;
     uint64_t first_glyph_ms;
     int layout_slot;
@@ -36,6 +37,7 @@ typedef struct EidolonSessionEntry {
     bool visible;
     bool first_glyph_logged;
     bool streaming;
+    bool live_owned;
 } EidolonSessionEntry;
 
 typedef struct EidolonSessionDiscovery EidolonSessionDiscovery;
