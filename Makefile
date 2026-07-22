@@ -17,6 +17,7 @@ COMMON_SOURCES := \
 	src/dialogue.c \
 	src/draw.c \
 	src/expression_director.c \
+	src/frame_clock.c \
 	src/hook_output.c \
 	src/humanoid.c \
 	src/ik.c \
@@ -306,6 +307,7 @@ PORTRAIT_MOTION_TEST := $(TEST_DIR)/portrait_motion_test$(EXE)
 AFFECT_TEST := $(TEST_DIR)/affect_test$(EXE)
 AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
 EXPRESSION_DIRECTOR_TEST := $(TEST_DIR)/expression_director_test$(EXE)
+FRAME_CLOCK_TEST := $(TEST_DIR)/frame_clock_test$(EXE)
 BUBBLE_LAYOUT_TEST := $(TEST_DIR)/bubble_layout_test$(EXE)
 SESSION_REGISTRY_TEST := $(TEST_DIR)/session_registry_test$(EXE)
 USER_SETTINGS_TEST := $(TEST_DIR)/user_settings_test$(EXE)
@@ -396,6 +398,10 @@ $(EXPRESSION_DIRECTOR_TEST): tests/expression_director_test.c src/expression_dir
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(FRAME_CLOCK_TEST): tests/frame_clock_test.c src/frame_clock.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 $(BUBBLE_LAYOUT_TEST): tests/bubble_layout_test.c src/bubble_layout.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
@@ -443,7 +449,7 @@ codex-relay-test: $(CODEX_RELAY_TEST)
 check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
-	$(EXPRESSION_DIRECTOR_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
+	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
@@ -461,6 +467,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_
 	$(AFFECT_TEST)
 	$(AFFECT_TOKENIZER_TEST)
 	$(EXPRESSION_DIRECTOR_TEST)
+	$(FRAME_CLOCK_TEST)
 	$(BUBBLE_LAYOUT_TEST)
 	$(SESSION_REGISTRY_TEST)
 	$(USER_SETTINGS_TEST)

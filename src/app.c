@@ -3,14 +3,15 @@
 #include "animation.h"
 #include "bubble_layout.h"
 #include "draw.h"
+#include "frame_clock.h"
 #include "log.h"
 #include "platform/overlay.h"
 #include "pose.h"
 #include "settings_ui.h"
 
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
-#define PRESENTATION_RATE_HZ 30U
-#define PRESENTATION_INTERVAL_NS ((Uint64)SDL_NS_PER_SECOND / PRESENTATION_RATE_HZ)
+#define EVENT_BATCH_LIMIT 128U
+#define EVENT_PRESSURE_LOG_INTERVAL_MS 1000U
 #define USER_SETTINGS_SAVE_DELAY_MS 500U
 #define EXPRESSION_TRACK_TIMEOUT_MS 3000U
 #define EXPRESSION_SUBMISSION_TIMEOUT_MS 10000U
@@ -35,6 +36,8 @@ static void capture_runtime_settings(const EidolonApp *app, EidolonUserSettings 
     settings->bubble_custom_y = app->bubble_custom_bounds.y;
     settings->bubble_custom_width = app->bubble_custom_bounds.w;
     settings->bubble_custom_height = app->bubble_custom_bounds.h;
+    settings->vsync = app->vsync_enabled;
+    settings->fps_limit = app->fps_limit;
 }
 
 static void schedule_user_settings_save(EidolonApp *app) {
@@ -86,6 +89,12 @@ static void mark_user_settings_dirty(EidolonApp *app, EidolonUserSettingField fi
         app->user_settings.bubble_custom_y = app->bubble_custom_bounds.y;
         app->user_settings.bubble_custom_width = app->bubble_custom_bounds.w;
         app->user_settings.bubble_custom_height = app->bubble_custom_bounds.h;
+        break;
+    case EIDOLON_USER_SETTING_VSYNC:
+        app->user_settings.vsync = app->vsync_enabled;
+        break;
+    case EIDOLON_USER_SETTING_FPS_LIMIT:
+        app->user_settings.fps_limit = app->fps_limit;
         break;
     }
     app->user_settings.overrides |= (uint32_t)field;
@@ -489,20 +498,19 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
     }
 }
 
-static Sint32 presentation_wait_ms(Uint64 now_ns, Uint64 deadline_ns) {
-    if (now_ns >= deadline_ns) {
-        return 0;
-    }
-    const Uint64 remaining_ns = deadline_ns - now_ns;
-    return (Sint32)((remaining_ns + (Uint64)SDL_NS_PER_MS - 1U) / (Uint64)SDL_NS_PER_MS);
+static uint64_t current_display_interval_ns(const EidolonApp *app) {
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(app->window);
+    const SDL_DisplayMode *mode = display != 0U ? SDL_GetCurrentDisplayMode(display) : NULL;
+    return eidolon_frame_interval_ns(mode != NULL ? mode->refresh_rate_numerator : 0,
+                                     mode != NULL ? mode->refresh_rate_denominator : 0,
+                                     mode != NULL ? mode->refresh_rate : 0.0F);
 }
 
-static Uint64 advance_presentation_deadline(Uint64 deadline_ns, Uint64 completed_ns) {
-    deadline_ns += PRESENTATION_INTERVAL_NS;
-    if (deadline_ns <= completed_ns) {
-        deadline_ns = completed_ns + PRESENTATION_INTERVAL_NS;
-    }
-    return deadline_ns;
+static void update_presentation_policy(EidolonApp *app) {
+    app->display_interval_ns = current_display_interval_ns(app);
+    app->presentation_interval_ns = eidolon_frame_policy_interval_ns(
+        app->display_interval_ns, app->vsync_enabled, app->vsync_active, app->fps_limit,
+        &app->presentation_uncapped, &app->presentation_software_paced);
 }
 
 static EidolonNeutralPose neutral_pose_from_config(const EidolonMotionConfig *config) {
@@ -1082,6 +1090,12 @@ static void apply_settings_layer(EidolonApp *app, const EidolonUserSettings *set
         eidolon_app_set_bubble_bounds_mode(app,
                                            (EidolonBubbleBoundsMode)settings->bubble_bounds_mode);
     }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_VSYNC)) {
+        eidolon_app_set_vsync(app, settings->vsync);
+    }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_FPS_LIMIT)) {
+        eidolon_app_set_fps_limit(app, settings->fps_limit);
+    }
     app->user_settings_applying = was_applying;
 }
 
@@ -1102,6 +1116,8 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     app->model_render_resolution = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
     app->bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_AVATAR;
     app->bubble_custom_bounds = (SDL_Rect){0, 0, 1920, 1080};
+    app->vsync_enabled = true;
+    app->fps_limit = 0;
     eidolon_user_settings_defaults(&app->system_settings);
     eidolon_user_settings_defaults(&app->user_settings);
     eidolon_motion_config_defaults(&app->motion_config);
@@ -1176,11 +1192,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         SDL_ClearError();
     }
 
-    if (!SDL_SetRenderVSync(app->renderer, app->snapshot_mode ? 0 : 1)) {
-        eidolon_log_write("renderer", "vsync request failed; explicit %u Hz cap remains active: %s",
-                          PRESENTATION_RATE_HZ, SDL_GetError());
-        SDL_ClearError();
-    }
+    eidolon_app_set_vsync(app, app->vsync_enabled);
     if (!app->snapshot_mode) {
         (void)update_display_metrics(app);
     }
@@ -1381,17 +1393,26 @@ void eidolon_app_log_presentation_metrics(const EidolonApp *app) {
     int window_height = 0;
     int output_width = 0;
     int output_height = 0;
-    int vsync = 0;
+    const double display_rate = app->display_interval_ns > 0U
+                                    ? (double)SDL_NS_PER_SECOND / (double)app->display_interval_ns
+                                    : 0.0;
+    const double presentation_rate =
+        app->presentation_interval_ns > 0U
+            ? (double)SDL_NS_PER_SECOND / (double)app->presentation_interval_ns
+            : 0.0;
     (void)SDL_GetWindowSize(app->window, &window_width, &window_height);
     (void)SDL_GetCurrentRenderOutputSize(app->renderer, &output_width, &output_height);
-    (void)SDL_GetRenderVSync(app->renderer, &vsync);
     eidolon_log_write(
         "renderer",
-        "presentation scale=%.2fx logical=%dx%d window=%dx%d output=%dx%d target=%d cap=%uHz "
-        "vsync=%d",
+        "presentation scale=%.2fx logical=%dx%d window=%dx%d output=%dx%d target=%d "
+        "display=%.2fHz vsync=requested:%s/active:%s fps_limit=%d effective=%s%.2fHz owner=%s",
         app->model_scale, app->window_width, app->window_height, window_width, window_height,
-        output_width, output_height, eidolon_model_render_resolution(app->model),
-        PRESENTATION_RATE_HZ, vsync);
+        output_width, output_height, eidolon_model_render_resolution(app->model), display_rate,
+        app->vsync_enabled ? "yes" : "no", app->vsync_active ? "yes" : "no", app->fps_limit,
+        app->presentation_uncapped ? "uncapped/" : "", presentation_rate,
+        app->presentation_software_paced ? "software"
+        : app->vsync_active              ? "vsync"
+                                         : "none");
 }
 
 static float normalize_degrees(float degrees) {
@@ -1623,6 +1644,40 @@ void eidolon_app_set_bubble_custom_bounds(EidolonApp *app, SDL_Rect bounds) {
     }
 }
 
+void eidolon_app_set_vsync(EidolonApp *app, bool enabled) {
+    const bool changed = app->vsync_enabled != enabled;
+    app->vsync_enabled = enabled;
+    const int requested = !app->snapshot_mode && enabled ? 1 : 0;
+    if (!SDL_SetRenderVSync(app->renderer, requested)) {
+        eidolon_log_write("renderer", "could not set vsync=%d: %s", requested, SDL_GetError());
+        SDL_ClearError();
+    }
+    int active = 0;
+    if (!SDL_GetRenderVSync(app->renderer, &active)) {
+        eidolon_log_write("renderer", "could not query active vsync: %s", SDL_GetError());
+        SDL_ClearError();
+        active = 0;
+    }
+    app->vsync_active = active != 0;
+    update_presentation_policy(app);
+    if (enabled && !app->snapshot_mode && !app->vsync_active) {
+        eidolon_log_write("renderer", "vsync unavailable; active-display refresh fallback enabled");
+    }
+    if (changed) {
+        mark_user_settings_dirty(app, EIDOLON_USER_SETTING_VSYNC);
+    }
+}
+
+void eidolon_app_set_fps_limit(EidolonApp *app, int fps_limit) {
+    const int clamped = SDL_clamp(fps_limit, EIDOLON_FPS_LIMIT_MIN, EIDOLON_FPS_LIMIT_MAX);
+    const bool changed = app->fps_limit != clamped;
+    app->fps_limit = clamped;
+    update_presentation_policy(app);
+    if (changed) {
+        mark_user_settings_dirty(app, EIDOLON_USER_SETTING_FPS_LIMIT);
+    }
+}
+
 bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField field) {
     if (!eidolon_user_settings_is_overridden(&app->user_settings, field)) {
         return false;
@@ -1679,6 +1734,12 @@ bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField fie
                                                         app->system_settings.bubble_custom_height});
         eidolon_app_set_bubble_bounds_mode(
             app, (EidolonBubbleBoundsMode)app->system_settings.bubble_bounds_mode);
+        break;
+    case EIDOLON_USER_SETTING_VSYNC:
+        eidolon_app_set_vsync(app, app->system_settings.vsync);
+        break;
+    case EIDOLON_USER_SETTING_FPS_LIMIT:
+        eidolon_app_set_fps_limit(app, app->system_settings.fps_limit);
         break;
     }
     app->user_settings_applying = false;
@@ -1746,9 +1807,26 @@ static void begin_primary_interaction(EidolonApp *app, const SDL_MouseButtonEven
     if (!point_in_rect(button->x, button->y, &character)) {
         return;
     }
+    int original_x = 0;
+    int original_y = 0;
+    SDL_GetWindowPosition(app->window, &original_x, &original_y);
+    if (eidolon_platform_begin_window_drag(app->window)) {
+        int current_x = 0;
+        int current_y = 0;
+        SDL_GetWindowPosition(app->window, &current_x, &current_y);
+        app->native_drag_completed = true;
+        app->primary_moved = current_x != original_x || current_y != original_y;
+        if (app->primary_moved) {
+            reflow_overlay_layout(app, app->model_scale);
+        }
+        return;
+    }
     app->primary_interaction = EIDOLON_PRIMARY_INTERACTION_CHARACTER_DRAG;
     SDL_GetGlobalMouseState(&app->drag_global_x, &app->drag_global_y);
     SDL_GetWindowPosition(app->window, &app->drag_window_x, &app->drag_window_y);
+    app->drag_target_window_x = app->drag_window_x;
+    app->drag_target_window_y = app->drag_window_y;
+    app->drag_position_pending = false;
     if (!SDL_CaptureMouse(true)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not capture character drag: %s",
                     SDL_GetError());
@@ -1772,16 +1850,40 @@ static void update_primary_interaction(EidolonApp *app, const SDL_MouseMotionEve
         SDL_abs((int)(global_y - app->drag_global_y)) > 3) {
         app->primary_moved = true;
     }
-    SDL_SetWindowPosition(app->window, x, y);
+    app->drag_target_window_x = x;
+    app->drag_target_window_y = y;
+    app->drag_position_pending = true;
+}
+
+static void commit_character_drag(EidolonApp *app) {
+    if (app->primary_interaction != EIDOLON_PRIMARY_INTERACTION_CHARACTER_DRAG ||
+        !app->drag_position_pending) {
+        return;
+    }
+    app->drag_position_pending = false;
+    const Uint64 started_ns = SDL_GetTicksNS();
+    if (!SDL_SetWindowPosition(app->window, app->drag_target_window_x, app->drag_target_window_y)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not move character window: %s",
+                    SDL_GetError());
+        return;
+    }
+    const Uint64 elapsed_ns = SDL_GetTicksNS() - started_ns;
+    if (elapsed_ns > app->presentation_interval_ns) {
+        eidolon_log_write("input", "window move stalled duration_ms=%.2f target=%d,%d",
+                          (double)elapsed_ns / (double)SDL_NS_PER_MS, app->drag_target_window_x,
+                          app->drag_target_window_y);
+    }
 }
 
 static void end_primary_interaction(EidolonApp *app) {
     if (app->primary_interaction == EIDOLON_PRIMARY_INTERACTION_CHARACTER_DRAG) {
+        commit_character_drag(app);
         SDL_CaptureMouse(false);
         if (app->primary_moved) {
             reflow_overlay_layout(app, app->model_scale);
         }
     }
+    app->drag_position_pending = false;
     app->primary_interaction = EIDOLON_PRIMARY_INTERACTION_NONE;
     app->primary_session_slot = -1;
 }
@@ -1864,12 +1966,17 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         break;
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
         const SDL_FPoint body_center = current_body_global_center(app);
+        update_presentation_policy(app);
         if (update_display_metrics(app)) {
             restore_body_global_center(app, body_center);
             eidolon_app_set_model_scale(app, app->model_scale);
         }
         break;
     }
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+        update_presentation_policy(app);
+        eidolon_app_log_presentation_metrics(app);
+        break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         app->hit_test_initialized = false;
         break;
@@ -1880,6 +1987,7 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
     case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
     case SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED:
     case SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED:
+        update_presentation_policy(app);
         app->bubble_display_id = 0U;
         reflow_overlay_layout(app, app->model_scale);
         break;
@@ -1949,31 +2057,61 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
 }
 
 void eidolon_app_run(EidolonApp *app) {
-    Uint64 next_presentation_ns = SDL_GetTicksNS();
-    Uint64 previous_presentation_ns = 0U;
+    EidolonFrameClock frame_clock;
+    eidolon_frame_clock_init(&frame_clock, SDL_GetTicksNS(), app->presentation_interval_ns);
+    bool frame_clock_software_paced = app->presentation_software_paced;
+    uint64_t next_event_pressure_log_ms = 0U;
     while (app->running) {
         SDL_Event event;
-        const Sint32 wait_ms = presentation_wait_ms(SDL_GetTicksNS(), next_presentation_ns);
-        if (SDL_WaitEventTimeout(&event, wait_ms)) {
-            handle_event(app, &event);
+        size_t event_count = 0U;
+        Uint64 now_ns = SDL_GetTicksNS();
+        if (frame_clock.interval_ns != app->presentation_interval_ns ||
+            frame_clock_software_paced != app->presentation_software_paced) {
+            eidolon_frame_clock_set_interval(&frame_clock, now_ns, app->presentation_interval_ns);
+            frame_clock_software_paced = app->presentation_software_paced;
         }
-        while (SDL_PollEvent(&event)) {
+        const Sint32 wait_ms =
+            frame_clock_software_paced ? eidolon_frame_clock_wait_ms(&frame_clock, now_ns) : 0;
+        const bool event_received = SDL_WaitEventTimeout(&event, wait_ms);
+        const Uint64 event_batch_started_ns = SDL_GetTicksNS();
+        if (event_received) {
             handle_event(app, &event);
+            event_count = 1U;
+        }
+        while (event_count < EVENT_BATCH_LIMIT && SDL_PollEvent(&event)) {
+            handle_event(app, &event);
+            ++event_count;
         }
         if (!app->running) {
             break;
         }
 
-        const Uint64 now_ns = SDL_GetTicksNS();
-        if (now_ns < next_presentation_ns) {
+        now_ns = SDL_GetTicksNS();
+        const Uint64 event_batch_ns = now_ns - event_batch_started_ns;
+        const uint64_t event_now_ms = SDL_GetTicks();
+        if (app->native_drag_completed) {
+            eidolon_frame_clock_set_interval(&frame_clock, now_ns, app->presentation_interval_ns);
+            frame_clock.previous_frame_ns = 0U;
+            app->native_drag_completed = false;
+        } else if ((event_count == EVENT_BATCH_LIMIT || event_batch_ns > frame_clock.interval_ns) &&
+                   event_now_ms >= next_event_pressure_log_ms) {
+            eidolon_log_write("input", "event pressure events=%zu duration_ms=%.2f capped=%s",
+                              event_count, (double)event_batch_ns / (double)SDL_NS_PER_MS,
+                              event_count == EVENT_BATCH_LIMIT ? "yes" : "no");
+            next_event_pressure_log_ms = event_now_ms + EVENT_PRESSURE_LOG_INTERVAL_MS;
+        }
+        if (frame_clock_software_paced && !eidolon_frame_clock_due(&frame_clock, now_ns)) {
             continue;
         }
-        if (previous_presentation_ns != 0U &&
-            now_ns - previous_presentation_ns > PRESENTATION_INTERVAL_NS * 2U) {
+        commit_character_drag(app);
+        now_ns = SDL_GetTicksNS();
+        if (frame_clock.previous_frame_ns != 0U &&
+            now_ns - frame_clock.previous_frame_ns > frame_clock.interval_ns * 2U) {
             eidolon_log_write("renderer", "presentation hitch gap_ms=%.2f",
-                              (double)(now_ns - previous_presentation_ns) / (double)SDL_NS_PER_MS);
+                              (double)(now_ns - frame_clock.previous_frame_ns) /
+                                  (double)SDL_NS_PER_MS);
         }
-        previous_presentation_ns = now_ns;
+        const float delta_seconds = eidolon_frame_clock_begin(&frame_clock, now_ns);
 
         const uint64_t now_ms = SDL_GetTicks();
         EidolonConversationEvent conversation_event;
@@ -2078,7 +2216,7 @@ void eidolon_app_run(EidolonApp *app) {
             activate_dialogue_delivery(app, &app->dialogue, -1.0F, now_ms);
         }
         service_expression_director(app, now_ms);
-        eidolon_affect_controller_update(&app->affect, 1.0F / (float)PRESENTATION_RATE_HZ, now_ms);
+        eidolon_affect_controller_update(&app->affect, delta_seconds, now_ms);
         eidolon_portrait_set_expression_intent(app->portrait, app->affect.expression_intent,
                                                now_ms);
         const uint64_t portrait_revision = eidolon_portrait_revision(app->portrait);
@@ -2120,8 +2258,9 @@ void eidolon_app_run(EidolonApp *app) {
         eidolon_draw_frame(app);
         eidolon_settings_ui_draw(app->settings_ui, app);
         flush_user_settings(app, false);
-        next_presentation_ns =
-            advance_presentation_deadline(next_presentation_ns, SDL_GetTicksNS());
+        if (frame_clock_software_paced) {
+            eidolon_frame_clock_finish(&frame_clock, SDL_GetTicksNS());
+        }
     }
 }
 

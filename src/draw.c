@@ -7,8 +7,6 @@
 
 #include <string.h>
 
-#define TEXT_SLOT_STATE_TITLE 0U
-#define TEXT_SLOT_STATE_SUBTITLE 1U
 #define TEXT_SLOT_DIALOGUE_TITLE_BASE 2U
 #define TEXT_SLOT_DIALOGUE_BODY_BASE 7U
 
@@ -106,69 +104,10 @@ static void fill_triangle(SDL_Renderer *renderer, SDL_FPoint a, SDL_FPoint b, SD
     SDL_RenderGeometry(renderer, NULL, vertices, 3, NULL, 0);
 }
 
-static const char *state_label(EidolonState state) {
-    switch (state) {
-    case EIDOLON_STATE_IDLE:
-        return "IDLE";
-    case EIDOLON_STATE_RUNNING:
-        return "WORKING";
-    case EIDOLON_STATE_WAITING:
-        return "NEEDS INPUT";
-    case EIDOLON_STATE_REVIEW:
-        return "READY";
-    case EIDOLON_STATE_FAILED:
-        return "BLOCKED";
-    case EIDOLON_STATE_COUNT:
-        break;
-    }
-    return "UNKNOWN";
-}
-
-static SDL_Color accent_for(EidolonState state) {
-    switch (state) {
-    case EIDOLON_STATE_RUNNING:
-        return (SDL_Color){112, 156, 255, 255};
-    case EIDOLON_STATE_WAITING:
-        return (SDL_Color){255, 188, 79, 255};
-    case EIDOLON_STATE_REVIEW:
-        return (SDL_Color){103, 211, 142, 255};
-    case EIDOLON_STATE_FAILED:
-        return (SDL_Color){255, 103, 119, 255};
-    case EIDOLON_STATE_IDLE:
-    case EIDOLON_STATE_COUNT:
-        return (SDL_Color){177, 151, 255, 255};
-    }
-    return (SDL_Color){255, 255, 255, 255};
-}
-
-static void draw_state_bubble(EidolonApp *app) {
-    const SDL_FRect shadow = {29.0F, 29.0F, 305.0F, 78.0F};
-    const SDL_FRect bubble = {26.0F, 25.0F, 305.0F, 78.0F};
-    const SDL_Color accent = accent_for(app->state);
-
-    fill_rounded_rect(app->renderer, &shadow, 19.0F, (SDL_Color){0, 0, 0, 70});
-    fill_triangle(app->renderer, (SDL_FPoint){299.0F, 102.0F}, (SDL_FPoint){325.0F, 90.0F},
-                  (SDL_FPoint){349.0F, 137.0F}, (SDL_Color){0, 0, 0, 70});
-    fill_rounded_rect(app->renderer, &bubble, 19.0F, (SDL_Color){20, 20, 25, 232});
-    fill_triangle(app->renderer, (SDL_FPoint){296.0F, 99.0F}, (SDL_FPoint){322.0F, 87.0F},
-                  (SDL_FPoint){346.0F, 132.0F}, (SDL_Color){20, 20, 25, 232});
-
-    const SDL_FRect accent_bar = {42.0F, 41.0F, 4.0F, 46.0F};
-    fill_rounded_rect(app->renderer, &accent_bar, 2.0F, accent);
-
-    const char *state = state_label(app->state);
-    if (!eidolon_text_renderer_draw(app->text_renderer, TEXT_SLOT_STATE_TITLE, state, strlen(state),
-                                    60.0F, 38.0F, 0, (SDL_Color){245, 244, 248, 255})) {
-        SDL_SetRenderDrawColor(app->renderer, 245, 244, 248, 255);
-        SDL_RenderDebugText(app->renderer, 60.0F, 42.0F, state);
-    }
-    static const char subtitle[] = "EIDOLON / LOCAL STATE";
-    if (!eidolon_text_renderer_draw(app->text_renderer, TEXT_SLOT_STATE_SUBTITLE, subtitle,
-                                    sizeof(subtitle) - 1U, 60.0F, 62.0F, 0,
-                                    (SDL_Color){168, 166, 177, 255})) {
-        SDL_SetRenderDrawColor(app->renderer, 168, 166, 177, 255);
-        SDL_RenderDebugText(app->renderer, 60.0F, 66.0F, subtitle);
-    }
+static SDL_Color color_with_opacity(SDL_Color color, float opacity) {
+    const float clamped = SDL_clamp(opacity, 0.0F, 1.0F);
+    color.a = (Uint8)SDL_roundf((float)color.a * clamped);
+    return color;
 }
 
 static void draw_dialogue_text(EidolonApp *app, const EidolonDialogue *dialogue, float x,
@@ -198,11 +137,22 @@ static void draw_dialogue_text(EidolonApp *app, const EidolonDialogue *dialogue,
 
 static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                                  const EidolonDialogue *dialogue, const char *title,
-                                 size_t title_slot, size_t body_slot) {
+                                 size_t title_slot, size_t body_slot, float opacity) {
+    if (opacity <= 0.0F) {
+        return;
+    }
     SDL_FRect shadow = *bubble;
     shadow.x += 3.0F;
     shadow.y += 4.0F;
-    const DialogueThemeStyle style = dialogue_theme_style(app->dialogue_theme);
+    DialogueThemeStyle style = dialogue_theme_style(app->dialogue_theme);
+    style.shadow = color_with_opacity(style.shadow, opacity);
+    style.background = color_with_opacity(style.background, opacity);
+    style.outline = color_with_opacity(style.outline, opacity);
+    style.accent = color_with_opacity(style.accent, opacity);
+    style.secondary = color_with_opacity(style.secondary, opacity);
+    style.title = color_with_opacity(style.title, opacity);
+    style.body = color_with_opacity(style.body, opacity);
+    style.divider = color_with_opacity(style.divider, opacity);
     const bool points_right =
         bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
     const float tail_y = bubble->y + bubble->h * 0.68F;
@@ -269,6 +219,7 @@ static void draw_scene(EidolonApp *app) {
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0);
     SDL_RenderClear(app->renderer);
 
+    const uint64_t now_ms = SDL_GetTicks();
     const size_t visible_sessions = eidolon_session_registry_visible_count(&app->session_registry);
     if (visible_sessions > 0U) {
         for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
@@ -277,16 +228,15 @@ static void draw_scene(EidolonApp *app) {
             if (session != NULL && app->bubble_rect_valid[slot]) {
                 draw_dialogue_bubble(app, &app->bubble_rects[slot], &session->dialogue,
                                      session->title, TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
-                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot);
+                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot,
+                                     eidolon_session_entry_opacity(session, now_ms));
             }
         }
     } else if (app->state == EIDOLON_STATE_REVIEW && eidolon_dialogue_is_active(&app->dialogue)) {
         const SDL_FRect bubble = {17.0F, 16.0F, EIDOLON_BUBBLE_WIDTH, EIDOLON_BUBBLE_HEIGHT};
         draw_dialogue_bubble(app, &bubble, &app->dialogue, "EIDOLON",
                              TEXT_SLOT_DIALOGUE_TITLE_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
-                             TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY);
-    } else if (app->state != EIDOLON_STATE_IDLE) {
-        draw_state_bubble(app);
+                             TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY, 1.0F);
     }
 
     if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
@@ -322,7 +272,7 @@ static int hit_test_mode(const EidolonApp *app) {
     if (app->state == EIDOLON_STATE_REVIEW && eidolon_dialogue_is_active(&app->dialogue)) {
         return 2;
     }
-    return app->state == EIDOLON_STATE_IDLE ? 0 : 1;
+    return 0;
 }
 
 static void update_hit_test_if_needed(EidolonApp *app) {

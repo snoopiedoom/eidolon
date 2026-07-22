@@ -12,6 +12,7 @@
 #define EIDOLON_SESSION_CAPACITY 8U
 #define EIDOLON_VISIBLE_SESSION_CAPACITY 4U
 #define EIDOLON_SESSION_BUBBLE_TIMEOUT_MS 5000U
+#define EIDOLON_SESSION_BUBBLE_FADE_MS 3000U
 #define EIDOLON_SESSION_ID_CAPACITY EIDOLON_PROVIDER_SESSION_ID_CAPACITY
 #define EIDOLON_SESSION_TITLE_CAPACITY EIDOLON_PROVIDER_TITLE_CAPACITY
 #define EIDOLON_SESSION_PATH_CAPACITY 4096U
@@ -73,6 +74,7 @@ void eidolon_session_registry_configure_dialogue(EidolonSessionRegistry *registr
                                                  unsigned int hold_ms);
 void eidolon_session_registry_destroy(EidolonSessionRegistry *registry);
 size_t eidolon_session_registry_visible_count(const EidolonSessionRegistry *registry);
+float eidolon_session_entry_opacity(const EidolonSessionEntry *entry, uint64_t now_ms);
 EidolonSessionEntry *eidolon_session_registry_at_slot(EidolonSessionRegistry *registry, int slot);
 const EidolonSessionEntry *
 eidolon_session_registry_at_slot_const(const EidolonSessionRegistry *registry, int slot);

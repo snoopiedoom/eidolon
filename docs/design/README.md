@@ -7,6 +7,7 @@ These documents define behavior that should survive implementation rewrites.
 - [Multi-session dialogue](session-dialogue.md)
 - [Presence contract](presence-contract.md)
 - [Body capabilities](body-capabilities.md)
+- [Native presentation and graphics stack](native-presentation.md)
 
 ## Specification template
 

@@ -22,8 +22,9 @@ bone matrices → GPU skinning
 shared GPU texture → transparent SDL composition
 ```
 
-The current presentation loop is 30 Hz; higher-rate solver/physics work is a design target and may
-run independently when it materially improves motion.
+The presentation loop uses measured frame time and follows the configured VSync/FPS policy. Future
+solver or secondary-physics stages may use a fixed internal timestep when their stability requires
+one, without imposing that rate on presentation.
 
 ## Goals
 

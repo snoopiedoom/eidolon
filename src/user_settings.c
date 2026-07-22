@@ -161,6 +161,8 @@ void eidolon_user_settings_defaults(EidolonUserSettings *settings) {
         .bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_AVATAR,
         .bubble_custom_width = 1920,
         .bubble_custom_height = 1080,
+        .vsync = true,
+        .fps_limit = 0,
     };
 }
 
@@ -287,6 +289,16 @@ bool eidolon_user_settings_parse(const char *text, size_t length, EidolonUserSet
             if (parsed) {
                 candidate.overrides |= EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
             }
+        } else if (strcmp(key, "vsync") == 0) {
+            parsed = parse_bool(value, &candidate.vsync);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_VSYNC;
+            }
+        } else if (strcmp(key, "fps_limit") == 0) {
+            parsed = parse_int(value, &candidate.fps_limit);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_FPS_LIMIT;
+            }
         }
         if (!parsed) {
             set_error(error, error_capacity, "line %zu: invalid value for %s", line_number, key);
@@ -297,6 +309,12 @@ bool eidolon_user_settings_parse(const char *text, size_t length, EidolonUserSet
     if (valid && candidate.bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM &&
         (candidate.bubble_custom_width <= 0 || candidate.bubble_custom_height <= 0)) {
         set_error(error, error_capacity, "custom bubble bounds require positive width and height");
+        valid = false;
+    }
+    if (valid && (candidate.fps_limit < EIDOLON_FPS_LIMIT_MIN ||
+                  candidate.fps_limit > EIDOLON_FPS_LIMIT_MAX)) {
+        set_error(error, error_capacity, "fps_limit must be between %d and %d",
+                  EIDOLON_FPS_LIMIT_MIN, EIDOLON_FPS_LIMIT_MAX);
         valid = false;
     }
     if (valid && (!version_seen || version != EIDOLON_USER_SETTINGS_VERSION)) {
@@ -392,6 +410,12 @@ bool eidolon_user_settings_save(const char *path, const EidolonUserSettings *set
         APPEND_SETTING("bubble_custom_y = %d\n", settings->bubble_custom_y);
         APPEND_SETTING("bubble_custom_width = %d\n", settings->bubble_custom_width);
         APPEND_SETTING("bubble_custom_height = %d\n", settings->bubble_custom_height);
+    }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_VSYNC)) {
+        APPEND_SETTING("vsync = %s\n", settings->vsync ? "true" : "false");
+    }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_FPS_LIMIT)) {
+        APPEND_SETTING("fps_limit = %d\n", settings->fps_limit);
     }
 #undef APPEND_SETTING
 

@@ -597,9 +597,10 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
     }
     for (size_t index = 0U; index < EIDOLON_SESSION_CAPACITY; ++index) {
         EidolonSessionEntry *entry = &registry->entries[index];
+        const uint64_t quiet_ms =
+            now_ms >= entry->last_activity_ms ? now_ms - entry->last_activity_ms : 0U;
         if (entry->visible &&
-            now_ms - entry->last_activity_ms >= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) {
-            const uint64_t quiet_ms = now_ms - entry->last_activity_ms;
+            quiet_ms >= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS) {
             entry->visible = false;
             entry->layout_slot = -1;
             result.changed = true;
@@ -634,6 +635,22 @@ EidolonSessionPoll eidolon_session_registry_poll(EidolonSessionRegistry *registr
         }
     }
     return result;
+}
+
+float eidolon_session_entry_opacity(const EidolonSessionEntry *entry, uint64_t now_ms) {
+    if (entry == NULL || !entry->visible) {
+        return 0.0F;
+    }
+    const uint64_t quiet_ms =
+        now_ms >= entry->last_activity_ms ? now_ms - entry->last_activity_ms : 0U;
+    if (quiet_ms <= EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) {
+        return 1.0F;
+    }
+    const uint64_t fade_ms = quiet_ms - EIDOLON_SESSION_BUBBLE_TIMEOUT_MS;
+    if (fade_ms >= EIDOLON_SESSION_BUBBLE_FADE_MS) {
+        return 0.0F;
+    }
+    return 1.0F - (float)fade_ms / (float)EIDOLON_SESSION_BUBBLE_FADE_MS;
 }
 
 size_t eidolon_session_registry_visible_count(const EidolonSessionRegistry *registry) {

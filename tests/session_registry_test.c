@@ -150,20 +150,43 @@ int main(void) {
     assert(second_entry->visible);
 
     poll = eidolon_session_registry_poll(timeouts, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS);
-    assert(poll.changed);
-    assert(!first_entry->visible);
-    assert(first_entry->layout_slot == -1);
+    assert(!poll.changed);
+    assert(first_entry->visible);
+    assert(eidolon_session_entry_opacity(first_entry, 1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS) ==
+           1.0F);
     assert(second_entry->visible);
+
+    const uint64_t half_fade =
+        1000U + EIDOLON_SESSION_BUBBLE_TIMEOUT_MS + EIDOLON_SESSION_BUBBLE_FADE_MS / 2U;
+    poll = eidolon_session_registry_poll(timeouts, half_fade);
+    assert(!poll.changed);
+    assert(first_entry->visible);
+    assert(eidolon_session_entry_opacity(first_entry, half_fade) == 0.5F);
+    const int first_slot = first_entry->layout_slot;
 
     EidolonConversationEvent renewed = {.type = EIDOLON_CONVERSATION_TEXT_DELTA};
     SDL_strlcpy(renewed.provider, "opencode", sizeof(renewed.provider));
     SDL_strlcpy(renewed.session_id, "quiet-first", sizeof(renewed.session_id));
     SDL_strlcpy(renewed.message_id, "renewed-message", sizeof(renewed.message_id));
     SDL_strlcpy(renewed.text, "back", sizeof(renewed.text));
-    poll = eidolon_session_registry_apply_event(timeouts, &renewed, 6001U);
-    assert(poll.changed);
+    poll = eidolon_session_registry_apply_event(timeouts, &renewed, half_fade + 1U);
+    assert(!poll.changed);
     assert(first_entry->visible);
-    assert(first_entry->last_activity_ms == 6001U);
+    assert(first_entry->layout_slot == first_slot);
+    assert(first_entry->last_activity_ms == half_fade + 1U);
+    assert(eidolon_session_entry_opacity(first_entry, half_fade + 1U) == 1.0F);
+
+    const uint64_t renewed_hide_ms = first_entry->last_activity_ms +
+                                     EIDOLON_SESSION_BUBBLE_TIMEOUT_MS +
+                                     EIDOLON_SESSION_BUBBLE_FADE_MS;
+    (void)eidolon_session_registry_poll(timeouts, renewed_hide_ms - 1U);
+    assert(first_entry->visible);
+    assert(eidolon_session_entry_opacity(first_entry, renewed_hide_ms - 1U) > 0.0F);
+    poll = eidolon_session_registry_poll(timeouts, renewed_hide_ms);
+    assert(poll.changed);
+    assert(!first_entry->visible);
+    assert(first_entry->layout_slot == -1);
+    assert(eidolon_session_entry_opacity(first_entry, renewed_hide_ms) == 0.0F);
     eidolon_session_registry_destroy(timeouts);
     SDL_free(timeouts);
 

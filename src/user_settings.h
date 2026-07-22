@@ -8,6 +8,8 @@
 #define EIDOLON_USER_SETTINGS_VERSION 1
 #define EIDOLON_USER_SETTINGS_PATH_CAPACITY 1024U
 #define EIDOLON_USER_SETTINGS_ERROR_CAPACITY 256U
+#define EIDOLON_FPS_LIMIT_MIN 0
+#define EIDOLON_FPS_LIMIT_MAX 1000
 
 typedef enum EidolonBubbleBoundsMode {
     EIDOLON_BUBBLE_BOUNDS_AVATAR = 0,
@@ -29,6 +31,8 @@ typedef enum EidolonUserSettingField {
     EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT = 1U << 8,
     EIDOLON_USER_SETTING_DIALOGUE_HOLD = 1U << 9,
     EIDOLON_USER_SETTING_BUBBLE_BOUNDS = 1U << 10,
+    EIDOLON_USER_SETTING_VSYNC = 1U << 11,
+    EIDOLON_USER_SETTING_FPS_LIMIT = 1U << 12,
 } EidolonUserSettingField;
 
 typedef struct EidolonUserSettings {
@@ -48,6 +52,8 @@ typedef struct EidolonUserSettings {
     int bubble_custom_y;
     int bubble_custom_width;
     int bubble_custom_height;
+    bool vsync;
+    int fps_limit;
 } EidolonUserSettings;
 
 const char *eidolon_bubble_bounds_mode_name(EidolonBubbleBoundsMode mode);

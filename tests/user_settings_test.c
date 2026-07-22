@@ -22,6 +22,8 @@ static void parses_complete_settings(void) {
                                "bubble_custom_y = 0\n"
                                "bubble_custom_width = 1920\n"
                                "bubble_custom_height = 1040\n"
+                               "vsync = false\n"
+                               "fps_limit = 144\n"
                                "future_option = ignored\n";
     EidolonUserSettings settings;
     eidolon_user_settings_defaults(&settings);
@@ -42,13 +44,16 @@ static void parses_complete_settings(void) {
     assert(settings.bubble_custom_y == 0);
     assert(settings.bubble_custom_width == 1920);
     assert(settings.bubble_custom_height == 1040);
+    assert(!settings.vsync);
+    assert(settings.fps_limit == 144);
     assert(settings.overrides ==
            (EIDOLON_USER_SETTING_RENDER_MODE | EIDOLON_USER_SETTING_DISPLAY_SCALE |
             EIDOLON_USER_SETTING_PORTRAIT_FACE_MODE | EIDOLON_USER_SETTING_MODEL_RENDER_RESOLUTION |
             EIDOLON_USER_SETTING_MODEL_YAW | EIDOLON_USER_SETTING_MODEL_PITCH |
             EIDOLON_USER_SETTING_MODEL_ROLL | EIDOLON_USER_SETTING_DIALOGUE_THEME |
             EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT | EIDOLON_USER_SETTING_DIALOGUE_HOLD |
-            EIDOLON_USER_SETTING_BUBBLE_BOUNDS));
+            EIDOLON_USER_SETTING_BUBBLE_BOUNDS | EIDOLON_USER_SETTING_VSYNC |
+            EIDOLON_USER_SETTING_FPS_LIMIT));
 }
 
 static void rejects_invalid_file_without_partial_apply(void) {
@@ -88,11 +93,14 @@ static void saves_and_loads_round_trip(void) {
     expected.bubble_custom_y = 40;
     expected.bubble_custom_width = 2560;
     expected.bubble_custom_height = 1400;
+    expected.vsync = false;
+    expected.fps_limit = 165;
     expected.overrides =
         EIDOLON_USER_SETTING_RENDER_MODE | EIDOLON_USER_SETTING_DISPLAY_SCALE |
         EIDOLON_USER_SETTING_PORTRAIT_FACE_MODE | EIDOLON_USER_SETTING_MODEL_RENDER_RESOLUTION |
         EIDOLON_USER_SETTING_DIALOGUE_THEME | EIDOLON_USER_SETTING_DIALOGUE_MOVEMENT |
-        EIDOLON_USER_SETTING_DIALOGUE_HOLD | EIDOLON_USER_SETTING_BUBBLE_BOUNDS;
+        EIDOLON_USER_SETTING_DIALOGUE_HOLD | EIDOLON_USER_SETTING_BUBBLE_BOUNDS |
+        EIDOLON_USER_SETTING_VSYNC | EIDOLON_USER_SETTING_FPS_LIMIT;
     char error[EIDOLON_USER_SETTINGS_ERROR_CAPACITY];
     assert(eidolon_user_settings_save(EIDOLON_TEST_SETTINGS_PATH, &expected, error, sizeof(error)));
 
@@ -111,6 +119,8 @@ static void saves_and_loads_round_trip(void) {
     assert(actual.bubble_custom_y == expected.bubble_custom_y);
     assert(actual.bubble_custom_width == expected.bubble_custom_width);
     assert(actual.bubble_custom_height == expected.bubble_custom_height);
+    assert(actual.vsync == expected.vsync);
+    assert(actual.fps_limit == expected.fps_limit);
     assert(actual.overrides == expected.overrides);
     assert(SDL_RemovePath(EIDOLON_TEST_SETTINGS_PATH));
 }
@@ -144,6 +154,17 @@ static void sparse_save_omits_inherited_values(void) {
     assert(SDL_RemovePath(EIDOLON_TEST_SETTINGS_PATH));
 }
 
+static void rejects_invalid_fps_limit(void) {
+    static const char text[] = "version = 1\nfps_limit = 1001\n";
+    EidolonUserSettings settings;
+    eidolon_user_settings_defaults(&settings);
+    char error[EIDOLON_USER_SETTINGS_ERROR_CAPACITY];
+    assert(!eidolon_user_settings_parse(text, strlen(text), &settings, error, sizeof(error)));
+    assert(settings.fps_limit == 0);
+    assert(settings.overrides == 0U);
+    assert(strstr(error, "fps_limit") != NULL);
+}
+
 int main(void) {
     parses_complete_settings();
     rejects_invalid_file_without_partial_apply();
@@ -151,5 +172,6 @@ int main(void) {
     saves_and_loads_round_trip();
     sparse_file_inherits_missing_fields();
     sparse_save_omits_inherited_values();
+    rejects_invalid_fps_limit();
     return 0;
 }

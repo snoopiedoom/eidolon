@@ -91,6 +91,10 @@ typedef struct EidolonApp {
     float drag_global_y;
     int drag_window_x;
     int drag_window_y;
+    int drag_target_window_x;
+    int drag_target_window_y;
+    bool drag_position_pending;
+    bool native_drag_completed;
     int primary_session_slot;
     int hit_test_row;
     int hit_test_frame;
@@ -113,6 +117,13 @@ typedef struct EidolonApp {
     bool motion_config_dirty;
     float display_scale;
     float window_coordinate_scale;
+    bool vsync_enabled;
+    bool vsync_active;
+    int fps_limit;
+    uint64_t display_interval_ns;
+    uint64_t presentation_interval_ns;
+    bool presentation_uncapped;
+    bool presentation_software_paced;
     int window_width;
     int window_height;
     SDL_FRect body_rect;

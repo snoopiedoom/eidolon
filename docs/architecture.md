@@ -26,6 +26,25 @@ selected sprite | portrait | 3D body renderer
 transparent SDL composition + native hit testing
 ```
 
+This is the current implementation, not the permanent presentation boundary. The target separates
+content rendering from platform-native surface presentation:
+
+```text
+renderer-neutral scene snapshot
+              ↓
+body content + dialogue content + geometry
+              ↓
+native presentation backend
+              ↓
+platform compositor layer tree
+```
+
+The presentation backend will own hosts, independent body/bubble layers, input regions, output
+topology, cadence, and compositor commits. The graphics backend will own pixel production. The two
+are independent selections. See the
+[native presentation and graphics stack](design/native-presentation.md) for the contract, strategy
+analysis, platform mappings, and migration gates.
+
 Language-scale work must never block presentation. Session discovery, transcript parsing, and local
 model inference cross bounded asynchronous boundaries. The presentation thread consumes completed
 snapshots and prepared expression tracks.
@@ -62,8 +81,9 @@ snapshots and prepared expression tracks.
 - `text_renderer`: SDL_ttf faces, fallback selection, and reusable cached text objects;
 - `settings_ui`: a separate SDL/Dear ImGui window; it displays controls but does not own settings;
 - `user_settings`: strict parsing, serialization, sparse override state, and persistence;
-- `platform`: only behavior SDL cannot express uniformly—overlay hit testing, local IPC, and session
-  file discovery.
+- `platform`: in the current implementation, behavior SDL cannot express uniformly—overlay hit
+  testing, local IPC, and session file discovery. The target presentation backend expands native
+  ownership without moving session semantics into platform code.
 
 Do not duplicate these collections in `app.c`. In particular, session paths, titles, dialogue
 objects, and activity timestamps belong to `session_registry`.
@@ -169,8 +189,17 @@ skin” failure.
 
 ## Overlay and performance invariants
 
-- presentation has an authoritative 30 Hz deadline and never performs catch-up bursts;
-- VSync is requested but is not the sole limiter;
+- presentation cadence is configured independently through VSync and an optional FPS ceiling;
+  active VSync exclusively owns the default cadence, while the software clock owns explicit lower
+  ceilings and unavailable-VSync fallback without producing catch-up bursts;
+- input processing has a bounded event budget; continuous mouse motion cannot postpone
+  presentation indefinitely;
+- character dragging coalesces motion into the latest target and performs at most one native window
+  move per presentation tick on the portable fallback; Windows delegates the interactive move to
+  the native compositor instead of synchronously repositioning the HWND from the render loop;
+- VSync is optional and is not the sole limiter;
+- the settings renderer is paced by the main presentation loop and cannot introduce a second VSync
+  wait;
 - ordinary breathing, speaking, and portrait motion do not invalidate the hit mask;
 - alpha readback happens only after structural changes such as scale, layout, framing, pose, or a
   completed manual rotation;
@@ -180,5 +209,6 @@ skin” failure.
 - discovery and inference never run on the presentation thread.
 
 At large desktop scale, the transparent swapchain area—not the 3D triangle count—is usually the
-dominant APU cost. The next compositor optimization is independently sized character and bubble
-windows with a conservative character alpha envelope, not CPU rasterization.
+dominant APU cost. The intended fix is independently sized compositor layers for the character and
+each bubble, with renderer-provided hit geometry and no ordinary full-frame readback. It is not CPU
+rasterization or an unmeasured graphics-API migration.

@@ -85,6 +85,8 @@ character-defined default without freezing a copy of that default into the user 
 
 ## Design
 
+The current runtime is:
+
 ```text
 configured Codex / OpenCode session source
                     ↓
@@ -101,8 +103,11 @@ selected sprite | portrait | 3D body renderer
 transparent SDL composition + native hit testing
 ```
 
-The renderer never owns conversation semantics, and platform code never owns presentation. Slow
-language decisions stay separate from frame-rate motion and drawing.
+The target stack separates body/dialogue rendering from native presentation so compositor layers can
+move and fade without rerendering their content. See the
+[native presentation and graphics plan](docs/design/native-presentation.md). Body renderers never
+own conversation semantics; presentation backends never own session state. Slow language decisions
+stay separate from frame-rate motion and drawing.
 
 ## Documentation
 
@@ -116,6 +121,7 @@ language decisions stay separate from frame-rate motion and drawing.
 - [Agent adapters and session integration](docs/integrations.md)
 - [Character and asset pipeline](docs/assets.md)
 - [Design specifications](docs/design/README.md)
+- [Native presentation and graphics plan](docs/design/native-presentation.md)
 
 Eidolon is an early-stage native project with a working Windows daily-driver path and unfinished
 product packaging. Character assets remain the responsibility of the local user and are not part

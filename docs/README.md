@@ -34,6 +34,7 @@ particular implementation changes.
 - [Multi-session dialogue](design/session-dialogue.md)
 - [Presence contract](design/presence-contract.md)
 - [Body capabilities](design/body-capabilities.md)
+- [Native presentation and graphics stack](design/native-presentation.md)
 
 New designs belong under `docs/design/`. Each specification should state the problem, goals,
 non-goals, ownership, data flow, invariants, failure behavior, and acceptance criteria. Temporary

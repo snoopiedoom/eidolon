@@ -67,8 +67,16 @@ overrides with reset-to-inheritance semantics.
 - tiny discourse fragments merge into the thought they modify and ambiguous faces preserve
   continuity;
 - portrait art swaps atomically with no crossfade; damped semantic motion remains independent;
+- session bubbles remain opaque for five quiet seconds, then fade out over three seconds;
+- mouse-motion floods are bounded and character dragging coalesces native window moves at the
+  configured presentation boundary; Windows uses compositor-owned native dragging so HWND moves
+  cannot consume the renderer's frame budget;
+- VSync and the independent FPS ceiling are persisted settings; the shipped default follows the
+  active monitor, while VSync-off with a zero ceiling is uncapped;
 - Windows 3D and SDL composition share one D3D11 device and GPU-resident texture;
 - pixel alpha drives click-through while coarse Win32 regions keep DWM region cost bounded;
+- the intended native presentation boundary and graphics-backend migration gates are specified, but
+  the current runtime still presents through one SDL-owned transparent window;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
@@ -113,15 +121,18 @@ overrides with reset-to-inheritance semantics.
 1. collect interactive confirmation for the Win32 click-border fix and hard-cut expressions;
 2. interactively verify monitor-aware bubble placement, stable slots, drag-release reflow, and
    mixed-DPI anchoring across sprite, portrait, and 3D bodies;
-3. add source-instance identity and source/adapter status controls without moving ownership into the
+3. extract the presentation-backend contract, preserve the current path as `sdl_window_legacy`, and
+   build the gated Windows DirectComposition portrait proof described in
+   `docs/design/native-presentation.md`;
+4. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
-4. add explicit shared-character performance ownership for concurrent bubbles;
-5. replace the hard-coded body-asset selector with character-package discovery;
-6. make session retirement policy configurable;
-7. expand normalized operational state toward the presence contract;
-8. tune affect targets and continuity thresholds from real expression traces;
-9. calibrate the four initial Rio semantic poses before adding transition dynamics;
-10. consider expression annotation/detection only after the downloaded portrait catalog is present.
+5. add explicit shared-character performance ownership for concurrent bubbles;
+6. replace the hard-coded body-asset selector with character-package discovery;
+7. make session retirement policy configurable;
+8. expand normalized operational state toward the presence contract;
+9. tune affect targets and continuity thresholds from real expression traces;
+10. calibrate the four initial Rio semantic poses before adding transition dynamics;
+11. consider expression annotation/detection only after the downloaded portrait catalog is present.
 
 ## Restart checklist
 

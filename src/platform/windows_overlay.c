@@ -365,8 +365,8 @@ bool eidolon_platform_configure_overlay(SDL_Window *window) {
     }
 
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME | WS_SYSMENU |
-               WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME | WS_SYSMENU | WS_MINIMIZEBOX |
+               WS_MAXIMIZEBOX);
     style |= WS_POPUP;
 
     SetLastError(ERROR_SUCCESS);
@@ -404,6 +404,21 @@ bool eidolon_platform_configure_overlay(SDL_Window *window) {
     overlay.hwnd = hwnd;
     overlay.previous_proc = (WNDPROC)previous;
 
+    return true;
+}
+
+bool eidolon_platform_begin_window_drag(SDL_Window *window) {
+    HWND hwnd = window_handle(window);
+    if (hwnd == NULL || hwnd != overlay.hwnd) {
+        return false;
+    }
+    POINT cursor;
+    if (!GetCursorPos(&cursor)) {
+        return false;
+    }
+    const LPARAM position = (LPARAM)(DWORD)MAKELONG((WORD)cursor.x, (WORD)cursor.y);
+    ReleaseCapture();
+    (void)SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, position);
     return true;
 }
 

@@ -13,7 +13,7 @@ another session speaks.
 - show multiple active outputs simultaneously;
 - use real session titles with stable fallbacks;
 - keep placement deterministic and visually stable;
-- retire inactive bubbles on a short, predictable presentation timeout;
+- keep inactive bubbles fully visible for five seconds, then fade them out over three seconds;
 - route clicks to the bubble actually clicked;
 - keep the one-session case simple.
 
@@ -110,7 +110,9 @@ bubble, shadow, and character pixels remain interactive.
 - two sessions can type and scroll independently without replacing each other;
 - a session retains title and slot across repeated messages;
 - clicking the left bubble never advances the right bubble;
-- one quiet bubble disappears after five seconds without hiding or resetting another session;
+- one quiet bubble remains opaque for five seconds, fades continuously for three seconds, and then
+  disappears without hiding or resetting another session;
+- new activity during the fade restores full opacity immediately without changing the session slot;
 - new output renews a hidden session and restores its bubble;
 - subagent rollouts never appear as user bubbles;
 - a slow discovery scan does not stall presentation or dialogue reveal;

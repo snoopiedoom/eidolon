@@ -22,12 +22,19 @@ ImGui does not create `imgui.ini`; Eidolon has one persistence system.
 
 - `preferred_renderer`: `sprite`, `portrait`, or `model_3d`;
 - `display_scale`: presentation multiplier;
+- `vsync`: requests synchronization to the active display refresh;
+- `fps_limit`: an independent presentation ceiling from 1 to 1000, or `0` for no explicit cap;
 - `bubble_bounds_mode`: `avatar`, `primary`, `virtual`, or `custom`;
 - `model_render_resolution`: independent square 3D target size;
 - `model_yaw_degrees`, `model_pitch_degrees`, `model_roll_degrees`.
 
 The supported model targets are 512, 1024, 1536, and 2048 pixels in the UI. Presentation scale is
 independent and currently ranges from 0.75x to 4.0x.
+
+The shipped cadence policy is `vsync = true` and `fps_limit = 0`, so presentation follows the
+active monitor rather than a fixed application rate. A lower explicit limit wins over VSync. With
+VSync disabled, `fps_limit = 0` is genuinely uncapped. If a requested VSync mode is unavailable,
+Eidolon uses the active display rate as a software fallback instead of running without a bound.
 
 ## User overrides
 

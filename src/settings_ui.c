@@ -285,6 +285,48 @@ static void draw_character_tab(EidolonApp *app) {
     }
 }
 
+static void draw_display_tab(EidolonApp *app) {
+    ImGui_SeparatorText("presentation cadence");
+    bool vsync = app->vsync_enabled;
+    if (ImGui_Checkbox("vertical sync", &vsync)) {
+        eidolon_app_set_vsync(app, vsync);
+    }
+    reset_setting_button(app, EIDOLON_USER_SETTING_VSYNC, "reset##vsync");
+    ImGui_Text("default: %s  |  source: %s", app->system_settings.vsync ? "on" : "off",
+               setting_source(app, EIDOLON_USER_SETTING_VSYNC));
+
+    int fps_limit = app->fps_limit;
+    if (ImGui_InputInt("FPS limit (0 = unlimited)", &fps_limit)) {
+        eidolon_app_set_fps_limit(
+            app, SDL_clamp(fps_limit, EIDOLON_FPS_LIMIT_MIN, EIDOLON_FPS_LIMIT_MAX));
+    }
+    reset_setting_button(app, EIDOLON_USER_SETTING_FPS_LIMIT, "reset##fps_limit");
+    ImGui_Text("default: %d  |  source: %s", app->system_settings.fps_limit,
+               setting_source(app, EIDOLON_USER_SETTING_FPS_LIMIT));
+
+    const double display_rate = app->display_interval_ns > 0U
+                                    ? (double)SDL_NS_PER_SECOND / (double)app->display_interval_ns
+                                    : 0.0;
+    const double effective_rate =
+        app->presentation_interval_ns > 0U
+            ? (double)SDL_NS_PER_SECOND / (double)app->presentation_interval_ns
+            : 0.0;
+    ImGui_SeparatorText("effective state");
+    ImGui_Text("display refresh: %.2f Hz", display_rate);
+    ImGui_Text("vsync requested: %s  |  active: %s", app->vsync_enabled ? "yes" : "no",
+               app->vsync_active ? "yes" : "no");
+    if (app->presentation_uncapped) {
+        ImGui_Text("software pacing: uncapped");
+    } else {
+        ImGui_Text("effective ceiling: %.2f Hz", effective_rate);
+        ImGui_Text("cadence owner: %s",
+                   app->presentation_software_paced ? "software clock" : "VSync");
+    }
+    ImGui_TextWrapped("with vsync enabled, the display refresh remains the upper bound. a lower "
+                      "FPS limit is still honored. if vsync is unavailable, Eidolon falls back "
+                      "to display-rate software pacing.");
+}
+
 static const char *theme_name(EidolonDialogueTheme theme) {
     return theme == EIDOLON_DIALOGUE_THEME_ACADEMY_HEART ? "academy heart" : "classic";
 }
@@ -409,6 +451,12 @@ static void draw_diagnostics_tab(const EidolonApp *app) {
                app->affect.current.dominance);
     ImGui_Text("evidence: %.3f", app->affect.evidence);
     ImGui_Text("motion revision: %llu", (unsigned long long)app->motion_config_watch.revision);
+    ImGui_Text("presentation: vsync %s/%s  limit %d  %s  owner %s",
+               app->vsync_enabled ? "requested" : "off", app->vsync_active ? "active" : "idle",
+               app->fps_limit, app->presentation_uncapped ? "uncapped" : "paced",
+               app->presentation_software_paced ? "software"
+               : app->vsync_active              ? "vsync"
+                                                : "none");
     ImGui_Text("user override fields: 0x%x", app->user_settings.overrides);
     ImGui_Text("bubble bounds: %s  %d,%d %dx%d",
                eidolon_bubble_bounds_mode_name(app->bubble_bounds_mode),
@@ -436,6 +484,10 @@ static void draw_settings(EidolonApp *app) {
                                    ImGuiWindowFlags_NoSavedSettings;
     if (ImGui_Begin("Eidolon settings##root", NULL, flags) &&
         ImGui_BeginTabBar("settings tabs", 0)) {
+        if (ImGui_BeginTabItem("Display", NULL, 0)) {
+            draw_display_tab(app);
+            ImGui_EndTabItem();
+        }
         if (ImGui_BeginTabItem("Character", NULL, 0)) {
             draw_character_tab(app);
             ImGui_EndTabItem();
@@ -476,8 +528,8 @@ EidolonSettingsUi *eidolon_settings_ui_create(const char *font_path) {
         eidolon_settings_ui_destroy(ui);
         return NULL;
     }
-    if (!SDL_SetRenderVSync(ui->renderer, 1)) {
-        eidolon_log_write("settings", "could not enable vsync: %s", SDL_GetError());
+    if (!SDL_SetRenderVSync(ui->renderer, 0)) {
+        eidolon_log_write("settings", "could not disable secondary vsync: %s", SDL_GetError());
     }
 
     ui->context = ImGui_CreateContext(NULL);
