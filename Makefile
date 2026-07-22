@@ -159,7 +159,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -282,12 +282,20 @@ BGFX_INTEROP_SMOKE := $(BGFX_BUILD_DIR)/bgfx_interop_smoke.exe
 BGFX_INTEROP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/bgfx_interop_smoke.o
 BGFX_DCOMP_SMOKE := $(BGFX_BUILD_DIR)/bgfx_dcomp_smoke.exe
 BGFX_DCOMP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/bgfx_dcomp_smoke.o
+D3D11_DCOMP_SMOKE := $(BGFX_BUILD_DIR)/d3d11_dcomp_smoke.exe
+D3D11_DCOMP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/d3d11_dcomp_smoke.o
+SDL_GPU_DCOMP_SMOKE := $(BGFX_BUILD_DIR)/sdl_gpu_dcomp_smoke.exe
+SDL_GPU_DCOMP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/sdl_gpu_dcomp_smoke.o
+SDL_RENDERER_DCOMP_SMOKE := $(BGFX_BUILD_DIR)/sdl_renderer_dcomp_smoke.exe
+SDL_RENDERER_DCOMP_SMOKE_OBJECT := $(BGFX_OBJ_DIR)/sdl_renderer_dcomp_smoke.o
 BGFX_OBJECTS := \
 	$(BGFX_OBJ_DIR)/bx.o \
 	$(BGFX_OBJ_DIR)/bimg.o \
 	$(BGFX_OBJ_DIR)/bgfx.o
 BGFX_DEPS := $(BGFX_OBJECTS:.o=.d) $(BGFX_SMOKE_OBJECT:.o=.d) \
-	$(BGFX_INTEROP_SMOKE_OBJECT:.o=.d) $(BGFX_DCOMP_SMOKE_OBJECT:.o=.d)
+	$(BGFX_INTEROP_SMOKE_OBJECT:.o=.d) $(BGFX_DCOMP_SMOKE_OBJECT:.o=.d) \
+	$(D3D11_DCOMP_SMOKE_OBJECT:.o=.d) $(SDL_GPU_DCOMP_SMOKE_OBJECT:.o=.d) \
+	$(SDL_RENDERER_DCOMP_SMOKE_OBJECT:.o=.d)
 BGFX_CPPFLAGS := \
 	-I$(BGFX_DIR)/include \
 	-I$(BGFX_DIR)/3rdparty \
@@ -343,6 +351,24 @@ $(BGFX_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
 		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
 		-Wno-language-extension-token -c $< -o $@
 
+$(D3D11_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+	$(make-dir)
+	$(CXX) -DEIDOLON_DCOMP_NATIVE_D3D11=1 $(CXXFLAGS) \
+		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
+		-Wno-language-extension-token -c $< -o $@
+
+$(SDL_GPU_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+	$(make-dir)
+	$(CXX) -DEIDOLON_DCOMP_SDL_GPU=1 -I"$(SDL3_ROOT)/include" $(CXXFLAGS) \
+		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
+		-Wno-language-extension-token -c $< -o $@
+
+$(SDL_RENDERER_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+	$(make-dir)
+	$(CXX) -DEIDOLON_DCOMP_SDL_RENDERER=1 -I"$(SDL3_ROOT)/include" $(CXXFLAGS) \
+		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
+		-Wno-language-extension-token -c $< -o $@
+
 $(BGFX_SMOKE): $(BGFX_SMOKE_OBJECT) $(BGFX_LIB)
 	$(make-dir)
 	$(CXX) $(LDFLAGS) $^ -lSDL3 -ld3d11 -ldxgi -ldxguid -ld3dcompiler \
@@ -368,6 +394,38 @@ $(BGFX_DCOMP_SMOKE): $(BGFX_DCOMP_SMOKE_OBJECT) $(BGFX_LIB)
 
 bgfx-dcomp-smoke: $(BGFX_DCOMP_SMOKE)
 	"$(BGFX_DCOMP_SMOKE)" $(if $(filter 1,$(SHOW)),--show,)
+
+$(D3D11_DCOMP_SMOKE): $(D3D11_DCOMP_SMOKE_OBJECT)
+	$(make-dir)
+	$(CXX) $^ -ldcomp -ld3d11 -ldxgi -ldxguid -lgdi32 -lpsapi -luser32 -lole32 -o $@
+
+d3d11-dcomp-smoke: $(D3D11_DCOMP_SMOKE)
+	"$(D3D11_DCOMP_SMOKE)" $(if $(filter 1,$(SHOW)),--show,)
+
+$(SDL_GPU_DCOMP_SMOKE): $(SDL_GPU_DCOMP_SMOKE_OBJECT)
+	$(make-dir)
+	$(CXX) -L"$(SDL3_ROOT)/lib/x64" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
+		-lgdi32 -lpsapi -luser32 -lole32 -o $@
+	$(copy-runtime)
+
+sdl-gpu-dcomp-smoke: $(SDL_GPU_DCOMP_SMOKE)
+	"$(SDL_GPU_DCOMP_SMOKE)" $(if $(filter 1,$(SHOW)),--show,)
+
+$(SDL_RENDERER_DCOMP_SMOKE): $(SDL_RENDERER_DCOMP_SMOKE_OBJECT)
+	$(make-dir)
+	$(CXX) -L"$(SDL3_ROOT)/lib/x64" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
+		-lgdi32 -lpsapi -luser32 -lole32 -o $@
+	$(copy-runtime)
+
+sdl-renderer-dcomp-smoke: $(SDL_RENDERER_DCOMP_SMOKE)
+	"$(SDL_RENDERER_DCOMP_SMOKE)" $(if $(filter 1,$(SHOW)),--show,)
+
+graphics-backend-benchmark: $(D3D11_DCOMP_SMOKE) $(SDL_RENDERER_DCOMP_SMOKE) \
+	$(BGFX_DCOMP_SMOKE) $(SDL_GPU_DCOMP_SMOKE)
+	"$(D3D11_DCOMP_SMOKE)" --benchmark
+	"$(SDL_RENDERER_DCOMP_SMOKE)" --benchmark
+	"$(BGFX_DCOMP_SMOKE)" --benchmark
+	"$(SDL_GPU_DCOMP_SMOKE)" --benchmark
 else
 bgfx-smoke:
 	@echo "The bgfx D3D11 smoke test is currently prepared for Windows only."
@@ -379,6 +437,22 @@ bgfx-interop-smoke:
 
 bgfx-dcomp-smoke:
 	@echo "The bgfx DirectComposition smoke test is currently prepared for Windows only."
+	@false
+
+d3d11-dcomp-smoke:
+	@echo "The D3D11 DirectComposition smoke test is currently prepared for Windows only."
+	@false
+
+sdl-gpu-dcomp-smoke:
+	@echo "The SDL_GPU DirectComposition smoke test is currently prepared for Windows only."
+	@false
+
+sdl-renderer-dcomp-smoke:
+	@echo "The SDL_Renderer DirectComposition smoke test is currently prepared for Windows only."
+	@false
+
+graphics-backend-benchmark:
+	@echo "The graphics backend benchmark is currently prepared for Windows only."
 	@false
 endif
 
@@ -660,7 +734,11 @@ help:
 	@echo "make bgfx-smoke      build pinned bgfx submodules and run the hidden C99/D3D11 probe"
 	@echo "make bgfx-interop-smoke  verify bgfx renders into an Eidolon-owned D3D11 texture"
 	@echo "make bgfx-dcomp-smoke  verify two bgfx layers through DirectComposition"
-	@echo "make bgfx-dcomp-smoke SHOW=1  run the brief owner-controlled visual probe"
+	@echo "make bgfx-dcomp-smoke SHOW=1  run the draggable owner-controlled visual probe"
+	@echo "make d3d11-dcomp-smoke  run the equivalent native D3D11 baseline"
+	@echo "make sdl-gpu-dcomp-smoke  measure SDL_GPU's required CPU bridge"
+	@echo "make sdl-renderer-dcomp-smoke  run the current SDL/D3D11 baseline"
+	@echo "make graphics-backend-benchmark  compare equivalent Eidolon-sized layers"
 	@echo "make provider-live-test PROVIDER=codex PROVIDER_URL=ws://...  probe a running provider"
 	@echo "make codex-relay-test  launch a hidden app-server and verify the in-path relay"
 	@echo "make text-setup      download verified SDL_ttf runtime/development files"

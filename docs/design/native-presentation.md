@@ -352,8 +352,10 @@ offline to SPIR-V, DXIL/DXBC, MSL, and metallib formats:
 - [SDL_shadercross workflow](https://moonside.games/posts/introducing-sdl-shadercross/)
 
 However, the public GPU device and texture types are opaque, and normal presentation claims an
-`SDL_Window`. The current API does not provide a portable external-image import/export contract for
-DirectComposition, SurfaceControl, Core Animation, and arbitrary Wayland child surfaces.
+`SDL_Window`. SDL 3.4.10 does not provide a public external-image import/export contract for
+DirectComposition, SurfaceControl, Core Animation, and arbitrary Wayland child surfaces. SDL's
+open [external-texture issue](https://github.com/libsdl-org/SDL/issues/14077) describes this as
+functionality still required before the GPU renderer can replace existing renderers.
 
 **Decision:** do not migrate first. Build a focused interop spike after the presentation contract
 exists. SDL_GPU becomes the preferred shared renderer only if it can satisfy all of these without
@@ -366,7 +368,13 @@ CPU readback:
 5. survive device loss and output transfer;
 6. retain hidden snapshot testing.
 
-Failure of that spike does not invalidate SDL_GPU for legacy windows or selected platforms.
+The Windows spike rendered correctly through SDL_GPU/D3D12, but the only public bridge to Eidolon's
+D3D11 composition swapchain was a synchronous GPU-to-CPU download followed by a D3D11 upload. The
+Eidolon-sized release probe performed 40 bridge transfers and 20 presentation readbacks. This
+fails the native-presentation invariant regardless of its acceptable small-sample throughput.
+Failure of this spike does not invalidate SDL_GPU for legacy windows or selected platforms; it
+rejects SDL_GPU as the Windows DirectComposition renderer until public external-resource interop
+exists.
 
 ### Option C: use raw Vulkan everywhere
 
@@ -437,15 +445,37 @@ texture, and pass that texture through bgfx's public external-texture argument. 
 directly into it with no bridge copy. This proves same-device texture interop, premultiplied-alpha
 preservation, recreation, and lifetime ordering.
 
-The next Windows probe extends that contract to Eidolon-owned DirectComposition swapchains. bgfx
-can wrap and render directly into a premultiplied BGRA8 flip-sequential logical back buffer, reuse
+The Windows probe extended that contract to Eidolon-owned DirectComposition swapchains. bgfx can
+wrap and render directly into a premultiplied BGRA8 flip-sequential logical back buffer, reuse
 the wrapper after `Present`, rebind it as D3D11 flip-model presentation requires, and update body and
 bubble swapchains independently. DirectComposition then changes layer transform, offset, and
 opacity without another body submission. Test-only staging readbacks verify both content revisions;
 the measured presentation bridge has zero GPU copies and zero CPU readbacks. This proves the
-D3D11/DirectComposition bridge, not its production resilience: resize, output transfer, device
-loss, latency, idle behavior, and interactive quality remain gated separately. It also does not
-prove equivalent native-target contracts on other bgfx backends.
+D3D11/DirectComposition bridge. Resize, output transfer, device-loss observation, latency, idle
+behavior, and interactive quality also passed their separate gate. It does not prove equivalent
+native-target contracts on other bgfx backends.
+
+The final comparison did not justify adoption. Against the same 1024x1024 body and growing bubble
+workload, direct D3D11 used 27.24 MiB working set and 13.77 MiB private memory. bgfx remained
+zero-copy but used 80.97 MiB working set and 139.06 MiB private memory, produced a 950.5 KiB static
+probe rather than a 171.5 KiB native probe, and took about nineteen times as long in measured CPU
+submission. GPU and full-frame latency stayed small for both. Those costs would be defensible if
+bgfx removed several platform rendering implementations; the experiment proved only the Windows
+D3D11 bridge, while every native compositor still needs its own host, lifecycle, synchronization,
+and interop proof.
+
+SDL_Renderer could also wrap each composition back buffer through its public external-D3D11 texture
+property with negligible submission overhead. It still required an SDL-owned hidden HWND and
+swapchain solely to own the renderer. Before any composition layer existed, repeated isolated idle
+probes charged 0.48–0.61 CPU seconds per second to one background worker on the AMD test machine;
+direct D3D11 charged zero. That dummy presentation owner is both a measured cost and the wrong
+architecture for a native-composition backend. SDL_Renderer therefore remains a legacy,
+settings, snapshot, and fallback renderer rather than the device owner behind DirectComposition.
+
+**Measured decision:** use direct D3D11 in the Windows native-composition backend. Retain bgfx as an
+opt-in research target, not a production dependency. Reopen the decision only when a non-Windows
+native backend can measure a concrete reduction in renderer implementations or a feature
+unavailable through the platform-aligned path.
 
 ### Option E: platform-aligned native graphics
 
@@ -475,8 +505,8 @@ Eidolon adopts a hybrid stack:
 3. Windows keeps D3D11 during the DirectComposition migration because it already renders Rio and
    feeds composition swapchains directly;
 4. SDL_Renderer remains for settings, snapshots, fallback presentation, and temporary 2D bridges;
-5. bgfx and SDL_GPU receive gated interop spikes as shared-renderer candidates; neither is an
-   assumed decision;
+5. the first bgfx and SDL_GPU gates are complete: neither enters the Windows production renderer;
+   their opt-in probes remain available for future platform-specific reevaluation;
 6. Vulkan is used directly only where platform integration or measured workload justifies it;
 7. no graphics abstraction enters the core stack until it preserves native presentation ownership
    and avoids animated CPU readback.
@@ -670,12 +700,13 @@ Gate: one bubble can type or fade without invalidating body or sibling-bubble co
 Gate: all three bodies work through the same scene and presentation contract; inactive renderers stay
 uninitialized.
 
-### Phase 5: graphics-backend spike
+### Phase 5: graphics-backend spike — complete for Windows
 
 - build bgfx, bx, and bimg from pinned Git submodules behind an opt-in GNU Make target;
 - prove the bgfx C99 API against a hidden D3D11 window, then a transparent offscreen target and
   DirectComposition bridge;
-- implement the smallest equivalent SDL_GPU offscreen body renderer;
+- implement the smallest equivalent SDL_GPU offscreen body renderer and expose every required
+  bridge transfer;
 - test D3D12/DirectComposition, Vulkan/Wayland, Metal/Core Animation, and Android SurfaceControl
   interop separately;
 - measure CPU time, GPU time, memory, frame latency, power behavior, and implementation size against
@@ -798,6 +829,6 @@ Automated snapshots do not prove desktop feel.
 - the first supported Wayland compositor matrix and layer-shell fallback UX;
 - minimum Android API for the native compositor backend;
 - graphics device sharing across multiple hosts and targets;
-- whether bgfx or SDL_GPU exposes the more maintainable native-target interop contract after the
-  Phase 5 comparison;
+- whether a non-Windows bgfx or SDL_GPU backend can prove a better native-target contract than its
+  platform-aligned renderer; the Windows Phase 5 comparison selected direct D3D11;
 - plug-in ABI and trust model for future third-party body renderers.

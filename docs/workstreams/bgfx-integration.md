@@ -111,8 +111,8 @@ tested.
 - [x] translation, scale, rotation, opacity, and fade are compositor-only updates;
 - [x] unchanged body content is not rerendered while the visual moves;
 - [x] body and bubble layers can update independently;
-- [ ] frame latency, idle cost, resize, output transfer, and device loss are observable;
-- [ ] user performs the interactive drag and visual-quality acceptance pass.
+- [x] frame latency, idle cost, resize, output transfer, and device loss are observable;
+- [x] user performs the interactive drag and visual-quality acceptance pass.
 
 Possible bridges, in evaluation order:
 
@@ -123,7 +123,8 @@ Possible bridges, in evaluation order:
 The standard desktop bgfx HWND swapchain does not satisfy this gate.
 
 `make bgfx-dcomp-smoke` is the hidden automated bridge probe. `SHOW=1` turns the same executable
-into a brief owner-controlled visual sequence; it is never launched by automated verification.
+into an owner-controlled visual sequence with a draggable host surface and a six-second final hold;
+it is never launched by automated verification.
 
 The Windows DirectComposition header is a C++ COM interface and does not compile as C17. The
 production backend therefore needs one quarantined Windows-only C++ implementation behind a strict
@@ -132,12 +133,19 @@ that interface.
 
 ### Gate 5: adoption decision
 
-- [ ] compare bgfx against the current SDL/D3D11 path and an equivalent SDL_GPU experiment;
-- [ ] record build complexity, binary size, CPU/GPU time, memory, copies, latency, idle behavior,
+- [x] compare bgfx against the current SDL/D3D11 path and an equivalent SDL_GPU experiment;
+- [x] record build complexity, binary size, CPU/GPU time, memory, copies, latency, idle behavior,
   debugging quality, and platform reach;
-- [ ] accept bgfx only if portability and renderer ownership outweigh its dependency and interop
+- [x] accept bgfx only if portability and renderer ownership outweigh its dependency and interop
   costs;
-- [ ] update the native-presentation design with the measured decision.
+- [x] update the native-presentation design with the measured decision.
+
+**Decision:** do not adopt bgfx into the production renderer. The Windows native-composition
+backend owns D3D11 directly. Keep SDL_Renderer for the legacy window, settings, snapshots, and
+fallbacks, not as a hidden device-owning bridge inside DirectComposition. Keep the bgfx proof
+opt-in as evidence for a future platform where its portability can be measured against that
+platform's native compositor contract. Do not use SDL_GPU for Windows DirectComposition until SDL
+exposes a public external-resource contract that removes the animated CPU bridge.
 
 ## Build contract proven by Gates 1 and 2
 
@@ -203,12 +211,41 @@ Lifetime order is explicit: detach bgfx framebuffers, destroy borrowed bgfx hand
 destruction, detach the visual tree, release composition and swapchain objects, release Eidolon's
 retained D3D11 reference, and finally shut down bgfx.
 
+Gate 4 instrumentation is deliberately local to the proof executable:
+
+- eight ordinary bubble revisions measure monotonic time from dirty content immediately before
+  bgfx submission through `IDCompositionDevice::WaitForCommitCompletion`; the report includes
+  average, p95, and maximum values. This is submission-to-composition-completion latency, not a
+  claim about scanout or photon latency;
+- every composition commit is timed independently so content cost and compositor cost remain
+  distinguishable;
+- a 250 ms idle interval measures process CPU time and fails if content renders, presents, or
+  composition commits advance;
+- bubble resize destroys the borrowed bgfx handles, advances deferred destruction, releases buffer
+  zero, calls `ResizeBuffers`, re-wraps the new buffer, and records both rebuild latency and resource
+  generation;
+- hidden runs enumerate monitor work areas, move the hidden host to a different output when one is
+  available, restore it, and require both transitions to be observed. Visible runs observe monitor
+  changes while the user drags the host;
+- the adapter LUID, current output, DPI, output count, and transfer count are reported;
+- `ID3D11Device::GetDeviceRemovedReason` is checked after every meaningful GPU/composition stage.
+  Device-removed, reset, hung, and driver-internal failures are classified and reported with their
+  HRESULT before the probe fails closed;
+- presentation counters separately report ordinary presents, compositor-only commits, resource
+  rebuilds, test-only verification readbacks, bridge copies, and presentation readbacks.
+
+The probe asserts structural invariants but does not impose machine-independent latency or CPU
+thresholds. Gate 5 owns comparative performance policy.
+
 ## Current checkpoint
 
-Gates 0 through 3 are complete. Gate 4 has proven the static and repeated-content bridge, independent
-layers, and compositor-only presentation changes in debug and release. It remains incomplete until
-latency/idle, resize, output transfer, and device-loss evidence exists and the owner accepts the
-visible probe. The production renderer remains unchanged.
+Gates 0 through 5 are complete. Gate 5 selected direct D3D11 for the Windows compositor backend.
+bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
+not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
+unacceptable CPU readback bridge into DirectComposition. SDL_Renderer could wrap the external
+D3D11 targets, but retaining its unused window swapchain violated presentation ownership and
+produced a persistent idle worker on the test machine. No candidate entered the production
+renderer.
 
 ## Restart checklist
 
@@ -267,7 +304,7 @@ visible probe. The production renderer remains unchanged.
   `external D3D11 targets=2 alpha=verified bridge_copies=0`;
 - the existing debug info-queue reference warning remained unchanged from Gate 2.
 
-### 2026-07-22: Gate 4 bridge proof passed
+### 2026-07-22: Gate 3 transparent-target proof passed
 
 - the Windows-only C++ probe created a no-redirection Win32 host, DirectComposition device and
   target, root visual, and independent body and bubble visuals behind no production code path;
@@ -286,4 +323,77 @@ visible probe. The production renderer remains unchanged.
   the gate now enforces the corrected ownership order instead of suppressing the assertion;
 - bgfx still reports its existing non-fatal D3D11 immediate-context reference warning at debug
   shutdown; this is unchanged in nature from earlier probes and remains adoption evidence;
-- the visible `SHOW=1` sequence and operational failure/latency instrumentation remain pending.
+- owner acceptance was still pending at this checkpoint and is recorded below after instrumentation.
+
+### 2026-07-22: Gate 4 instrumentation passed
+
+- debug and release runs each collected eight clean content-latency samples plus every
+  DirectComposition commit latency without including numerical verification readbacks;
+- a real bubble `ResizeBuffers` cycle advanced its resource generation, re-wrapped the external
+  buffer, rendered verified content, and presented successfully;
+- the hidden probe crossed and restored output bounds on the three-monitor test machine without
+  showing or activating its host window;
+- the idle interval advanced zero content frames, presents, and composition commits;
+- all staged device-removal checks returned `S_OK`; failures now retain their operation and HRESULT;
+- no bridge copy or presentation CPU readback was introduced. Four explicit staging readbacks
+  remain isolated as numerical test evidence.
+
+### 2026-07-22: Gate 4 owner acceptance passed
+
+- the owner ran the draggable `SHOW=1` composition probe and accepted its interaction and visual
+  quality as smooth;
+- Gate 4 is complete; this acceptance does not pre-empt Gate 5's comparative backend decision.
+
+### 2026-07-22: Gate 5 measured adoption decision
+
+`make MODE=release graphics-backend-benchmark` builds one backend-selectable harness four ways and
+runs the same workload through each. Every run owns the same no-redirection host, body and bubble
+composition swapchains, content revisions, 16 timed bubble updates, resize, compositor-only
+transforms, idle interval, output transfer, pixel verification, and device-loss checks. The
+Eidolon profile uses a 1024x1024 body target and grows the bubble from 768x256 to 896x320.
+
+An illustrative release run on the AMD integrated-GPU development machine produced:
+
+- direct D3D11: 0.009 ms average CPU submission, 0.065 ms average D3D11 GPU time, 0.160 ms average
+  content-to-compositor completion, 27.24 MiB working set, 13.77 MiB private memory, and a 171.5
+  KiB executable;
+- the current SDL_Renderer/D3D11 public external-texture path: 0.007 ms CPU submission, 0.044 ms
+  GPU time, 0.259 ms content-to-compositor completion, 51.51 MiB working set, 21.57 MiB private
+  memory, and a 173.5 KiB executable plus the already-required SDL runtime. Its renderer still
+  owned an otherwise unused hidden HWND swapchain; an isolated one-second initialization-idle
+  probe repeatedly charged 0.48–0.61 CPU seconds to one background worker while direct D3D11
+  charged zero;
+- bgfx/D3D11: 0.173 ms CPU submission, 0.549 ms GPU time, 0.862 ms
+  content-to-compositor completion, 80.97 MiB working set, 139.06 MiB private memory, and a 950.5
+  KiB statically linked executable;
+- SDL_GPU/D3D12 bridged into D3D11: 0.434 ms average submission with a 0.512 ms p95, 0.940 ms
+  content-to-compositor completion with a 6.287 ms p95, 89.66 MiB working set, 87.11 MiB private
+  memory, 40 bridge transfers, and 20 presentation CPU readbacks. SDL_GPU exposes no public GPU
+  timestamp query, so its internal D3D12 GPU time is reported as unavailable instead of fabricated.
+
+The small sample is a regression probe, not a universal performance claim. Submission and GPU
+timings distinguish renderer cost from the noisier compositor completion. All four paths crossed
+the same three-monitor topology, passed resize and numerical alpha checks, and reported no device
+loss. Only SDL_GPU copied or read presentation content. Application work counters stayed still in
+every idle interval; process CPU instrumentation separately exposed the SDL_Renderer worker, which
+is why zero logical work is not accepted as proof of quiescence.
+
+Build and debugging costs differ materially:
+
+- direct D3D11 uses the Windows SDK, native HRESULT/device-removal diagnostics, and no new runtime;
+- SDL_Renderer uses Eidolon's existing C dependency and public native-device/external-texture
+  properties, but it remains window-renderer-owned and brings an unused swapchain and observed idle
+  worker when used only as a DirectComposition device bridge;
+- bgfx adds three pinned source trees, C++20 amalgamated builds, SSE4.2, static payload, an internal
+  device access contract, verbose backend diagnostics, and the existing debug shutdown reference
+  warning. Its broad renderer reach does not remove platform compositor implementations;
+- SDL_GPU is already cross-platform and C-native, but SDL 3.4.10 exposes neither external
+  GPU-texture import/export nor GPU timestamps. On Windows it therefore requires an opaque D3D12
+  device plus a separate D3D11 compositor device and a synchronous CPU bridge.
+
+Direct D3D11 wins the Windows gate because it is the only path with zero bridge copies, compositor
+ownership, no dummy swapchain, native GPU timing, and measured idle quiescence. The portability
+benefit is not yet worth bgfx's cost: only its Windows D3D11 native-target path is
+proven, while Linux, macOS, Android, and iOS still require platform-specific presentation and
+interop work. bgfx remains an opt-in experiment. A future non-Windows backend may reopen the
+decision with that platform's equivalent measurements; it does not inherit a Windows verdict.
