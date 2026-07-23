@@ -63,14 +63,11 @@ typedef struct EidolonApp {
     EidolonPresentation *presentation;
     EidolonScene scene;
     EidolonSceneSnapshot scene_snapshot;
-    /* Transitional aliases borrowed from sdl_window_legacy. Body and dialogue renderers still
-       consume SDL_Renderer until native targets replace this migration bridge. */
+    /* Transitional aliases borrowed from sdl_window_legacy. Rasterizers still consume
+       SDL_Renderer until native targets replace this migration bridge. */
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *atlas;
-    SDL_Texture *bubble_layers[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
-    int bubble_layer_widths[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
-    int bubble_layer_heights[EIDOLON_VISIBLE_SESSION_CAPACITY + 1U];
     EidolonTextRenderer *text_renderer;
     EidolonModelRenderer *model;
     EidolonPortraitRenderer *portrait;

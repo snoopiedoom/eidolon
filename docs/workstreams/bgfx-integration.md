@@ -303,6 +303,19 @@ been enabled.
 
 ## Evidence log
 
+### 2026-07-23: legacy dialogue targets accepted
+
+- each visible session now resolves a presentation-owned target through its stable scene-layer id;
+- dialogue content is rasterized only when its content revision changes, while placement and fade
+  remain presentation-only updates;
+- the target contract records straight versus premultiplied alpha explicitly, preserving portrait
+  and dialogue edge behavior without backend-specific assumptions in orchestration;
+- failed redraws retain the previous active target, and a successful scene commit releases targets
+  for retired layers without disturbing surviving sessions;
+- `EidolonApp` no longer owns bubble texture arrays or their dimensions;
+- `make check`, the Windows debug build, formatting, and whitespace validation passed; the owner
+  accepted streaming, multi-session behavior, fading, dragging, and visual parity interactively.
+
 ### 2026-07-23: legacy body target accepted
 
 - the presentation owner now maintains two reusable target resources per stable scene layer and

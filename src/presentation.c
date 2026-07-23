@@ -12,6 +12,7 @@ typedef struct EidolonPresentationTargetResource {
     uint64_t generation;
     uint32_t width;
     uint32_t height;
+    EidolonPresentationAlphaMode alpha_mode;
     bool allocated;
 } EidolonPresentationTargetResource;
 
@@ -80,6 +81,15 @@ static void release_layer_target(EidolonPresentation *presentation,
         destroy_target_resource(presentation, &record->resources[index]);
     }
     SDL_zero(*record);
+}
+
+static bool scene_contains_layer(const EidolonSceneSnapshot *scene, EidolonSceneLayerId layer) {
+    for (size_t index = 0U; index < scene->layer_count; ++index) {
+        if (scene->layers[index].id.value == layer.value) {
+            return true;
+        }
+    }
+    return false;
 }
 
 EidolonPresentation *
@@ -191,9 +201,13 @@ bool eidolon_presentation_update_input_region(EidolonPresentation *presentation)
 
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                                               EidolonSceneLayerId layer, uint32_t width,
-                                              uint32_t height, uint64_t content_revision,
+                                              uint32_t height,
+                                              EidolonPresentationAlphaMode alpha_mode,
+                                              uint64_t content_revision,
                                               EidolonPresentationTargetUpdate *update) {
     if (presentation == NULL || layer.value == 0U || width == 0U || height == 0U ||
+        (alpha_mode != EIDOLON_PRESENTATION_ALPHA_STRAIGHT &&
+         alpha_mode != EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED) ||
         content_revision == 0U || update == NULL ||
         presentation->operations.create_target == NULL ||
         presentation->operations.destroy_target == NULL) {
@@ -212,6 +226,7 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
     if (record->active_slot < EIDOLON_PRESENTATION_TARGET_SLOT_COUNT) {
         const EidolonPresentationTargetResource *active = &record->resources[record->active_slot];
         if (active->allocated && active->width == width && active->height == height &&
+            active->alpha_mode == alpha_mode &&
             record->applied_content_revision == content_revision) {
             *update = (EidolonPresentationTargetUpdate){
                 .target = active->target,
@@ -219,6 +234,7 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                 .content_revision = content_revision,
                 .width = width,
                 .height = height,
+                .alpha_mode = alpha_mode,
                 .redraw_required = false,
             };
             return true;
@@ -227,12 +243,14 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
 
     const unsigned int staging_slot = record->active_slot == 0U ? 1U : 0U;
     EidolonPresentationTargetResource *staging = &record->resources[staging_slot];
-    if (staging->allocated && (staging->width != width || staging->height != height)) {
+    if (staging->allocated && (staging->width != width || staging->height != height ||
+                               staging->alpha_mode != alpha_mode)) {
         destroy_target_resource(presentation, staging);
     }
     if (!staging->allocated) {
         const EidolonPresentationTarget target = {presentation->next_target_id++};
-        if (!presentation->operations.create_target(presentation->context, target, width, height)) {
+        if (!presentation->operations.create_target(presentation->context, target, width, height,
+                                                    alpha_mode)) {
             return false;
         }
         *staging = (EidolonPresentationTargetResource){
@@ -240,6 +258,7 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
             .generation = presentation->next_target_generation++,
             .width = width,
             .height = height,
+            .alpha_mode = alpha_mode,
             .allocated = true,
         };
     }
@@ -252,6 +271,7 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
         .content_revision = content_revision,
         .width = width,
         .height = height,
+        .alpha_mode = alpha_mode,
         .redraw_required = true,
     };
     return true;
@@ -311,6 +331,7 @@ bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,
         .content_revision = record->applied_content_revision,
         .width = active->width,
         .height = active->height,
+        .alpha_mode = active->alpha_mode,
         .redraw_required = false,
     };
     return true;
@@ -338,6 +359,14 @@ bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
     if (presentation->operations.commit_scene != NULL &&
         !presentation->operations.commit_scene(presentation->context, scene)) {
         return false;
+    }
+    if (presentation->operations.destroy_target != NULL) {
+        for (size_t index = 0U; index < EIDOLON_SCENE_LAYER_CAPACITY; ++index) {
+            EidolonPresentationLayerTarget *record = &presentation->layer_targets[index];
+            if (record->occupied && !scene_contains_layer(scene, record->layer)) {
+                release_layer_target(presentation, record);
+            }
+        }
     }
     presentation->committed_scene_revision = scene->revision;
     return true;

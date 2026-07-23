@@ -2346,9 +2346,6 @@ void eidolon_app_destroy(EidolonApp *app) {
     eidolon_model_destroy(app->model);
     eidolon_portrait_destroy(app->portrait);
     eidolon_text_renderer_destroy(app->text_renderer);
-    for (size_t index = 0U; index < SDL_arraysize(app->bubble_layers); ++index) {
-        SDL_DestroyTexture(app->bubble_layers[index]);
-    }
     SDL_DestroyTexture(app->atlas);
     eidolon_presentation_destroy(app->presentation);
     SDL_Quit();

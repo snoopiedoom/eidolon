@@ -209,9 +209,9 @@ static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform
         return false;
     }
     EidolonPresentationTargetUpdate update;
-    if (!eidolon_presentation_begin_target_update(app->presentation, body->id, body->content_width,
-                                                  body->content_height, body->content_revision,
-                                                  &update)) {
+    if (!eidolon_presentation_begin_target_update(
+            app->presentation, body->id, body->content_width, body->content_height,
+            EIDOLON_PRESENTATION_ALPHA_STRAIGHT, body->content_revision, &update)) {
         return false;
     }
     if (update.redraw_required) {
@@ -452,74 +452,77 @@ static void draw_dialogue_bubble_content(EidolonApp *app, const SDL_FRect *bubbl
     }
 }
 
-static bool ensure_bubble_layer(EidolonApp *app, size_t layer_slot, int width, int height) {
-    if (layer_slot >= SDL_arraysize(app->bubble_layers) || width <= 0 || height <= 0) {
-        return false;
-    }
-    if (app->bubble_layers[layer_slot] != NULL &&
-        (app->bubble_layer_widths[layer_slot] != width ||
-         app->bubble_layer_heights[layer_slot] != height)) {
-        SDL_DestroyTexture(app->bubble_layers[layer_slot]);
-        app->bubble_layers[layer_slot] = NULL;
-    }
-    if (app->bubble_layers[layer_slot] == NULL) {
-        const SDL_BlendMode premultiplied_blend = SDL_ComposeCustomBlendMode(
-            SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
-            SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
-        app->bubble_layers[layer_slot] = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ABGR8888,
-                                                           SDL_TEXTUREACCESS_TARGET, width, height);
-        if (app->bubble_layers[layer_slot] == NULL ||
-            !SDL_SetTextureBlendMode(app->bubble_layers[layer_slot], premultiplied_blend)) {
-            SDL_DestroyTexture(app->bubble_layers[layer_slot]);
-            app->bubble_layers[layer_slot] = NULL;
-            return false;
-        }
-        app->bubble_layer_widths[layer_slot] = width;
-        app->bubble_layer_heights[layer_slot] = height;
-    }
-    return true;
-}
-
 static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                                  const EidolonDialogue *dialogue, const char *title,
-                                 size_t title_slot, size_t body_slot, size_t layer_slot,
+                                 size_t title_slot, size_t body_slot, uint64_t stable_key,
                                  float opacity) {
     if (opacity <= 0.0F) {
         return;
     }
     const bool points_right =
         bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
-    const int layer_width = (int)SDL_ceilf(bubble->w + BUBBLE_LAYER_PADDING * 2.0F);
-    const int layer_height = (int)SDL_ceilf(bubble->h + BUBBLE_LAYER_PADDING * 2.0F);
-    SDL_Texture *previous_target = SDL_GetRenderTarget(app->renderer);
-    if (ensure_bubble_layer(app, layer_slot, layer_width, layer_height) &&
-        SDL_SetRenderTarget(app->renderer, app->bubble_layers[layer_slot])) {
-        SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0);
-        SDL_RenderClear(app->renderer);
-        const SDL_FRect local_bubble = {
-            BUBBLE_LAYER_PADDING,
-            BUBBLE_LAYER_PADDING,
-            bubble->w,
-            bubble->h,
-        };
-        draw_dialogue_bubble_content(app, &local_bubble, dialogue, title, title_slot, body_slot,
-                                     1.0F, points_right);
-        if (SDL_SetRenderTarget(app->renderer, previous_target) &&
-            SDL_SetTextureColorModFloat(app->bubble_layers[layer_slot], opacity, opacity,
-                                        opacity) &&
-            SDL_SetTextureAlphaModFloat(app->bubble_layers[layer_slot], opacity)) {
+    const EidolonSceneLayerSnapshot *layer =
+        eidolon_scene_snapshot_layer(&app->scene_snapshot, stable_key);
+    EidolonPresentationTargetUpdate update;
+    if (layer != NULL &&
+        eidolon_presentation_begin_target_update(
+            app->presentation, layer->id, layer->content_width, layer->content_height,
+            EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED, layer->content_revision, &update)) {
+        if (update.redraw_required) {
+            SDL_Texture *target =
+                eidolon_sdl_legacy_target_texture(app->presentation, update.target);
+            SDL_Texture *previous_target = SDL_GetRenderTarget(app->renderer);
+            bool content_valid = target != NULL && SDL_SetRenderTarget(app->renderer, target);
+            if (content_valid) {
+                content_valid = SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0) &&
+                                SDL_RenderClear(app->renderer);
+                if (content_valid) {
+                    const SDL_FRect local_bubble = {
+                        BUBBLE_LAYER_PADDING,
+                        BUBBLE_LAYER_PADDING,
+                        bubble->w,
+                        bubble->h,
+                    };
+                    draw_dialogue_bubble_content(app, &local_bubble, dialogue, title, title_slot,
+                                                 body_slot, 1.0F, points_right);
+                }
+            }
+            const bool target_restored = SDL_SetRenderTarget(app->renderer, previous_target);
+            content_valid = target_restored && content_valid;
+            const bool update_finished = eidolon_presentation_finish_target_update(
+                app->presentation, &update, content_valid);
+            if (!target_restored) {
+                return;
+            }
+            if (update_finished && content_valid) {
+                eidolon_log_write(
+                    "renderer",
+                    "dialogue target redraw target=%u generation=%llu content_revision=%llu "
+                    "extent=%ux%u",
+                    update.target.value, (unsigned long long)update.generation,
+                    (unsigned long long)update.content_revision, update.width, update.height);
+            } else if (!eidolon_presentation_target_for_layer(app->presentation, layer->id,
+                                                              &update)) {
+                goto direct_draw;
+            }
+        }
+
+        SDL_Texture *target = eidolon_sdl_legacy_target_texture(app->presentation, update.target);
+        if (target != NULL && SDL_SetTextureColorModFloat(target, opacity, opacity, opacity) &&
+            SDL_SetTextureAlphaModFloat(target, opacity)) {
             const SDL_FRect destination = {
                 bubble->x - BUBBLE_LAYER_PADDING,
                 bubble->y - BUBBLE_LAYER_PADDING,
-                (float)layer_width,
-                (float)layer_height,
+                (float)update.width,
+                (float)update.height,
             };
-            SDL_RenderTexture(app->renderer, app->bubble_layers[layer_slot], NULL, &destination);
-            return;
+            if (SDL_RenderTexture(app->renderer, target, NULL, &destination)) {
+                return;
+            }
         }
     }
 
-    (void)SDL_SetRenderTarget(app->renderer, previous_target);
+direct_draw:
     draw_dialogue_bubble_content(app, bubble, dialogue, title, title_slot, body_slot, opacity,
                                  points_right);
 }
@@ -545,7 +548,8 @@ static void draw_scene(EidolonApp *app) {
             if (session != NULL && app->bubble_rect_valid[slot]) {
                 draw_dialogue_bubble(app, &app->bubble_rects[slot], &session->dialogue,
                                      session->title, TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
-                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot, (size_t)slot,
+                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot,
+                                     dialogue_stable_key(session, slot),
                                      eidolon_session_entry_opacity(session, now_ms));
             }
         }
@@ -554,7 +558,7 @@ static void draw_scene(EidolonApp *app) {
         draw_dialogue_bubble(app, &bubble, &app->dialogue, "EIDOLON",
                              TEXT_SLOT_DIALOGUE_TITLE_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
                              TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
-                             EIDOLON_VISIBLE_SESSION_CAPACITY, 1.0F);
+                             SCENE_FALLBACK_DIALOGUE_KEY, 1.0F);
     }
 
     if (portrait_active) {

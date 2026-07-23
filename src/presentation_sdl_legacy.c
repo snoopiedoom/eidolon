@@ -98,7 +98,7 @@ static EidolonSdlLegacyTarget *legacy_find_target(EidolonSdlLegacyPresentation *
 }
 
 static bool legacy_create_target(void *opaque, EidolonPresentationTarget target, uint32_t width,
-                                 uint32_t height) {
+                                 uint32_t height, EidolonPresentationAlphaMode alpha_mode) {
     EidolonSdlLegacyPresentation *legacy = opaque;
     EidolonSdlLegacyTarget *slot = NULL;
     for (size_t index = 0U; index < SDL_arraysize(legacy->targets); ++index) {
@@ -113,7 +113,13 @@ static bool legacy_create_target(void *opaque, EidolonPresentationTarget target,
     }
     SDL_Texture *texture = SDL_CreateTexture(legacy->renderer, SDL_PIXELFORMAT_ABGR8888,
                                              SDL_TEXTUREACCESS_TARGET, (int)width, (int)height);
-    if (texture == NULL || !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) ||
+    const SDL_BlendMode blend =
+        alpha_mode == EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED
+            ? SDL_ComposeCustomBlendMode(
+                  SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
+                  SDL_BLENDFACTOR_ONE, SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, SDL_BLENDOPERATION_ADD)
+            : SDL_BLENDMODE_BLEND;
+    if (texture == NULL || !SDL_SetTextureBlendMode(texture, blend) ||
         !SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR)) {
         SDL_DestroyTexture(texture);
         return false;

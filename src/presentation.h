@@ -20,12 +20,18 @@ typedef struct EidolonPresentationTarget {
     uint32_t value;
 } EidolonPresentationTarget;
 
+typedef enum EidolonPresentationAlphaMode {
+    EIDOLON_PRESENTATION_ALPHA_STRAIGHT,
+    EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED,
+} EidolonPresentationAlphaMode;
+
 typedef struct EidolonPresentationTargetUpdate {
     EidolonPresentationTarget target;
     uint64_t generation;
     uint64_t content_revision;
     uint32_t width;
     uint32_t height;
+    EidolonPresentationAlphaMode alpha_mode;
     bool redraw_required;
 } EidolonPresentationTargetUpdate;
 
@@ -62,7 +68,7 @@ typedef struct EidolonPresentationBackendOps {
     void (*suspend_input_region)(void *context);
     bool (*update_input_region)(void *context);
     bool (*create_target)(void *context, EidolonPresentationTarget target, uint32_t width,
-                          uint32_t height);
+                          uint32_t height, EidolonPresentationAlphaMode alpha_mode);
     void (*destroy_target)(void *context, EidolonPresentationTarget target);
     bool (*commit_scene)(void *context, const EidolonSceneSnapshot *scene);
     bool (*present)(void *context);
@@ -92,7 +98,9 @@ void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation);
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                                               EidolonSceneLayerId layer, uint32_t width,
-                                              uint32_t height, uint64_t content_revision,
+                                              uint32_t height,
+                                              EidolonPresentationAlphaMode alpha_mode,
+                                              uint64_t content_revision,
                                               EidolonPresentationTargetUpdate *update);
 bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation,
                                                const EidolonPresentationTargetUpdate *update,
