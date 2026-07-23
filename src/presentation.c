@@ -12,6 +12,7 @@ struct EidolonPresentation {
     void *context;
     EidolonPresentationBackendOps operations;
     EidolonPresentationHost host;
+    uint64_t committed_scene_revision;
 };
 
 EidolonPresentation *
@@ -110,6 +111,24 @@ void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation) {
     return presentation != NULL && presentation->operations.update_input_region != NULL &&
            presentation->operations.update_input_region(presentation->context);
+}
+
+bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
+                                       const EidolonSceneSnapshot *scene) {
+    if (presentation == NULL || scene == NULL || scene->revision == 0U ||
+        scene->revision < presentation->committed_scene_revision) {
+        SDL_SetError("stale or invalid presentation scene");
+        return false;
+    }
+    if (scene->revision == presentation->committed_scene_revision) {
+        return true;
+    }
+    if (presentation->operations.commit_scene != NULL &&
+        !presentation->operations.commit_scene(presentation->context, scene)) {
+        return false;
+    }
+    presentation->committed_scene_revision = scene->revision;
+    return true;
 }
 
 bool eidolon_presentation_present(EidolonPresentation *presentation) {

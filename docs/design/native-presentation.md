@@ -671,8 +671,9 @@ Gate: snapshots and interactive SDL behavior match before any native compositor 
 runtime capability flags, a fake-backend contract test, and a behavior-preserving
 `sdl_window_legacy` backend. Host and SDL-renderer lifetime, overlay setup, geometry, VSync, native
 drag, input-region refresh, and final present flow through that owner. Existing body and dialogue
-renderers still borrow the legacy SDL renderer and have not yet published independent scene layers
-or revisions. DirectComposition therefore remains disabled.
+renderers still borrow the legacy SDL renderer. They now publish stable renderer-neutral body and
+per-session dialogue layers with independent content and presentation revisions, but they have not
+yet migrated pixels into backend-owned targets. DirectComposition therefore remains disabled.
 
 ### Phase 2: Windows portrait proof
 

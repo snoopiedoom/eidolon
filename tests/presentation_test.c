@@ -8,6 +8,7 @@ typedef struct FakePresentation {
     unsigned int configure_count;
     unsigned int sync_count;
     unsigned int present_count;
+    unsigned int commit_count;
     unsigned int destroy_count;
     int vsync_interval;
     bool input_suspended;
@@ -75,6 +76,13 @@ static bool fake_present(void *context) {
     return true;
 }
 
+static bool fake_commit_scene(void *context, const EidolonSceneSnapshot *scene) {
+    FakePresentation *fake = context;
+    assert(scene->revision > 0U);
+    ++fake->commit_count;
+    return true;
+}
+
 int main(void) {
     FakePresentation fake = {
         .geometry = {10, 20, 520, 360},
@@ -90,6 +98,7 @@ int main(void) {
         .begin_interactive_move = fake_begin_move,
         .suspend_input_region = fake_suspend_input,
         .update_input_region = fake_update_input,
+        .commit_scene = fake_commit_scene,
         .present = fake_present,
     };
     const uint64_t capabilities =
@@ -123,6 +132,13 @@ int main(void) {
     assert(fake.input_suspended);
     assert(eidolon_presentation_update_input_region(presentation));
     assert(!fake.input_suspended);
+    const EidolonSceneSnapshot scene = {.revision = 2U};
+    assert(eidolon_presentation_commit_scene(presentation, &scene));
+    assert(fake.commit_count == 1U);
+    assert(eidolon_presentation_commit_scene(presentation, &scene));
+    assert(fake.commit_count == 1U);
+    const EidolonSceneSnapshot stale_scene = {.revision = 1U};
+    assert(!eidolon_presentation_commit_scene(presentation, &stale_scene));
     assert(eidolon_presentation_present(presentation));
     assert(fake.present_count == 1U);
 

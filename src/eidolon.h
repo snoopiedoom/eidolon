@@ -18,6 +18,7 @@
 #include "portrait.h"
 #include "pose.h"
 #include "presentation.h"
+#include "scene.h"
 #include "session_registry.h"
 #include "state.h"
 #include "text_renderer.h"
@@ -60,6 +61,8 @@ typedef struct EidolonSettingsUi EidolonSettingsUi;
 
 typedef struct EidolonApp {
     EidolonPresentation *presentation;
+    EidolonScene scene;
+    EidolonSceneSnapshot scene_snapshot;
     /* Transitional aliases borrowed from sdl_window_legacy. Body and dialogue renderers still
        consume SDL_Renderer until native targets replace this migration bridge. */
     SDL_Window *window;

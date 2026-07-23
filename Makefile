@@ -35,6 +35,7 @@ COMMON_SOURCES := \
 	src/portrait.c \
 	src/portrait_motion.c \
 	src/relay_core.c \
+	src/scene.c \
 	src/providers/codex_relay.c \
 	src/providers/codex_stream.c \
 	src/providers/live_source.c \
@@ -499,6 +500,7 @@ AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
 EXPRESSION_DIRECTOR_TEST := $(TEST_DIR)/expression_director_test$(EXE)
 FRAME_CLOCK_TEST := $(TEST_DIR)/frame_clock_test$(EXE)
 PRESENTATION_TEST := $(TEST_DIR)/presentation_test$(EXE)
+SCENE_TEST := $(TEST_DIR)/scene_test$(EXE)
 BUBBLE_LAYOUT_TEST := $(TEST_DIR)/bubble_layout_test$(EXE)
 SESSION_REGISTRY_TEST := $(TEST_DIR)/session_registry_test$(EXE)
 USER_SETTINGS_TEST := $(TEST_DIR)/user_settings_test$(EXE)
@@ -593,7 +595,11 @@ $(FRAME_CLOCK_TEST): tests/frame_clock_test.c src/frame_clock.c | $(TEST_RUNTIME
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(PRESENTATION_TEST): tests/presentation_test.c src/presentation.c | $(TEST_RUNTIME)
+$(PRESENTATION_TEST): tests/presentation_test.c src/presentation.c src/scene.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(SCENE_TEST): tests/scene_test.c src/scene.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
@@ -644,7 +650,7 @@ codex-relay-test: $(CODEX_RELAY_TEST)
 check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
-	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
+	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
@@ -664,6 +670,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_
 	$(EXPRESSION_DIRECTOR_TEST)
 	$(FRAME_CLOCK_TEST)
 	$(PRESENTATION_TEST)
+	$(SCENE_TEST)
 	$(BUBBLE_LAYOUT_TEST)
 	$(SESSION_REGISTRY_TEST)
 	$(USER_SETTINGS_TEST)

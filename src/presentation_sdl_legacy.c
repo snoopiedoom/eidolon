@@ -75,6 +75,12 @@ static bool legacy_update_input_region(void *opaque) {
     return eidolon_platform_update_hit_test(legacy->window, legacy->renderer);
 }
 
+static bool legacy_commit_scene(void *opaque, const EidolonSceneSnapshot *scene) {
+    (void)opaque;
+    (void)scene;
+    return true;
+}
+
 static bool legacy_present(void *opaque) {
     EidolonSdlLegacyPresentation *legacy = opaque;
     return SDL_RenderPresent(legacy->renderer);
@@ -121,6 +127,7 @@ EidolonPresentation *eidolon_sdl_legacy_presentation_create(const EidolonSdlLega
         .begin_interactive_move = legacy_begin_interactive_move,
         .suspend_input_region = legacy_suspend_input_region,
         .update_input_region = legacy_update_input_region,
+        .commit_scene = legacy_commit_scene,
         .present = legacy_present,
     };
     uint64_t capabilities =

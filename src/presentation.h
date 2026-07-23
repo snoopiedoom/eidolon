@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "scene.h"
+
 typedef struct EidolonPresentation EidolonPresentation;
 
 typedef struct EidolonPresentationHost {
@@ -50,6 +52,7 @@ typedef struct EidolonPresentationBackendOps {
     bool (*begin_interactive_move)(void *context);
     void (*suspend_input_region)(void *context);
     bool (*update_input_region)(void *context);
+    bool (*commit_scene)(void *context, const EidolonSceneSnapshot *scene);
     bool (*present)(void *context);
 } EidolonPresentationBackendOps;
 
@@ -75,6 +78,8 @@ bool eidolon_presentation_set_vsync(EidolonPresentation *presentation, int inter
 bool eidolon_presentation_begin_interactive_move(EidolonPresentation *presentation);
 void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation);
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation);
+bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
+                                       const EidolonSceneSnapshot *scene);
 bool eidolon_presentation_present(EidolonPresentation *presentation);
 
 #endif

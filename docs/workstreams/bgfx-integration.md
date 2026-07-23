@@ -155,7 +155,7 @@ exposes a public external-resource contract that removes the animated CPU bridge
 - [x] move host/renderer lifetime, overlay setup, geometry, VSync, native drag, hit-region updates,
   and final presentation behind that backend;
 - [x] add a fake-backend contract test to ordinary `make check`;
-- [ ] publish renderer-neutral body and dialogue scene descriptions with independent content and
+- [x] publish renderer-neutral body and dialogue scene descriptions with independent content and
   presentation revisions;
 - [ ] remove transitional SDL window/renderer aliases from `EidolonApp` as backend targets replace
   them;
@@ -297,6 +297,11 @@ been enabled.
 - The hidden four-session snapshot completed through the normal runnable `make` layout and matched
   the accepted composition visually. No DirectComposition backend or production selection switch
   is active yet; interactive equivalence remains owner-controlled.
+- The second checkpoint publishes stable body and per-session dialogue layers in global logical
+  coordinates. Each layer carries independent content and presentation revisions; text reveal,
+  expression/sprite/3D changes, and legacy-baked portrait motion affect content, while placement,
+  z-order, visibility, and opacity affect presentation. The presentation owner rejects stale scene
+  commits before they reach a backend.
 
 ### 2026-07-22: workstream created
 

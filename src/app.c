@@ -1165,6 +1165,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     eidolon_user_settings_defaults(&app->user_settings);
     eidolon_motion_config_defaults(&app->motion_config);
     eidolon_motion_config_watch_init(&app->motion_config_watch);
+    eidolon_scene_init(&app->scene);
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init failed: %s", SDL_GetError());
