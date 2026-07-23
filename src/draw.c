@@ -3,7 +3,7 @@
 #include "animation.h"
 #include "bubble_layout.h"
 #include "log.h"
-#include "platform/overlay.h"
+#include "presentation_sdl_legacy.h"
 
 #include <string.h>
 
@@ -381,7 +381,7 @@ static void update_hit_test_if_needed(EidolonApp *app) {
         }
     }
 
-    if (eidolon_platform_update_hit_test(app->window, app->renderer)) {
+    if (eidolon_presentation_update_input_region(app->presentation)) {
         app->hit_test_initialized = true;
         app->hit_test_row = app->animation.row;
         app->hit_test_frame = app->animation.frame;
@@ -394,7 +394,14 @@ static void update_hit_test_if_needed(EidolonApp *app) {
 void eidolon_draw_frame(EidolonApp *app) {
     draw_scene(app);
     update_hit_test_if_needed(app);
-    SDL_RenderPresent(app->renderer);
+    if (!eidolon_presentation_present(app->presentation)) {
+        static bool present_failure_reported = false;
+        if (!present_failure_reported) {
+            eidolon_log_write("renderer", "presentation failed backend=%s error=%s",
+                              eidolon_presentation_backend_name(app->presentation), SDL_GetError());
+            present_failure_reported = true;
+        }
+    }
 }
 
 bool eidolon_draw_snapshot(EidolonApp *app, const char *path) {
@@ -417,7 +424,7 @@ bool eidolon_draw_snapshot(EidolonApp *app, const char *path) {
     }
     draw_scene(app);
 
-    SDL_Surface *surface = eidolon_platform_read_pixels(app->renderer);
+    SDL_Surface *surface = eidolon_sdl_legacy_read_pixels(app->presentation);
     const bool restored = SDL_SetRenderTarget(app->renderer, previous_target);
     SDL_DestroyTexture(snapshot_target);
     if (surface == NULL) {

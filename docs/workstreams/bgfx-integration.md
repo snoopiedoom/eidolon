@@ -147,6 +147,27 @@ opt-in as evidence for a future platform where its portability can be measured a
 platform's native compositor contract. Do not use SDL_GPU for Windows DirectComposition until SDL
 exposes a public external-resource contract that removes the animated CPU bridge.
 
+### Gate 6: production presentation boundary
+
+- [x] introduce one platform-neutral presentation owner with opaque host, layer, and target ids;
+- [x] expose loaded-runtime capability flags independently from graphics renderer selection;
+- [x] implement `sdl_window_legacy` as the behavior-preserving first backend;
+- [x] move host/renderer lifetime, overlay setup, geometry, VSync, native drag, hit-region updates,
+  and final presentation behind that backend;
+- [x] add a fake-backend contract test to ordinary `make check`;
+- [ ] publish renderer-neutral body and dialogue scene descriptions with independent content and
+  presentation revisions;
+- [ ] remove transitional SDL window/renderer aliases from `EidolonApp` as backend targets replace
+  them;
+- [ ] enable the Win32 DirectComposition backend only after legacy snapshots and owner-controlled
+  interaction remain equivalent.
+
+This gate is the production migration, not another graphics experiment. The first checkpoint keeps
+the visible runtime on `sdl_window_legacy`. Body, portrait, dialogue, and snapshot renderers still
+borrow its SDL renderer explicitly; the presentation object now owns and destroys that renderer and
+its host. Native DirectComposition remains disabled until immutable scene snapshots and independent
+layer revisions exist.
+
 ## Build contract proven by Gates 1 and 2
 
 `make bgfx-smoke` is an opt-in Windows target. It:
@@ -239,13 +260,15 @@ thresholds. Gate 5 owns comparative performance policy.
 
 ## Current checkpoint
 
-Gates 0 through 5 are complete. Gate 5 selected direct D3D11 for the Windows compositor backend.
+Gates 0 through 5 are complete. Gate 6 is in progress at the behavior-preserving presentation
+boundary checkpoint. Gate 5 selected direct D3D11 for the Windows compositor backend.
 bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
 not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
 unacceptable CPU readback bridge into DirectComposition. SDL_Renderer could wrap the external
 D3D11 targets, but retaining its unused window swapchain violated presentation ownership and
 produced a persistent idle worker on the test machine. No candidate entered the production
-renderer.
+renderer. The current production runtime still uses `sdl_window_legacy`; DirectComposition has not
+been enabled.
 
 ## Restart checklist
 
@@ -259,6 +282,21 @@ renderer.
    handoff.
 
 ## Evidence log
+
+### 2026-07-22: Gate 6 presentation ownership checkpoint
+
+- Baseline `9d1a86472ef6f20d38eb2dd2f54e44d856df907c` was clean, owner-verified, and matched
+  `origin/master` before production work began.
+- `presentation` now exposes one C17 backend contract, opaque host/layer/target ids, and runtime
+  capability flags without native window or graphics types.
+- `sdl_window_legacy` owns the SDL window, SDL renderer, platform overlay lifecycle, geometry,
+  VSync, native interactive move, input-region refresh, and present call. `EidolonApp` retains
+  clearly marked borrowed SDL aliases only for renderers not yet migrated to backend targets.
+- A fake backend verifies dispatch, capabilities, geometry validation, input suspension, present,
+  and exactly-once destruction through ordinary `make check`.
+- The hidden four-session snapshot completed through the normal runnable `make` layout and matched
+  the accepted composition visually. No DirectComposition backend or production selection switch
+  is active yet; interactive equivalence remains owner-controlled.
 
 ### 2026-07-22: workstream created
 

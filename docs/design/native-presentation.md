@@ -667,6 +667,13 @@ Gate: existing checks and user-owned interaction behavior remain unchanged.
 
 Gate: snapshots and interactive SDL behavior match before any native compositor backend is enabled.
 
+**Status:** in progress. The first production checkpoint now has an opaque C17 presentation owner,
+runtime capability flags, a fake-backend contract test, and a behavior-preserving
+`sdl_window_legacy` backend. Host and SDL-renderer lifetime, overlay setup, geometry, VSync, native
+drag, input-region refresh, and final present flow through that owner. Existing body and dialogue
+renderers still borrow the legacy SDL renderer and have not yet published independent scene layers
+or revisions. DirectComposition therefore remains disabled.
+
 ### Phase 2: Windows portrait proof
 
 - create one output-local Win32 host and DirectComposition device/tree;

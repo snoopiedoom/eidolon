@@ -5,8 +5,8 @@
 #include "draw.h"
 #include "frame_clock.h"
 #include "log.h"
-#include "platform/overlay.h"
 #include "pose.h"
+#include "presentation_sdl_legacy.h"
 #include "settings_ui.h"
 
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
@@ -506,6 +506,26 @@ static uint64_t current_display_interval_ns(const EidolonApp *app) {
                                      mode != NULL ? mode->refresh_rate : 0.0F);
 }
 
+static bool presentation_position(const EidolonApp *app, int *x, int *y) {
+    EidolonPresentationGeometry geometry;
+    if (!eidolon_presentation_get_geometry(app->presentation, &geometry)) {
+        return false;
+    }
+    *x = geometry.x;
+    *y = geometry.y;
+    return true;
+}
+
+static bool set_presentation_position(EidolonApp *app, int x, int y) {
+    EidolonPresentationGeometry geometry;
+    if (!eidolon_presentation_get_geometry(app->presentation, &geometry)) {
+        return false;
+    }
+    geometry.x = x;
+    geometry.y = y;
+    return eidolon_presentation_set_geometry(app->presentation, &geometry);
+}
+
 static void update_presentation_policy(EidolonApp *app) {
     app->display_interval_ns = current_display_interval_ns(app);
     app->presentation_interval_ns = eidolon_frame_policy_interval_ns(
@@ -678,7 +698,7 @@ static SDL_FRect legacy_body_rect(const EidolonApp *app, float scale, int canvas
 static SDL_FPoint current_body_global_center(const EidolonApp *app) {
     int window_x = 0;
     int window_y = 0;
-    SDL_GetWindowPosition(app->window, &window_x, &window_y);
+    (void)presentation_position(app, &window_x, &window_y);
     const SDL_FRect body =
         app->body_rect_initialized
             ? app->body_rect
@@ -696,7 +716,7 @@ static void restore_body_global_center(EidolonApp *app, SDL_FPoint center) {
     }
     int window_x = 0;
     int window_y = 0;
-    SDL_GetWindowPosition(app->window, &window_x, &window_y);
+    (void)presentation_position(app, &window_x, &window_y);
     app->body_rect.x =
         (center.x - (float)window_x) / app->window_coordinate_scale - app->body_rect.w * 0.5F;
     app->body_rect.y =
@@ -707,31 +727,34 @@ static bool apply_window_geometry(EidolonApp *app, SDL_Rect window_bounds) {
     if (window_bounds.w <= 0 || window_bounds.h <= 0) {
         return false;
     }
-    int current_x = 0;
-    int current_y = 0;
-    int current_width = 0;
-    int current_height = 0;
-    const bool have_position = SDL_GetWindowPosition(app->window, &current_x, &current_y);
-    const bool have_size = SDL_GetWindowSize(app->window, &current_width, &current_height);
-    bool geometry_requested = false;
-    if (!have_size || current_width != window_bounds.w || current_height != window_bounds.h) {
-        if (!SDL_SetWindowSize(app->window, window_bounds.w, window_bounds.h)) {
-            eidolon_log_write("layout", "could not resize overlay: %s", SDL_GetError());
-            return false;
-        }
-        geometry_requested = true;
+    EidolonPresentationGeometry current = {
+        .x = window_bounds.x,
+        .y = window_bounds.y,
+        .width = window_bounds.w,
+        .height = window_bounds.h,
+    };
+    const bool have_geometry = eidolon_presentation_get_geometry(app->presentation, &current);
+    EidolonPresentationGeometry requested = current;
+    requested.width = window_bounds.w;
+    requested.height = window_bounds.h;
+    if (!app->snapshot_mode) {
+        requested.x = window_bounds.x;
+        requested.y = window_bounds.y;
     }
-    if (!app->snapshot_mode &&
-        (!have_position || current_x != window_bounds.x || current_y != window_bounds.y)) {
-        if (!SDL_SetWindowPosition(app->window, window_bounds.x, window_bounds.y)) {
-            eidolon_log_write("layout", "could not position overlay: %s", SDL_GetError());
-            return false;
-        }
-        geometry_requested = true;
+    const bool geometry_requested = !have_geometry || current.x != requested.x ||
+                                    current.y != requested.y || current.width != requested.width ||
+                                    current.height != requested.height;
+    if (geometry_requested && !eidolon_presentation_set_geometry(app->presentation, &requested)) {
+        eidolon_log_write("layout", "could not apply overlay geometry: %s", SDL_GetError());
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not apply overlay geometry: %s",
+                    SDL_GetError());
+        return false;
     }
-    if (geometry_requested && !SDL_SyncWindow(app->window)) {
+    if (geometry_requested && !eidolon_presentation_sync_host(app->presentation)) {
         eidolon_log_write("layout", "overlay geometry synchronization timed out: %s",
                           SDL_GetError());
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Overlay geometry synchronization timed out: %s",
+                    SDL_GetError());
         return false;
     }
     app->window_width =
@@ -928,7 +951,7 @@ static void reflow_overlay_layout(EidolonApp *app, float scale) {
 
     int old_window_x = 0;
     int old_window_y = 0;
-    SDL_GetWindowPosition(app->window, &old_window_x, &old_window_y);
+    (void)presentation_position(app, &old_window_x, &old_window_y);
     EidolonBubbleLayoutInput input = {
         .usable_bounds = {(float)usable_bounds.x, (float)usable_bounds.y, (float)usable_bounds.w,
                           (float)usable_bounds.h},
@@ -1012,7 +1035,7 @@ static void reflow_overlay_layout(EidolonApp *app, float scale) {
 #endif
 }
 
-static void set_initial_position(SDL_Window *window) {
+static void set_initial_position(EidolonApp *app) {
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
     SDL_Rect bounds;
     if (!SDL_GetDisplayUsableBounds(display, &bounds)) {
@@ -1020,16 +1043,18 @@ static void set_initial_position(SDL_Window *window) {
     }
 
     const int margin = 24;
-    int width = 0;
-    int height = 0;
-    SDL_GetWindowSize(window, &width, &height);
-    SDL_SetWindowPosition(window, bounds.x + bounds.w - width - margin,
-                          bounds.y + bounds.h - height - margin);
+    EidolonPresentationGeometry geometry;
+    if (!eidolon_presentation_get_geometry(app->presentation, &geometry)) {
+        return;
+    }
+    geometry.x = bounds.x + bounds.w - geometry.width - margin;
+    geometry.y = bounds.y + bounds.h - geometry.height - margin;
+    (void)eidolon_presentation_set_geometry(app->presentation, &geometry);
 }
 
 static bool update_display_metrics(EidolonApp *app) {
     const float previous_coordinate_scale = app->window_coordinate_scale;
-    float display_scale = SDL_GetWindowDisplayScale(app->window);
+    float display_scale = eidolon_presentation_display_scale(app->presentation);
     if (display_scale <= 0.0F) {
         display_scale = 1.0F;
     }
@@ -1180,28 +1205,29 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         app->snapshot_mode ? SDL_WINDOW_HIDDEN
                            : SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS |
                                  SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    app->window = SDL_CreateWindow("Eidolon", EIDOLON_WINDOW_WIDTH, EIDOLON_WINDOW_HEIGHT, flags);
-    if (app->window == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_CreateWindow failed: %s", SDL_GetError());
+    const EidolonSdlLegacyConfig presentation_config = {
+        .title = "Eidolon",
+        .width = EIDOLON_WINDOW_WIDTH,
+        .height = EIDOLON_WINDOW_HEIGHT,
+        .window_flags = flags,
+    };
+    app->presentation = eidolon_sdl_legacy_presentation_create(&presentation_config);
+    if (app->presentation == NULL) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation creation failed: %s",
+                     SDL_GetError());
         return false;
     }
-
-#if defined(_WIN32)
-    app->renderer = SDL_CreateRenderer(app->window, "direct3d11");
-    if (app->renderer == NULL) {
-        eidolon_log_write("renderer", "direct3d11 unavailable; sprite fallback may be used: %s",
-                          SDL_GetError());
-        SDL_ClearError();
-        app->renderer = SDL_CreateRenderer(app->window, NULL);
-    }
-#else
-    app->renderer = SDL_CreateRenderer(app->window, NULL);
-#endif
-    if (app->renderer == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_CreateRenderer failed: %s", SDL_GetError());
+    app->window = eidolon_sdl_legacy_window(app->presentation);
+    app->renderer = eidolon_sdl_legacy_renderer(app->presentation);
+    if (app->window == NULL || app->renderer == NULL) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation resources unavailable: %s",
+                     SDL_GetError());
         return false;
     }
-    eidolon_log_write("renderer", "SDL backend=%s", SDL_GetRendererName(app->renderer));
+    eidolon_log_write("renderer", "presentation=%s graphics=%s capabilities=0x%llx",
+                      eidolon_presentation_backend_name(app->presentation),
+                      SDL_GetRendererName(app->renderer),
+                      (unsigned long long)eidolon_presentation_capabilities(app->presentation));
 
     app->text_renderer = eidolon_text_renderer_create(app->renderer, EIDOLON_FONT_PATH, 12.0F);
     if (app->text_renderer == NULL) {
@@ -1252,10 +1278,10 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
 
     eidolon_app_set_model_scale(app, app->model_scale);
     if (!app->snapshot_mode) {
-        if (!eidolon_platform_configure_overlay(app->window)) {
+        if (!eidolon_presentation_configure_host(app->presentation)) {
             return false;
         }
-        set_initial_position(app->window);
+        set_initial_position(app);
     }
 
     if (!app->snapshot_mode) {
@@ -1418,7 +1444,11 @@ void eidolon_app_log_presentation_metrics(const EidolonApp *app) {
         app->presentation_interval_ns > 0U
             ? (double)SDL_NS_PER_SECOND / (double)app->presentation_interval_ns
             : 0.0;
-    (void)SDL_GetWindowSize(app->window, &window_width, &window_height);
+    EidolonPresentationGeometry geometry;
+    if (eidolon_presentation_get_geometry(app->presentation, &geometry)) {
+        window_width = geometry.width;
+        window_height = geometry.height;
+    }
     (void)SDL_GetCurrentRenderOutputSize(app->renderer, &output_width, &output_height);
     eidolon_log_write(
         "renderer",
@@ -1567,7 +1597,7 @@ void eidolon_app_set_portrait_framing(EidolonApp *app, bool face_mode) {
     }
     int old_window_x = 0;
     int old_window_y = 0;
-    SDL_GetWindowPosition(app->window, &old_window_x, &old_window_y);
+    (void)presentation_position(app, &old_window_x, &old_window_y);
     const SDL_FRect old_character = portrait_character_rect(app);
     const float old_center_x = (float)old_window_x + (old_character.x + old_character.w * 0.5F) *
                                                          app->window_coordinate_scale;
@@ -1582,7 +1612,7 @@ void eidolon_app_set_portrait_framing(EidolonApp *app, bool face_mode) {
         old_center_x - (new_character.x + new_character.w * 0.5F) * app->window_coordinate_scale);
     const int new_window_y = (int)SDL_roundf(
         old_center_y - (new_character.y + new_character.h * 0.5F) * app->window_coordinate_scale);
-    if (!SDL_SetWindowPosition(app->window, new_window_x, new_window_y)) {
+    if (!set_presentation_position(app, new_window_x, new_window_y)) {
         eidolon_log_write("portrait", "could not preserve character center while reframing: %s",
                           SDL_GetError());
     }
@@ -1666,7 +1696,7 @@ void eidolon_app_set_vsync(EidolonApp *app, bool enabled) {
     const bool changed = app->vsync_enabled != enabled;
     app->vsync_enabled = enabled;
     const int requested = !app->snapshot_mode && enabled ? 1 : 0;
-    if (!SDL_SetRenderVSync(app->renderer, requested)) {
+    if (!eidolon_presentation_set_vsync(app->presentation, requested)) {
         eidolon_log_write("renderer", "could not set vsync=%d: %s", requested, SDL_GetError());
         SDL_ClearError();
     }
@@ -1827,11 +1857,11 @@ static void begin_primary_interaction(EidolonApp *app, const SDL_MouseButtonEven
     }
     int original_x = 0;
     int original_y = 0;
-    SDL_GetWindowPosition(app->window, &original_x, &original_y);
-    if (eidolon_platform_begin_window_drag(app->window)) {
+    (void)presentation_position(app, &original_x, &original_y);
+    if (eidolon_presentation_begin_interactive_move(app->presentation)) {
         int current_x = 0;
         int current_y = 0;
-        SDL_GetWindowPosition(app->window, &current_x, &current_y);
+        (void)presentation_position(app, &current_x, &current_y);
         app->native_drag_completed = true;
         app->primary_moved = current_x != original_x || current_y != original_y;
         if (app->primary_moved) {
@@ -1841,7 +1871,7 @@ static void begin_primary_interaction(EidolonApp *app, const SDL_MouseButtonEven
     }
     app->primary_interaction = EIDOLON_PRIMARY_INTERACTION_CHARACTER_DRAG;
     SDL_GetGlobalMouseState(&app->drag_global_x, &app->drag_global_y);
-    SDL_GetWindowPosition(app->window, &app->drag_window_x, &app->drag_window_y);
+    (void)presentation_position(app, &app->drag_window_x, &app->drag_window_y);
     app->drag_target_window_x = app->drag_window_x;
     app->drag_target_window_y = app->drag_window_y;
     app->drag_position_pending = false;
@@ -1880,7 +1910,7 @@ static void commit_character_drag(EidolonApp *app) {
     }
     app->drag_position_pending = false;
     const Uint64 started_ns = SDL_GetTicksNS();
-    if (!SDL_SetWindowPosition(app->window, app->drag_target_window_x, app->drag_target_window_y)) {
+    if (!set_presentation_position(app, app->drag_target_window_x, app->drag_target_window_y)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not move character window: %s",
                     SDL_GetError());
         return;
@@ -1947,7 +1977,7 @@ static void update_model_rotation_drag(EidolonApp *app, const SDL_MouseMotionEve
         return;
     }
     if (!app->model_rotation_hit_test_suspended) {
-        eidolon_platform_suspend_hit_test(app->window);
+        eidolon_presentation_suspend_input_region(app->presentation);
         app->model_rotation_hit_test_suspended = true;
     }
     if (app->model_rotation_roll_dragging) {
@@ -2312,7 +2342,6 @@ void eidolon_app_destroy(EidolonApp *app) {
     if (!app->snapshot_mode) {
         eidolon_ipc_server_destroy(&app->ipc);
     }
-    eidolon_platform_destroy_overlay(app->window);
     eidolon_model_destroy(app->model);
     eidolon_portrait_destroy(app->portrait);
     eidolon_text_renderer_destroy(app->text_renderer);
@@ -2320,8 +2349,7 @@ void eidolon_app_destroy(EidolonApp *app) {
         SDL_DestroyTexture(app->bubble_layers[index]);
     }
     SDL_DestroyTexture(app->atlas);
-    SDL_DestroyRenderer(app->renderer);
-    SDL_DestroyWindow(app->window);
+    eidolon_presentation_destroy(app->presentation);
     SDL_Quit();
     SDL_zero(*app);
 }
