@@ -3,13 +3,24 @@
 #include "platform/overlay.h"
 #include "presentation_internal.h"
 
+#define SDL_LEGACY_TARGET_CAPACITY (EIDOLON_SCENE_LAYER_CAPACITY * 2U)
+
+typedef struct EidolonSdlLegacyTarget {
+    EidolonPresentationTarget id;
+    SDL_Texture *texture;
+} EidolonSdlLegacyTarget;
+
 typedef struct EidolonSdlLegacyPresentation {
     SDL_Window *window;
     SDL_Renderer *renderer;
+    EidolonSdlLegacyTarget targets[SDL_LEGACY_TARGET_CAPACITY];
 } EidolonSdlLegacyPresentation;
 
 static void legacy_destroy(void *opaque) {
     EidolonSdlLegacyPresentation *legacy = opaque;
+    for (size_t index = 0U; index < SDL_arraysize(legacy->targets); ++index) {
+        SDL_DestroyTexture(legacy->targets[index].texture);
+    }
     eidolon_platform_destroy_overlay(legacy->window);
     SDL_DestroyRenderer(legacy->renderer);
     SDL_DestroyWindow(legacy->window);
@@ -75,6 +86,52 @@ static bool legacy_update_input_region(void *opaque) {
     return eidolon_platform_update_hit_test(legacy->window, legacy->renderer);
 }
 
+static EidolonSdlLegacyTarget *legacy_find_target(EidolonSdlLegacyPresentation *legacy,
+                                                  EidolonPresentationTarget target) {
+    for (size_t index = 0U; index < SDL_arraysize(legacy->targets); ++index) {
+        if (legacy->targets[index].texture != NULL &&
+            legacy->targets[index].id.value == target.value) {
+            return &legacy->targets[index];
+        }
+    }
+    return NULL;
+}
+
+static bool legacy_create_target(void *opaque, EidolonPresentationTarget target, uint32_t width,
+                                 uint32_t height) {
+    EidolonSdlLegacyPresentation *legacy = opaque;
+    EidolonSdlLegacyTarget *slot = NULL;
+    for (size_t index = 0U; index < SDL_arraysize(legacy->targets); ++index) {
+        if (legacy->targets[index].texture == NULL) {
+            slot = &legacy->targets[index];
+            break;
+        }
+    }
+    if (slot == NULL) {
+        SDL_SetError("SDL legacy target capacity exhausted");
+        return false;
+    }
+    SDL_Texture *texture = SDL_CreateTexture(legacy->renderer, SDL_PIXELFORMAT_ABGR8888,
+                                             SDL_TEXTUREACCESS_TARGET, (int)width, (int)height);
+    if (texture == NULL || !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) ||
+        !SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR)) {
+        SDL_DestroyTexture(texture);
+        return false;
+    }
+    slot->id = target;
+    slot->texture = texture;
+    return true;
+}
+
+static void legacy_destroy_target(void *opaque, EidolonPresentationTarget target) {
+    EidolonSdlLegacyPresentation *legacy = opaque;
+    EidolonSdlLegacyTarget *slot = legacy_find_target(legacy, target);
+    if (slot != NULL) {
+        SDL_DestroyTexture(slot->texture);
+        SDL_zero(*slot);
+    }
+}
+
 static bool legacy_commit_scene(void *opaque, const EidolonSceneSnapshot *scene) {
     (void)opaque;
     (void)scene;
@@ -127,6 +184,8 @@ EidolonPresentation *eidolon_sdl_legacy_presentation_create(const EidolonSdlLega
         .begin_interactive_move = legacy_begin_interactive_move,
         .suspend_input_region = legacy_suspend_input_region,
         .update_input_region = legacy_update_input_region,
+        .create_target = legacy_create_target,
+        .destroy_target = legacy_destroy_target,
         .commit_scene = legacy_commit_scene,
         .present = legacy_present,
     };
@@ -158,6 +217,13 @@ SDL_Window *eidolon_sdl_legacy_window(EidolonPresentation *presentation) {
 SDL_Renderer *eidolon_sdl_legacy_renderer(EidolonPresentation *presentation) {
     EidolonSdlLegacyPresentation *legacy = legacy_context(presentation);
     return legacy != NULL ? legacy->renderer : NULL;
+}
+
+SDL_Texture *eidolon_sdl_legacy_target_texture(EidolonPresentation *presentation,
+                                               EidolonPresentationTarget target) {
+    EidolonSdlLegacyPresentation *legacy = legacy_context(presentation);
+    EidolonSdlLegacyTarget *slot = legacy != NULL ? legacy_find_target(legacy, target) : NULL;
+    return slot != NULL ? slot->texture : NULL;
 }
 
 SDL_Surface *eidolon_sdl_legacy_read_pixels(EidolonPresentation *presentation) {

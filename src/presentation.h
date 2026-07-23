@@ -20,6 +20,15 @@ typedef struct EidolonPresentationTarget {
     uint32_t value;
 } EidolonPresentationTarget;
 
+typedef struct EidolonPresentationTargetUpdate {
+    EidolonPresentationTarget target;
+    uint64_t generation;
+    uint64_t content_revision;
+    uint32_t width;
+    uint32_t height;
+    bool redraw_required;
+} EidolonPresentationTargetUpdate;
+
 typedef enum EidolonPresentationCapability {
     EIDOLON_PRESENTATION_CAP_PERSISTENT_OVER_OTHER_APPS = UINT64_C(1) << 0,
     EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT = UINT64_C(1) << 1,
@@ -52,6 +61,9 @@ typedef struct EidolonPresentationBackendOps {
     bool (*begin_interactive_move)(void *context);
     void (*suspend_input_region)(void *context);
     bool (*update_input_region)(void *context);
+    bool (*create_target)(void *context, EidolonPresentationTarget target, uint32_t width,
+                          uint32_t height);
+    void (*destroy_target)(void *context, EidolonPresentationTarget target);
     bool (*commit_scene)(void *context, const EidolonSceneSnapshot *scene);
     bool (*present)(void *context);
 } EidolonPresentationBackendOps;
@@ -78,6 +90,18 @@ bool eidolon_presentation_set_vsync(EidolonPresentation *presentation, int inter
 bool eidolon_presentation_begin_interactive_move(EidolonPresentation *presentation);
 void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation);
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation);
+bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
+                                              EidolonSceneLayerId layer, uint32_t width,
+                                              uint32_t height, uint64_t content_revision,
+                                              EidolonPresentationTargetUpdate *update);
+bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation,
+                                               const EidolonPresentationTargetUpdate *update,
+                                               bool content_valid);
+bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,
+                                           EidolonSceneLayerId layer,
+                                           EidolonPresentationTargetUpdate *target);
+void eidolon_presentation_release_target(EidolonPresentation *presentation,
+                                         EidolonSceneLayerId layer);
 bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
                                        const EidolonSceneSnapshot *scene);
 bool eidolon_presentation_present(EidolonPresentation *presentation);

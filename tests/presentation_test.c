@@ -9,6 +9,8 @@ typedef struct FakePresentation {
     unsigned int sync_count;
     unsigned int present_count;
     unsigned int commit_count;
+    unsigned int target_create_count;
+    unsigned int target_destroy_count;
     unsigned int destroy_count;
     int vsync_interval;
     bool input_suspended;
@@ -70,6 +72,20 @@ static bool fake_update_input(void *context) {
     return true;
 }
 
+static bool fake_create_target(void *context, EidolonPresentationTarget target, uint32_t width,
+                               uint32_t height) {
+    FakePresentation *fake = context;
+    assert(target.value != 0U && width > 0U && height > 0U);
+    ++fake->target_create_count;
+    return true;
+}
+
+static void fake_destroy_target(void *context, EidolonPresentationTarget target) {
+    FakePresentation *fake = context;
+    assert(target.value != 0U);
+    ++fake->target_destroy_count;
+}
+
 static bool fake_present(void *context) {
     FakePresentation *fake = context;
     ++fake->present_count;
@@ -98,6 +114,8 @@ int main(void) {
         .begin_interactive_move = fake_begin_move,
         .suspend_input_region = fake_suspend_input,
         .update_input_region = fake_update_input,
+        .create_target = fake_create_target,
+        .destroy_target = fake_destroy_target,
         .commit_scene = fake_commit_scene,
         .present = fake_present,
     };
@@ -139,6 +157,26 @@ int main(void) {
     assert(fake.commit_count == 1U);
     const EidolonSceneSnapshot stale_scene = {.revision = 1U};
     assert(!eidolon_presentation_commit_scene(presentation, &stale_scene));
+
+    const EidolonSceneLayerId body_layer = {1U};
+    EidolonPresentationTargetUpdate target;
+    assert(eidolon_presentation_begin_target_update(presentation, body_layer, 256U, 512U, 1U,
+                                                    &target));
+    assert(target.redraw_required && fake.target_create_count == 1U);
+    const EidolonPresentationTarget first_target = target.target;
+    assert(eidolon_presentation_finish_target_update(presentation, &target, true));
+    assert(eidolon_presentation_begin_target_update(presentation, body_layer, 256U, 512U, 1U,
+                                                    &target));
+    assert(!target.redraw_required && target.target.value == first_target.value);
+    assert(eidolon_presentation_begin_target_update(presentation, body_layer, 256U, 512U, 2U,
+                                                    &target));
+    assert(target.redraw_required && fake.target_create_count == 2U);
+    assert(eidolon_presentation_finish_target_update(presentation, &target, false));
+    assert(eidolon_presentation_target_for_layer(presentation, body_layer, &target));
+    assert(target.target.value == first_target.value && target.content_revision == 1U);
+    eidolon_presentation_release_target(presentation, body_layer);
+    assert(fake.target_destroy_count == 2U);
+
     assert(eidolon_presentation_present(presentation));
     assert(fake.present_count == 1U);
 

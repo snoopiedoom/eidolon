@@ -303,6 +303,21 @@ been enabled.
 
 ## Evidence log
 
+### 2026-07-23: legacy body target accepted
+
+- the presentation owner now maintains two reusable target resources per stable scene layer and
+  swaps staged content only after a successful draw;
+- the SDL legacy backend creates, resolves, and destroys its own portrait target textures while
+  `EidolonApp` retains no body-target ownership;
+- portrait source texels remain straight-alpha in the cache and blend only during final
+  composition; a fixed-time comparison matched the direct path across all 303,680 pixels;
+- elapsed portrait motion reuses cached content, while expression and framing revisions select the
+  inactive target for redraw;
+- the focused lifecycle test proves unchanged content is reused and a rejected update retains the
+  previous active target;
+- `make check`, the Windows debug build, formatting, whitespace validation, and hidden snapshots
+  passed; the owner accepted image quality, expression changes, framing, motion, and dragging.
+
 ### 2026-07-23: portrait transform split accepted
 
 - portrait motion evaluates once per frame into resolved bounds, rotation, and the existing

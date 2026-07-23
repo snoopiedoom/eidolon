@@ -138,6 +138,8 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
     size_t layer_count = 0U;
 
     if (app->body_rect.w > 0.0F && app->body_rect.h > 0.0F) {
+        uint32_t content_width = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.w));
+        uint32_t content_height = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.h));
         SDL_FRect presented_body = app->body_rect;
         float rotation_degrees = 0.0F;
         float pivot_x = 0.5F;
@@ -152,13 +154,14 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             rotation_degrees = portrait_transform->rotation_degrees;
             pivot_x = portrait_transform->pivot_x;
             pivot_y = portrait_transform->pivot_y;
+            (void)eidolon_portrait_content_size(app->portrait, &content_width, &content_height);
         }
         layers[layer_count++] = (EidolonSceneLayerInput){
             .stable_key = SCENE_BODY_KEY,
             .kind = EIDOLON_SCENE_LAYER_BODY,
             .content_token = body_content_token(app),
-            .content_width = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.w)),
-            .content_height = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.h)),
+            .content_width = content_width,
+            .content_height = content_height,
             .bounds = global_scene_rect(app, presented_body, &host),
             .rotation_degrees = rotation_degrees,
             .pivot_x = pivot_x,
@@ -197,6 +200,61 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             scene_failure_reported = true;
         }
     }
+}
+
+static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform *transform) {
+    const EidolonSceneLayerSnapshot *body =
+        eidolon_scene_snapshot_layer(&app->scene_snapshot, SCENE_BODY_KEY);
+    if (body == NULL || transform == NULL) {
+        return false;
+    }
+    EidolonPresentationTargetUpdate update;
+    if (!eidolon_presentation_begin_target_update(app->presentation, body->id, body->content_width,
+                                                  body->content_height, body->content_revision,
+                                                  &update)) {
+        return false;
+    }
+    if (update.redraw_required) {
+        SDL_Texture *target = eidolon_sdl_legacy_target_texture(app->presentation, update.target);
+        SDL_Texture *previous_target = SDL_GetRenderTarget(app->renderer);
+        bool content_valid = target != NULL && SDL_SetRenderTarget(app->renderer, target);
+        if (content_valid) {
+            content_valid = SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 0) &&
+                            SDL_RenderClear(app->renderer) &&
+                            eidolon_portrait_draw_content(app->portrait, app->renderer,
+                                                          update.width, update.height);
+        }
+        content_valid = SDL_SetRenderTarget(app->renderer, previous_target) && content_valid;
+        if (!eidolon_presentation_finish_target_update(app->presentation, &update, content_valid)) {
+            return false;
+        }
+        if (content_valid) {
+            eidolon_log_write(
+                "renderer",
+                "body target redraw target=%u generation=%llu content_revision=%llu extent=%ux%u",
+                update.target.value, (unsigned long long)update.generation,
+                (unsigned long long)update.content_revision, update.width, update.height);
+        } else if (!eidolon_presentation_target_for_layer(app->presentation, body->id, &update)) {
+            return false;
+        }
+    }
+
+    SDL_Texture *target = eidolon_sdl_legacy_target_texture(app->presentation, update.target);
+    if (target == NULL) {
+        return false;
+    }
+    const SDL_FRect destination = {
+        transform->x,
+        transform->y,
+        transform->width,
+        transform->height,
+    };
+    const SDL_FPoint pivot = {
+        transform->width * transform->pivot_x,
+        transform->height * transform->pivot_y,
+    };
+    return SDL_RenderTextureRotated(app->renderer, target, NULL, &destination,
+                                    (double)transform->rotation_degrees, &pivot, SDL_FLIP_NONE);
 }
 
 static DialogueThemeStyle dialogue_theme_style(EidolonDialogueTheme theme) {
@@ -500,11 +558,17 @@ static void draw_scene(EidolonApp *app) {
     }
 
     if (portrait_active) {
-        if (!portrait_transform_ready ||
-            !eidolon_portrait_draw_transform(app->portrait, app->renderer, &portrait_transform)) {
+        const bool rendered =
+            portrait_transform_ready && draw_portrait_target(app, &portrait_transform);
+        if (!rendered && portrait_transform_ready) {
+            SDL_ClearError();
+            (void)eidolon_portrait_draw_transform(app->portrait, app->renderer,
+                                                  &portrait_transform);
+        }
+        if (!portrait_transform_ready || !rendered) {
             static bool portrait_draw_reported = false;
             if (!portrait_draw_reported) {
-                eidolon_log_write("renderer", "portrait draw failed: %s", SDL_GetError());
+                eidolon_log_write("renderer", "portrait target fallback: %s", SDL_GetError());
                 portrait_draw_reported = true;
             }
         }

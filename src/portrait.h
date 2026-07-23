@@ -88,6 +88,10 @@ bool eidolon_portrait_face_mode(const EidolonPortraitRenderer *portrait);
 bool eidolon_portrait_evaluate_transform(EidolonPortraitRenderer *portrait, float x, float y,
                                          float width, float height, uint64_t now_ms,
                                          EidolonPortraitTransform *transform);
+bool eidolon_portrait_content_size(const EidolonPortraitRenderer *portrait, uint32_t *width,
+                                   uint32_t *height);
+bool eidolon_portrait_draw_content(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
+                                   uint32_t width, uint32_t height);
 bool eidolon_portrait_draw_transform(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
                                      const EidolonPortraitTransform *transform);
 bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,

@@ -998,6 +998,44 @@ bool eidolon_portrait_evaluate_transform(EidolonPortraitRenderer *portrait, floa
     return true;
 }
 
+bool eidolon_portrait_content_size(const EidolonPortraitRenderer *portrait, uint32_t *width,
+                                   uint32_t *height) {
+    if (!eidolon_portrait_ready(portrait) || width == NULL || height == NULL) {
+        return false;
+    }
+    if (portrait->face_mode) {
+        const SDL_FRect crop =
+            portrait->config.expressions[portrait->current_expression].portrait_crop;
+        *width = (uint32_t)SDL_ceilf(crop.w);
+        *height = (uint32_t)SDL_ceilf(crop.h);
+    } else {
+        *width = (uint32_t)portrait->texture_width;
+        *height = (uint32_t)portrait->texture_height;
+    }
+    return *width > 0U && *height > 0U;
+}
+
+bool eidolon_portrait_draw_content(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
+                                   uint32_t width, uint32_t height) {
+    if (!eidolon_portrait_ready(portrait) || renderer == NULL || width == 0U || height == 0U) {
+        return false;
+    }
+    SDL_Texture *current = portrait->textures[portrait->current_expression];
+    const SDL_FRect *current_source =
+        portrait->face_mode
+            ? &portrait->config.expressions[portrait->current_expression].portrait_crop
+            : NULL;
+    const SDL_FRect destination = {0.0F, 0.0F, (float)width, (float)height};
+    SDL_BlendMode previous_blend = SDL_BLENDMODE_INVALID;
+    if (!SDL_GetTextureBlendMode(current, &previous_blend) ||
+        !SDL_SetTextureBlendMode(current, SDL_BLENDMODE_NONE)) {
+        return false;
+    }
+    const bool rendered = SDL_RenderTexture(renderer, current, current_source, &destination);
+    const bool restored = SDL_SetTextureBlendMode(current, previous_blend);
+    return rendered && restored;
+}
+
 bool eidolon_portrait_draw_transform(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
                                      const EidolonPortraitTransform *transform) {
     if (!eidolon_portrait_ready(portrait) || renderer == NULL || transform == NULL) {
