@@ -11,6 +11,7 @@ static bool presentation_equal(const EidolonSceneLayerSnapshot *previous,
                                const EidolonSceneLayerInput *next) {
     return rect_equal(previous->bounds, next->bounds) &&
            previous->rotation_degrees == next->rotation_degrees &&
+           previous->pivot_x == next->pivot_x && previous->pivot_y == next->pivot_y &&
            previous->opacity == next->opacity && previous->z_order == next->z_order &&
            previous->visible == next->visible;
 }
@@ -68,7 +69,9 @@ bool eidolon_scene_publish(EidolonScene *scene, const EidolonSceneLayerInput *la
         if (layers[index].stable_key == 0U || layers[index].content_width == 0U ||
             layers[index].content_height == 0U || layers[index].bounds.width < 0.0F ||
             layers[index].bounds.height < 0.0F || layers[index].opacity < 0.0F ||
-            layers[index].opacity > 1.0F) {
+            layers[index].opacity > 1.0F || layers[index].pivot_x < 0.0F ||
+            layers[index].pivot_x > 1.0F || layers[index].pivot_y < 0.0F ||
+            layers[index].pivot_y > 1.0F) {
             SDL_SetError("invalid scene layer");
             return false;
         }
@@ -134,6 +137,8 @@ bool eidolon_scene_publish(EidolonScene *scene, const EidolonSceneLayerInput *la
         record->snapshot.content_height = input->content_height;
         record->snapshot.bounds = input->bounds;
         record->snapshot.rotation_degrees = input->rotation_degrees;
+        record->snapshot.pivot_x = input->pivot_x;
+        record->snapshot.pivot_y = input->pivot_y;
         record->snapshot.opacity = input->opacity;
         record->snapshot.z_order = input->z_order;
         record->snapshot.visible = input->visible;

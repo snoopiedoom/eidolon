@@ -32,6 +32,8 @@ typedef struct EidolonSceneLayerInput {
     uint32_t content_height;
     EidolonSceneRect bounds;
     float rotation_degrees;
+    float pivot_x;
+    float pivot_y;
     float opacity;
     int32_t z_order;
     bool visible;
@@ -47,6 +49,8 @@ typedef struct EidolonSceneLayerSnapshot {
     uint32_t content_height;
     EidolonSceneRect bounds;
     float rotation_degrees;
+    float pivot_x;
+    float pivot_y;
     float opacity;
     int32_t z_order;
     bool visible;

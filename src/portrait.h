@@ -55,6 +55,16 @@ typedef struct EidolonPortraitConfig {
 
 typedef struct EidolonPortraitRenderer EidolonPortraitRenderer;
 
+typedef struct EidolonPortraitTransform {
+    float x;
+    float y;
+    float width;
+    float height;
+    float rotation_degrees;
+    float pivot_x;
+    float pivot_y;
+} EidolonPortraitTransform;
+
 bool eidolon_portrait_config_parse(const char *text, size_t length, EidolonPortraitConfig *config,
                                    char *error, size_t error_capacity);
 EidolonPortraitRenderer *eidolon_portrait_create(SDL_Renderer *renderer, const char *config_path,
@@ -75,6 +85,11 @@ void eidolon_portrait_set_attention(EidolonPortraitRenderer *portrait, float dir
 void eidolon_portrait_force_reload(EidolonPortraitRenderer *portrait);
 void eidolon_portrait_set_face_mode(EidolonPortraitRenderer *portrait, bool enabled);
 bool eidolon_portrait_face_mode(const EidolonPortraitRenderer *portrait);
+bool eidolon_portrait_evaluate_transform(EidolonPortraitRenderer *portrait, float x, float y,
+                                         float width, float height, uint64_t now_ms,
+                                         EidolonPortraitTransform *transform);
+bool eidolon_portrait_draw_transform(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
+                                     const EidolonPortraitTransform *transform);
 bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
                            const SDL_FRect *destination, uint64_t now_ms);
 bool eidolon_portrait_ready(const EidolonPortraitRenderer *portrait);

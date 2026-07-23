@@ -860,11 +860,14 @@ static float damped_channel(float progress, float cycles, float power) {
     return SDL_sinf(progress * SDL_PI_F * cycles) * powf(remaining, power);
 }
 
-bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
-                           const SDL_FRect *destination, uint64_t now_ms) {
-    if (!eidolon_portrait_ready(portrait) || renderer == NULL || destination == NULL) {
+bool eidolon_portrait_evaluate_transform(EidolonPortraitRenderer *portrait, float x, float y,
+                                         float width, float height, uint64_t now_ms,
+                                         EidolonPortraitTransform *transform) {
+    if (!eidolon_portrait_ready(portrait) || width <= 0.0F || height <= 0.0F || transform == NULL) {
         return false;
     }
+    const SDL_FRect destination_rect = {x, y, width, height};
+    const SDL_FRect *destination = &destination_rect;
     const float seconds = (float)now_ms / 1000.0F;
     const float breath_phase = seconds * (2.0F * SDL_PI_F) / portrait->config.breath_period_seconds;
     const float sway_phase = seconds * (2.0F * SDL_PI_F) / 8.7F;
@@ -982,15 +985,54 @@ bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *rend
     animated.x += (old_width - animated.w) * 0.5F + translation_x;
     animated.y += old_height - animated.h + translation_y;
     angle += (double)degrees_delta;
-    const SDL_FPoint pivot = {animated.w * 0.5F, animated.h * 0.94F};
+
+    *transform = (EidolonPortraitTransform){
+        .x = animated.x,
+        .y = animated.y,
+        .width = animated.w,
+        .height = animated.h,
+        .rotation_degrees = (float)angle,
+        .pivot_x = 0.5F,
+        .pivot_y = 0.94F,
+    };
+    return true;
+}
+
+bool eidolon_portrait_draw_transform(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
+                                     const EidolonPortraitTransform *transform) {
+    if (!eidolon_portrait_ready(portrait) || renderer == NULL || transform == NULL) {
+        return false;
+    }
+    const SDL_FRect destination = {
+        transform->x,
+        transform->y,
+        transform->width,
+        transform->height,
+    };
+    const SDL_FPoint pivot = {
+        transform->width * transform->pivot_x,
+        transform->height * transform->pivot_y,
+    };
 
     SDL_Texture *current = portrait->textures[portrait->current_expression];
     const SDL_FRect *current_source =
         portrait->face_mode
             ? &portrait->config.expressions[portrait->current_expression].portrait_crop
             : NULL;
-    return SDL_RenderTextureRotated(renderer, current, current_source, &animated, angle, &pivot,
-                                    SDL_FLIP_NONE);
+    return SDL_RenderTextureRotated(renderer, current, current_source, &destination,
+                                    (double)transform->rotation_degrees, &pivot, SDL_FLIP_NONE);
+}
+
+bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
+                           const SDL_FRect *destination, uint64_t now_ms) {
+    if (destination == NULL) {
+        return false;
+    }
+    EidolonPortraitTransform transform;
+    return eidolon_portrait_evaluate_transform(portrait, destination->x, destination->y,
+                                               destination->w, destination->h, now_ms,
+                                               &transform) &&
+           eidolon_portrait_draw_transform(portrait, renderer, &transform);
 }
 
 bool eidolon_portrait_ready(const EidolonPortraitRenderer *portrait) {

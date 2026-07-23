@@ -11,6 +11,8 @@ static EidolonSceneLayerInput body(uint64_t token) {
         .content_width = 256U,
         .content_height = 256U,
         .bounds = {100.0F, 200.0F, 256.0F, 256.0F},
+        .pivot_x = 0.5F,
+        .pivot_y = 0.94F,
         .opacity = 1.0F,
         .z_order = 10,
         .visible = true,
@@ -31,6 +33,8 @@ int main(void) {
             .content_width = 420U,
             .content_height = 160U,
             .bounds = {360.0F, 40.0F, 420.0F, 160.0F},
+            .pivot_x = 0.5F,
+            .pivot_y = 0.5F,
             .opacity = 1.0F,
             .z_order = 20,
             .visible = true,
@@ -62,11 +66,17 @@ int main(void) {
     assert(snapshot.revision == 3U);
     assert(first_bubble->content_revision == 2U && first_bubble->presentation_revision == 2U);
 
+    layers[0].bounds = (EidolonSceneRect){99.0F, 198.0F, 260.0F, 260.0F};
+    layers[0].rotation_degrees = 0.4F;
+    assert(eidolon_scene_publish(&scene, layers, 2U, &snapshot));
+    first_body = eidolon_scene_snapshot_layer(&snapshot, 1U);
+    assert(first_body->content_revision == 1U && first_body->presentation_revision == 2U);
+
     assert(eidolon_scene_publish(&scene, layers, 1U, &snapshot));
-    assert(snapshot.revision == 4U && snapshot.layer_count == 1U);
+    assert(snapshot.revision == 5U && snapshot.layer_count == 1U);
     assert(eidolon_scene_publish(&scene, layers, 2U, &snapshot));
     first_bubble = eidolon_scene_snapshot_layer(&snapshot, 2U);
-    assert(snapshot.revision == 5U && first_bubble->id.value == bubble_id);
+    assert(snapshot.revision == 6U && first_bubble->id.value == bubble_id);
     assert(first_bubble->content_revision == 2U && first_bubble->presentation_revision == 4U);
 
     layers[1].stable_key = 1U;

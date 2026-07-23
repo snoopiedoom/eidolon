@@ -65,7 +65,7 @@ static uint64_t dialogue_content_token(const EidolonApp *app, const EidolonDialo
     return hash;
 }
 
-static uint64_t body_content_token(const EidolonApp *app, uint64_t now_ms) {
+static uint64_t body_content_token(const EidolonApp *app) {
     uint64_t hash = UINT64_C(1469598103934665603);
     hash = scene_hash_u64(hash, (uint64_t)app->render_mode);
     switch (app->render_mode) {
@@ -75,8 +75,6 @@ static uint64_t body_content_token(const EidolonApp *app, uint64_t now_ms) {
         break;
     case EIDOLON_RENDER_MODE_PORTRAIT:
         hash = scene_hash_u64(hash, eidolon_portrait_revision(app->portrait));
-        /* The legacy portrait renderer still bakes breathing and delivery motion into pixels. */
-        hash = scene_hash_u64(hash, now_ms);
         break;
     case EIDOLON_RENDER_MODE_MODEL_3D:
         hash = scene_hash_u64(hash, eidolon_model_presented_transform_revision(app->model));
@@ -120,6 +118,8 @@ static bool append_dialogue_scene_layer(EidolonApp *app, EidolonSceneLayerInput 
         .content_width = (uint32_t)SDL_max(1, (int)SDL_ceilf(padded.w)),
         .content_height = (uint32_t)SDL_max(1, (int)SDL_ceilf(padded.h)),
         .bounds = global_scene_rect(app, padded, host),
+        .pivot_x = 0.5F,
+        .pivot_y = 0.5F,
         .opacity = SDL_clamp(opacity, 0.0F, 1.0F),
         .z_order = z_order,
         .visible = true,
@@ -127,7 +127,8 @@ static bool append_dialogue_scene_layer(EidolonApp *app, EidolonSceneLayerInput 
     return true;
 }
 
-static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms) {
+static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
+                                   const EidolonPortraitTransform *portrait_transform) {
     EidolonPresentationGeometry host = {
         .width = app->window_width,
         .height = app->window_height,
@@ -137,13 +138,31 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms) {
     size_t layer_count = 0U;
 
     if (app->body_rect.w > 0.0F && app->body_rect.h > 0.0F) {
+        SDL_FRect presented_body = app->body_rect;
+        float rotation_degrees = 0.0F;
+        float pivot_x = 0.5F;
+        float pivot_y = 0.5F;
+        if (portrait_transform != NULL) {
+            presented_body = (SDL_FRect){
+                portrait_transform->x,
+                portrait_transform->y,
+                portrait_transform->width,
+                portrait_transform->height,
+            };
+            rotation_degrees = portrait_transform->rotation_degrees;
+            pivot_x = portrait_transform->pivot_x;
+            pivot_y = portrait_transform->pivot_y;
+        }
         layers[layer_count++] = (EidolonSceneLayerInput){
             .stable_key = SCENE_BODY_KEY,
             .kind = EIDOLON_SCENE_LAYER_BODY,
-            .content_token = body_content_token(app, now_ms),
+            .content_token = body_content_token(app),
             .content_width = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.w)),
             .content_height = (uint32_t)SDL_max(1, (int)SDL_ceilf(app->body_rect.h)),
-            .bounds = global_scene_rect(app, app->body_rect, &host),
+            .bounds = global_scene_rect(app, presented_body, &host),
+            .rotation_degrees = rotation_degrees,
+            .pivot_x = pivot_x,
+            .pivot_y = pivot_y,
             .opacity = 1.0F,
             .z_order = 10,
             .visible = true,
@@ -452,7 +471,14 @@ static void draw_scene(EidolonApp *app) {
     SDL_RenderClear(app->renderer);
 
     const uint64_t now_ms = SDL_GetTicks();
-    publish_scene_snapshot(app, now_ms);
+    EidolonPortraitTransform portrait_transform;
+    const bool portrait_active =
+        app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait);
+    const bool portrait_transform_ready =
+        portrait_active && eidolon_portrait_evaluate_transform(
+                               app->portrait, app->body_rect.x, app->body_rect.y, app->body_rect.w,
+                               app->body_rect.h, now_ms, &portrait_transform);
+    publish_scene_snapshot(app, now_ms, portrait_transform_ready ? &portrait_transform : NULL);
     const size_t visible_sessions = eidolon_session_registry_visible_count(&app->session_registry);
     if (visible_sessions > 0U) {
         for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
@@ -473,8 +499,9 @@ static void draw_scene(EidolonApp *app) {
                              EIDOLON_VISIBLE_SESSION_CAPACITY, 1.0F);
     }
 
-    if (app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait)) {
-        if (!eidolon_portrait_draw(app->portrait, app->renderer, &app->body_rect, SDL_GetTicks())) {
+    if (portrait_active) {
+        if (!portrait_transform_ready ||
+            !eidolon_portrait_draw_transform(app->portrait, app->renderer, &portrait_transform)) {
             static bool portrait_draw_reported = false;
             if (!portrait_draw_reported) {
                 eidolon_log_write("renderer", "portrait draw failed: %s", SDL_GetError());

@@ -168,6 +168,26 @@ borrow its SDL renderer explicitly; the presentation object now owns and destroy
 its host. Native DirectComposition remains disabled until immutable scene snapshots and independent
 layer revisions exist.
 
+#### Backend-owned target checkpoint
+
+The next checkpoint preserves the legacy SDL presentation while removing monolithic pixel
+ownership in small, owner-verified slices:
+
+1. represent portrait motion as resolved bounds, rotation, and a normalized pivot while expression
+   and crop selection remain content;
+2. make the presentation backend own opaque targets keyed by stable scene-layer ids and recreate
+   them through explicit generations on resize;
+3. render portrait content into a legacy body target only when its content revision changes, then
+   composite breathing and delivery motion from presentation state;
+4. give every visible session an independently revised legacy dialogue target;
+5. remove borrowed renderer access from body and dialogue orchestration while retaining an explicit
+   legacy snapshot path;
+6. accept the checkpoint through four narrow revision/independence tests, redraw instrumentation,
+   ordinary regression gates, deterministic snapshots, and owner-controlled visual evaluation.
+
+DirectComposition remains disabled throughout this checkpoint. Failed content updates retain the
+last valid target and do not acknowledge the requested content revision.
+
 ## Build contract proven by Gates 1 and 2
 
 `make bgfx-smoke` is an opt-in Windows target. It:
@@ -282,6 +302,18 @@ been enabled.
    handoff.
 
 ## Evidence log
+
+### 2026-07-23: portrait transform split accepted
+
+- portrait motion evaluates once per frame into resolved bounds, rotation, and the existing
+  foot-weighted normalized pivot;
+- legacy SDL drawing and renderer-neutral scene publication consume the same evaluated transform;
+- elapsed time no longer changes portrait content revision, while expression, crop, framing, and
+  configuration changes remain content changes;
+- `make check`, the Windows debug build, formatting, whitespace validation, and the hidden
+  portrait-motion snapshot passed;
+- the owner confirmed breathing, delivery motion, expression movement, and anchoring remained
+  correct in the interactive runtime.
 
 ### 2026-07-22: Gate 6 presentation ownership checkpoint
 
