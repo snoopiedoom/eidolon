@@ -35,6 +35,23 @@ typedef struct EidolonPresentationTargetUpdate {
     bool redraw_required;
 } EidolonPresentationTargetUpdate;
 
+typedef struct EidolonPresentationCommittedLayer {
+    EidolonSceneLayerSnapshot scene;
+    EidolonPresentationTarget target;
+    uint64_t target_generation;
+    uint64_t target_content_revision;
+    uint32_t target_width;
+    uint32_t target_height;
+    EidolonPresentationAlphaMode alpha_mode;
+    bool has_target;
+} EidolonPresentationCommittedLayer;
+
+typedef struct EidolonPresentationSceneCommit {
+    uint64_t revision;
+    size_t layer_count;
+    EidolonPresentationCommittedLayer layers[EIDOLON_SCENE_LAYER_CAPACITY];
+} EidolonPresentationSceneCommit;
+
 typedef enum EidolonPresentationCapability {
     EIDOLON_PRESENTATION_CAP_PERSISTENT_OVER_OTHER_APPS = UINT64_C(1) << 0,
     EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT = UINT64_C(1) << 1,
@@ -67,12 +84,21 @@ typedef struct EidolonPresentationBackendOps {
     bool (*begin_interactive_move)(void *context);
     void (*suspend_input_region)(void *context);
     bool (*update_input_region)(void *context);
-    bool (*create_target)(void *context, EidolonPresentationTarget target, uint32_t width,
+    bool (*create_target)(void *context, EidolonSceneLayerId layer,
+                          EidolonPresentationTarget target, uint64_t generation, uint32_t width,
                           uint32_t height, EidolonPresentationAlphaMode alpha_mode);
     void (*destroy_target)(void *context, EidolonPresentationTarget target);
-    bool (*commit_scene)(void *context, const EidolonSceneSnapshot *scene);
+    bool (*set_target_alpha_mask)(void *context, EidolonPresentationTarget target,
+                                  uint64_t generation, const uint8_t *pixels, size_t pitch,
+                                  uint8_t pixel_stride, uint8_t alpha_offset);
+    bool (*submit_target)(void *context, EidolonPresentationTarget target, uint64_t generation);
+    bool (*commit_scene)(void *context, const EidolonPresentationSceneCommit *commit);
     bool (*present)(void *context);
 } EidolonPresentationBackendOps;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 EidolonPresentation *
 eidolon_presentation_create_backend(const char *backend_name, uint64_t capabilities, void *context,
@@ -105,6 +131,10 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
 bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation,
                                                const EidolonPresentationTargetUpdate *update,
                                                bool content_valid);
+bool eidolon_presentation_set_target_alpha_mask(EidolonPresentation *presentation,
+                                                const EidolonPresentationTargetUpdate *update,
+                                                const uint8_t *pixels, size_t pitch,
+                                                uint8_t pixel_stride, uint8_t alpha_offset);
 bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,
                                            EidolonSceneLayerId layer,
                                            EidolonPresentationTargetUpdate *target);
@@ -113,5 +143,9 @@ void eidolon_presentation_release_target(EidolonPresentation *presentation,
 bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
                                        const EidolonSceneSnapshot *scene);
 bool eidolon_presentation_present(EidolonPresentation *presentation);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

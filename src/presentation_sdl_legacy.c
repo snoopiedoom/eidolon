@@ -97,9 +97,13 @@ static EidolonSdlLegacyTarget *legacy_find_target(EidolonSdlLegacyPresentation *
     return NULL;
 }
 
-static bool legacy_create_target(void *opaque, EidolonPresentationTarget target, uint32_t width,
-                                 uint32_t height, EidolonPresentationAlphaMode alpha_mode) {
+static bool legacy_create_target(void *opaque, EidolonSceneLayerId layer,
+                                 EidolonPresentationTarget target, uint64_t generation,
+                                 uint32_t width, uint32_t height,
+                                 EidolonPresentationAlphaMode alpha_mode) {
     EidolonSdlLegacyPresentation *legacy = opaque;
+    (void)layer;
+    (void)generation;
     EidolonSdlLegacyTarget *slot = NULL;
     for (size_t index = 0U; index < SDL_arraysize(legacy->targets); ++index) {
         if (legacy->targets[index].texture == NULL) {
@@ -138,9 +142,9 @@ static void legacy_destroy_target(void *opaque, EidolonPresentationTarget target
     }
 }
 
-static bool legacy_commit_scene(void *opaque, const EidolonSceneSnapshot *scene) {
+static bool legacy_commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
     (void)opaque;
-    (void)scene;
+    (void)commit;
     return true;
 }
 

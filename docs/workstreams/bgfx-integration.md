@@ -280,15 +280,16 @@ thresholds. Gate 5 owns comparative performance policy.
 
 ## Current checkpoint
 
-Gates 0 through 5 are complete. Gate 6 is in progress at the behavior-preserving presentation
-boundary checkpoint. Gate 5 selected direct D3D11 for the Windows compositor backend.
+Gates 0 through 5 are complete. Gate 6 is in progress at the first opt-in native presentation
+checkpoint. Gate 5 selected direct D3D11 for the Windows compositor backend.
 bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
 not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
 unacceptable CPU readback bridge into DirectComposition. SDL_Renderer could wrap the external
 D3D11 targets, but retaining its unused window swapchain violated presentation ownership and
 produced a persistent idle worker on the test machine. No candidate entered the production
-renderer. The current production runtime still uses `sdl_window_legacy`; DirectComposition has not
-been enabled.
+renderer. The default production runtime still uses `sdl_window_legacy`. An explicit
+`EIDOLON_PRESENTATION_BACKEND=win32_dcomp` environment override now enables the incomplete
+portrait-only DirectComposition path for owner-controlled evaluation; it is not a shipped default.
 
 ## Restart checklist
 
@@ -302,6 +303,36 @@ been enabled.
    handoff.
 
 ## Evidence log
+
+### 2026-07-23: opt-in DirectComposition portrait checkpoint
+
+- the presentation commit resolves every scene layer to its active target id, generation, content
+  revision, extent, and alpha contract, so failed redraw or swap-chain submission retains the last
+  valid pixels;
+- the quarantined C++ Windows adapter is the only translation unit that includes the C++-only
+  DirectComposition interface; scene, presentation, raster, and application contracts remain C17;
+- the adapter owns the no-redirection host, D3D11 device and context, composition tree, two reusable
+  premultiplied swap chains per stable layer, visual transforms, opacity, z-order, commits, and
+  deterministic teardown;
+- portrait assets retain renderer-neutral BGRA surfaces, while the Unicode text renderer has
+  parallel renderer and surface engines; shared dialogue artwork prevents the legacy and native
+  paths from drifting;
+- native portrait and dialogue content is premultiplied on CPU and uploaded directly into the
+  compositor-owned D3D11 target. This path performs no GPU readback, window-frame copy, or hidden
+  SDL rendering;
+- normal startup and all snapshots retain `sdl_window_legacy`. The environment override is
+  Windows-only and portrait-only;
+- each native target generation retains the CPU alpha plane that produced its submitted pixels.
+  Successful DirectComposition commits atomically publish that mask with the visual transform and
+  z-order used by inverse-mapped Win32 hit testing;
+- transparent pixels return native hit-test transparency. Opaque body pixels start Win32-owned
+  capture and top-level movement without coupling mouse motion to frame presentation. Native
+  dialogue-click routing and output-local host migration remain future work;
+- the owner observed a short black seam near the left side of the native dialogue artwork. It is a
+  known surface-raster parity defect, not a compositor-ownership blocker;
+- the hidden production-backend smoke passed host creation, target creation, D3D11 submission,
+  alpha-mask attachment, visual-tree commit, compositor synchronization, and teardown; ordinary
+  regression gates, the normal Windows build, formatting, and whitespace validation passed.
 
 ### 2026-07-23: SDL legacy raster boundary accepted
 

@@ -16,6 +16,7 @@ COMMON_SOURCES := \
 	src/conversation_sources.c \
 	src/delivery.c \
 	src/dialogue.c \
+	src/dialogue_art.c \
 	src/draw.c \
 	src/expression_director.c \
 	src/frame_clock.c \
@@ -69,10 +70,12 @@ SDL3_ROOT ?= C:/dev/SDL3
 SDL3_TTF_ROOT ?= $(CURDIR)/.cache/sdl_ttf/SDL3_ttf-3.2.2
 SHADERCROSS ?= $(CURDIR)/.cache/shadercross/bin/shadercross.exe
 PLATFORM_SOURCES := src/platform/windows_ipc.c src/platform/windows_overlay.c \
-	src/platform/windows_session_files.c
+	src/platform/windows_session_files.c src/raster_d3d11.c
+PLATFORM_CPP_SOURCES := src/platform/windows_dcomp.cpp
 CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include" -I"$(SDL3_TTF_ROOT)/include"
 LDFLAGS += -L"$(SDL3_ROOT)/lib/x64" -L"$(SDL3_TTF_ROOT)/lib/x64"
-LDLIBS += -lSDL3_ttf -lSDL3 -ldwmapi -luser32 -lgdi32 -ld3d11 -lwinhttp -lws2_32 -lbcrypt
+LDLIBS += -lSDL3_ttf -lSDL3 -ldcomp -ldwmapi -ldxgi -ldxguid -luser32 -lgdi32 -ld3d11 \
+	-lwinhttp -lws2_32 -lbcrypt -lole32
 define make-dir
 @powershell.exe -NoProfile -Command "New-Item -ItemType Directory -Force '$(subst /,\,$(dir $@))' | Out-Null"
 endef
@@ -93,6 +96,7 @@ PKG_CONFIG ?= pkg-config
 SHADERCROSS ?= shadercross
 PLATFORM_SOURCES := src/platform/linux_ipc.c src/platform/linux_overlay.c \
 	src/platform/linux_session_files.c
+PLATFORM_CPP_SOURCES :=
 CPPFLAGS += -Isrc $(shell $(PKG_CONFIG) --cflags sdl3 SDL3_ttf)
 LDLIBS += $(shell $(PKG_CONFIG) --libs sdl3 SDL3_ttf) -lm
 define make-dir
@@ -133,7 +137,8 @@ SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
 OBJECTS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SOURCES))
 DEPS := $(OBJECTS:.o=.d)
 IMGUI_OBJECTS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(IMGUI_CPP_SOURCES))
-IMGUI_DEPS := $(IMGUI_OBJECTS:.o=.d)
+PLATFORM_CPP_OBJECTS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(PLATFORM_CPP_SOURCES))
+IMGUI_DEPS := $(IMGUI_OBJECTS:.o=.d) $(PLATFORM_CPP_OBJECTS:.o=.d)
 
 CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
@@ -163,7 +168,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -185,6 +190,18 @@ AFFECT_MODEL_DIR := $(AFFECT_CACHE)/model
 AFFECT_WORKER := $(BUILD_ROOT)/eidolon-affect-worker.exe
 AFFECT_CLIENT_TEST := $(BUILD_ROOT)/tests/$(MODE)/affect_client_test.exe
 AFFECT_BENCHMARK := $(BUILD_ROOT)/tools/$(MODE)/affect_benchmark.exe
+WIN32_DCOMP_BACKEND_SMOKE := $(BUILD_ROOT)/tests/$(MODE)/windows_dcomp_backend_smoke.exe
+WIN32_DCOMP_BACKEND_SMOKE_OBJECT := $(OBJ_DIR)/tests/windows_dcomp_backend_smoke.o
+
+$(WIN32_DCOMP_BACKEND_SMOKE): $(WIN32_DCOMP_BACKEND_SMOKE_OBJECT) \
+		$(OBJ_DIR)/src/presentation.o $(OBJ_DIR)/src/scene.o \
+		$(OBJ_DIR)/src/platform/windows_dcomp.o
+	$(make-dir)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(copy-runtime)
+
+win32-dcomp-backend-smoke: $(WIN32_DCOMP_BACKEND_SMOKE)
+	"$(WIN32_DCOMP_BACKEND_SMOKE)"
 
 affect: $(AFFECT_WORKER)
 
@@ -246,9 +263,9 @@ $(TARGET): $(MODE_TARGET) force-output
 	$(copy-output)
 	$(copy-runtime)
 
-$(MODE_TARGET): $(OBJECTS) $(IMGUI_OBJECTS) | shaders
+$(MODE_TARGET): $(OBJECTS) $(IMGUI_OBJECTS) $(PLATFORM_CPP_OBJECTS) | shaders
 	$(make-dir)
-	$(CXX) $(LDFLAGS) $(OBJECTS) $(IMGUI_OBJECTS) $(LDLIBS) -o $@
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(IMGUI_OBJECTS) $(PLATFORM_CPP_OBJECTS) $(LDLIBS) -o $@
 
 $(OBJ_DIR)/%.o: %.c
 	$(make-dir)

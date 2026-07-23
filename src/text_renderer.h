@@ -15,5 +15,8 @@ EidolonTextRenderer *eidolon_text_renderer_create(SDL_Renderer *renderer, const 
 void eidolon_text_renderer_destroy(EidolonTextRenderer *text_renderer);
 bool eidolon_text_renderer_draw(EidolonTextRenderer *text_renderer, size_t slot, const char *text,
                                 size_t length, float x, float y, int wrap_width, SDL_Color color);
+bool eidolon_text_renderer_draw_surface(EidolonTextRenderer *text_renderer, size_t slot,
+                                        const char *text, size_t length, int x, int y,
+                                        int wrap_width, SDL_Color color, SDL_Surface *surface);
 
 #endif

@@ -6,6 +6,10 @@
 #include "presentation_sdl_legacy.h"
 #include "raster_sdl_legacy.h"
 
+#if defined(_WIN32)
+#include "raster_d3d11.h"
+#endif
+
 #include <string.h>
 
 #define TEXT_SLOT_DIALOGUE_TITLE_BASE 2U
@@ -14,6 +18,12 @@
 #define SCENE_BODY_KEY UINT64_C(1)
 #define SCENE_DIALOGUE_KEY_BASE (UINT64_C(1) << 63)
 #define SCENE_FALLBACK_DIALOGUE_KEY (SCENE_DIALOGUE_KEY_BASE | UINT64_C(1))
+
+static bool compositor_targets_active(const EidolonApp *app) {
+    return eidolon_presentation_supports(app->presentation,
+                                         EIDOLON_PRESENTATION_CAP_COMPOSITOR_TRANSFORM) &&
+           eidolon_presentation_supports(app->presentation, EIDOLON_PRESENTATION_CAP_GPU_ZERO_COPY);
+}
 
 static uint64_t scene_hash_bytes(uint64_t hash, const void *data, size_t length) {
     const uint8_t *bytes = data;
@@ -197,32 +207,57 @@ static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform
         return false;
     }
     EidolonPresentationTargetUpdate update;
+    const bool native_targets = compositor_targets_active(app);
     if (!eidolon_presentation_begin_target_update(
             app->presentation, body->id, body->content_width, body->content_height,
-            EIDOLON_PRESENTATION_ALPHA_STRAIGHT, body->content_revision, &update)) {
+            native_targets ? EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED
+                           : EIDOLON_PRESENTATION_ALPHA_STRAIGHT,
+            body->content_revision, &update)) {
         return false;
     }
     if (update.redraw_required) {
-        const EidolonSdlLegacyRasterResult raster_result =
-            eidolon_sdl_legacy_raster_portrait(app->presentation, app->portrait, &update);
-        const bool content_valid = raster_result == EIDOLON_SDL_LEGACY_RASTER_VALID;
-        if (!eidolon_presentation_finish_target_update(app->presentation, &update, content_valid)) {
-            return false;
-        }
-        if (raster_result == EIDOLON_SDL_LEGACY_RASTER_HOST_RESTORE_FAILED) {
-            return false;
-        }
-        if (content_valid) {
-            eidolon_log_write(
-                "renderer",
-                "body target redraw target=%u generation=%llu content_revision=%llu extent=%ux%u",
-                update.target.value, (unsigned long long)update.generation,
-                (unsigned long long)update.content_revision, update.width, update.height);
-        } else if (!eidolon_presentation_target_for_layer(app->presentation, body->id, &update)) {
-            return false;
+#if defined(_WIN32)
+        if (native_targets) {
+            const bool content_valid =
+                eidolon_d3d11_raster_portrait(app->presentation, app->portrait, &update);
+            if (!eidolon_presentation_finish_target_update(app->presentation, &update,
+                                                           content_valid)) {
+                return false;
+            }
+            if (!content_valid &&
+                !eidolon_presentation_target_for_layer(app->presentation, body->id, &update)) {
+                return false;
+            }
+        } else
+#endif
+        {
+            const EidolonSdlLegacyRasterResult raster_result =
+                eidolon_sdl_legacy_raster_portrait(app->presentation, app->portrait, &update);
+            const bool content_valid = raster_result == EIDOLON_SDL_LEGACY_RASTER_VALID;
+            if (!eidolon_presentation_finish_target_update(app->presentation, &update,
+                                                           content_valid)) {
+                return false;
+            }
+            if (raster_result == EIDOLON_SDL_LEGACY_RASTER_HOST_RESTORE_FAILED) {
+                return false;
+            }
+            if (content_valid) {
+                eidolon_log_write("renderer",
+                                  "body target redraw target=%u generation=%llu "
+                                  "content_revision=%llu extent=%ux%u",
+                                  update.target.value, (unsigned long long)update.generation,
+                                  (unsigned long long)update.content_revision, update.width,
+                                  update.height);
+            } else if (!eidolon_presentation_target_for_layer(app->presentation, body->id,
+                                                              &update)) {
+                return false;
+            }
         }
     }
 
+    if (native_targets) {
+        return true;
+    }
     return eidolon_sdl_legacy_composite_portrait(app->presentation, update.target, transform);
 }
 
@@ -238,6 +273,7 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     const EidolonSceneLayerSnapshot *layer =
         eidolon_scene_snapshot_layer(&app->scene_snapshot, stable_key);
     EidolonPresentationTargetUpdate update;
+    const bool native_targets = compositor_targets_active(app);
     if (layer != NULL &&
         eidolon_presentation_begin_target_update(
             app->presentation, layer->id, layer->content_width, layer->content_height,
@@ -249,28 +285,54 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                 bubble->w,
                 bubble->h,
             };
-            const EidolonSdlLegacyRasterResult raster_result = eidolon_sdl_legacy_raster_dialogue(
-                app->presentation, app->text_renderer, app->dialogue_theme, &update, &local_bubble,
-                dialogue, title, title_slot, body_slot, points_right);
-            const bool content_valid = raster_result == EIDOLON_SDL_LEGACY_RASTER_VALID;
-            const bool update_finished = eidolon_presentation_finish_target_update(
-                app->presentation, &update, content_valid);
-            if (raster_result == EIDOLON_SDL_LEGACY_RASTER_HOST_RESTORE_FAILED) {
-                return;
-            }
-            if (update_finished && content_valid) {
-                eidolon_log_write(
-                    "renderer",
-                    "dialogue target redraw target=%u generation=%llu content_revision=%llu "
-                    "extent=%ux%u",
-                    update.target.value, (unsigned long long)update.generation,
-                    (unsigned long long)update.content_revision, update.width, update.height);
-            } else if (!eidolon_presentation_target_for_layer(app->presentation, layer->id,
-                                                              &update)) {
-                goto direct_draw;
+#if defined(_WIN32)
+            if (native_targets) {
+                const bool content_valid = eidolon_d3d11_raster_dialogue(
+                    app->presentation, app->text_renderer, app->dialogue_theme, &update,
+                    &local_bubble, dialogue, title, title_slot, body_slot, points_right);
+                const bool update_finished = eidolon_presentation_finish_target_update(
+                    app->presentation, &update, content_valid);
+                if (update_finished && content_valid) {
+                    eidolon_log_write(
+                        "renderer",
+                        "dialogue target redraw target=%u generation=%llu content_revision=%llu "
+                        "extent=%ux%u",
+                        update.target.value, (unsigned long long)update.generation,
+                        (unsigned long long)update.content_revision, update.width, update.height);
+                } else if (!eidolon_presentation_target_for_layer(app->presentation, layer->id,
+                                                                  &update)) {
+                    return;
+                }
+            } else
+#endif
+            {
+                const EidolonSdlLegacyRasterResult raster_result =
+                    eidolon_sdl_legacy_raster_dialogue(
+                        app->presentation, app->text_renderer, app->dialogue_theme, &update,
+                        &local_bubble, dialogue, title, title_slot, body_slot, points_right);
+                const bool content_valid = raster_result == EIDOLON_SDL_LEGACY_RASTER_VALID;
+                const bool update_finished = eidolon_presentation_finish_target_update(
+                    app->presentation, &update, content_valid);
+                if (raster_result == EIDOLON_SDL_LEGACY_RASTER_HOST_RESTORE_FAILED) {
+                    return;
+                }
+                if (update_finished && content_valid) {
+                    eidolon_log_write(
+                        "renderer",
+                        "dialogue target redraw target=%u generation=%llu content_revision=%llu "
+                        "extent=%ux%u",
+                        update.target.value, (unsigned long long)update.generation,
+                        (unsigned long long)update.content_revision, update.width, update.height);
+                } else if (!eidolon_presentation_target_for_layer(app->presentation, layer->id,
+                                                                  &update)) {
+                    goto direct_draw;
+                }
             }
         }
 
+        if (native_targets) {
+            return;
+        }
         const SDL_FRect destination = {
             bubble->x - BUBBLE_LAYER_PADDING,
             bubble->y - BUBBLE_LAYER_PADDING,
@@ -284,13 +346,17 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
     }
 
 direct_draw:
+    if (native_targets) {
+        return;
+    }
     (void)eidolon_sdl_legacy_draw_dialogue(app->presentation, app->text_renderer,
                                            app->dialogue_theme, bubble, dialogue, title, title_slot,
                                            body_slot, opacity, points_right);
 }
 
 static void draw_scene(EidolonApp *app) {
-    if (!eidolon_sdl_legacy_clear_host(app->presentation)) {
+    const bool native_targets = compositor_targets_active(app);
+    if (!native_targets && !eidolon_sdl_legacy_clear_host(app->presentation)) {
         return;
     }
 
@@ -327,7 +393,7 @@ static void draw_scene(EidolonApp *app) {
     if (portrait_active) {
         const bool rendered =
             portrait_transform_ready && draw_portrait_target(app, &portrait_transform);
-        if (!rendered && portrait_transform_ready) {
+        if (!native_targets && !rendered && portrait_transform_ready) {
             SDL_ClearError();
             (void)eidolon_sdl_legacy_draw_portrait(app->presentation, app->portrait,
                                                    &portrait_transform);
@@ -339,7 +405,7 @@ static void draw_scene(EidolonApp *app) {
                 portrait_draw_reported = true;
             }
         }
-    } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
+    } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
                eidolon_model_texture(app->model) != NULL) {
         SDL_Texture *model_texture = eidolon_model_texture(app->model);
         const bool rendered =
@@ -350,7 +416,8 @@ static void draw_scene(EidolonApp *app) {
                               rendered ? "yes" : "no", SDL_GetError());
             model_draw_reported = true;
         }
-    } else if (app->render_mode == EIDOLON_RENDER_MODE_SPRITE && app->atlas != NULL) {
+    } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_SPRITE &&
+               app->atlas != NULL) {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
         (void)eidolon_sdl_legacy_draw_sprite(app->presentation, app->atlas, &source,
                                              &app->body_rect);
@@ -369,6 +436,10 @@ static int hit_test_mode(const EidolonApp *app) {
 }
 
 static void update_hit_test_if_needed(EidolonApp *app) {
+    if (!eidolon_presentation_supports(app->presentation,
+                                       EIDOLON_PRESENTATION_CAP_PER_PIXEL_INPUT)) {
+        return;
+    }
     const int mode = hit_test_mode(app);
     const uint64_t model_transform_revision =
         eidolon_model_presented_transform_revision(app->model);

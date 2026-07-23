@@ -11,6 +11,8 @@ typedef struct FakePresentation {
     unsigned int commit_count;
     unsigned int target_create_count;
     unsigned int target_destroy_count;
+    unsigned int target_alpha_mask_count;
+    unsigned int target_submit_count;
     unsigned int destroy_count;
     int vsync_interval;
     bool input_suspended;
@@ -72,10 +74,13 @@ static bool fake_update_input(void *context) {
     return true;
 }
 
-static bool fake_create_target(void *context, EidolonPresentationTarget target, uint32_t width,
-                               uint32_t height, EidolonPresentationAlphaMode alpha_mode) {
+static bool fake_create_target(void *context, EidolonSceneLayerId layer,
+                               EidolonPresentationTarget target, uint64_t generation,
+                               uint32_t width, uint32_t height,
+                               EidolonPresentationAlphaMode alpha_mode) {
     FakePresentation *fake = context;
-    assert(target.value != 0U && width > 0U && height > 0U);
+    assert(layer.value != 0U && target.value != 0U && generation != 0U && width > 0U &&
+           height > 0U);
     assert(alpha_mode == EIDOLON_PRESENTATION_ALPHA_STRAIGHT ||
            alpha_mode == EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED);
     ++fake->target_create_count;
@@ -88,15 +93,33 @@ static void fake_destroy_target(void *context, EidolonPresentationTarget target)
     ++fake->target_destroy_count;
 }
 
+static bool fake_set_target_alpha_mask(void *context, EidolonPresentationTarget target,
+                                       uint64_t generation, const uint8_t *pixels, size_t pitch,
+                                       uint8_t pixel_stride, uint8_t alpha_offset) {
+    FakePresentation *fake = context;
+    assert(target.value != 0U && generation != 0U && pixels != NULL);
+    assert(pitch >= 256U && pixel_stride == 1U && alpha_offset == 0U);
+    ++fake->target_alpha_mask_count;
+    return true;
+}
+
+static bool fake_submit_target(void *context, EidolonPresentationTarget target,
+                               uint64_t generation) {
+    FakePresentation *fake = context;
+    assert(target.value != 0U && generation != 0U);
+    ++fake->target_submit_count;
+    return true;
+}
+
 static bool fake_present(void *context) {
     FakePresentation *fake = context;
     ++fake->present_count;
     return true;
 }
 
-static bool fake_commit_scene(void *context, const EidolonSceneSnapshot *scene) {
+static bool fake_commit_scene(void *context, const EidolonPresentationSceneCommit *commit) {
     FakePresentation *fake = context;
-    assert(scene->revision > 0U);
+    assert(commit->revision > 0U);
     ++fake->commit_count;
     return true;
 }
@@ -118,6 +141,8 @@ int main(void) {
         .update_input_region = fake_update_input,
         .create_target = fake_create_target,
         .destroy_target = fake_destroy_target,
+        .set_target_alpha_mask = fake_set_target_alpha_mask,
+        .submit_target = fake_submit_target,
         .commit_scene = fake_commit_scene,
         .present = fake_present,
     };
@@ -169,8 +194,15 @@ int main(void) {
     assert(eidolon_presentation_begin_target_update(
         presentation, body_layer, 256U, 512U, EIDOLON_PRESENTATION_ALPHA_STRAIGHT, 1U, &target));
     assert(target.redraw_required && fake.target_create_count == 1U);
+    static const uint8_t alpha_mask[256U * 512U] = {0U};
+    assert(eidolon_presentation_set_target_alpha_mask(presentation, &target, alpha_mask, 256U, 1U,
+                                                      0U));
+    assert(fake.target_alpha_mask_count == 1U);
     const EidolonPresentationTarget first_target = target.target;
     assert(eidolon_presentation_finish_target_update(presentation, &target, true));
+    assert(fake.target_submit_count == 1U);
+    assert(!eidolon_presentation_set_target_alpha_mask(presentation, &target, alpha_mask, 256U, 1U,
+                                                       0U));
     assert(eidolon_presentation_begin_target_update(
         presentation, body_layer, 256U, 512U, EIDOLON_PRESENTATION_ALPHA_STRAIGHT, 1U, &target));
     assert(!target.redraw_required && target.target.value == first_target.value);
@@ -178,6 +210,7 @@ int main(void) {
         presentation, body_layer, 256U, 512U, EIDOLON_PRESENTATION_ALPHA_STRAIGHT, 2U, &target));
     assert(target.redraw_required && fake.target_create_count == 2U);
     assert(eidolon_presentation_finish_target_update(presentation, &target, false));
+    assert(fake.target_submit_count == 1U);
     assert(eidolon_presentation_target_for_layer(presentation, body_layer, &target));
     assert(target.target.value == first_target.value && target.content_revision == 1U);
     const EidolonSceneSnapshot retired_scene = {.revision = 3U};

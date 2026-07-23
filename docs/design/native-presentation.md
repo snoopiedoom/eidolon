@@ -667,13 +667,14 @@ Gate: existing checks and user-owned interaction behavior remain unchanged.
 
 Gate: snapshots and interactive SDL behavior match before any native compositor backend is enabled.
 
-**Status:** in progress. The first production checkpoint now has an opaque C17 presentation owner,
-runtime capability flags, a fake-backend contract test, and a behavior-preserving
-`sdl_window_legacy` backend. Host and SDL-renderer lifetime, overlay setup, geometry, VSync, native
-drag, input-region refresh, and final present flow through that owner. Existing body and dialogue
-renderers still borrow the legacy SDL renderer. They now publish stable renderer-neutral body and
-per-session dialogue layers with independent content and presentation revisions, but they have not
-yet migrated pixels into backend-owned targets. DirectComposition therefore remains disabled.
+**Status:** in progress. The production boundary now has an opaque C17 presentation owner, runtime
+capability flags, a behavior-preserving `sdl_window_legacy` backend, and an opt-in Windows
+DirectComposition backend behind one quarantined C++ adapter. Stable body and per-session dialogue
+layers resolve to independently generated presentation targets. Portrait and dialogue content can
+be authored without an SDL window renderer, premultiplied, and uploaded directly into
+compositor-owned D3D11 targets without readback. Normal startup and snapshots remain on
+`sdl_window_legacy`; the native override is portrait-only. Its Win32 adapter now owns transformed
+per-pixel hit testing and body dragging, with owner-controlled interaction proof still pending.
 
 ### Phase 2: Windows portrait proof
 
@@ -686,6 +687,13 @@ yet migrated pixels into backend-owned targets. DirectComposition therefore rema
 
 Gate: dragging at monitor refresh does not pause breathing, expression, dialogue reveal, or desktop
 input; no normal-frame readback occurs.
+
+**Current checkpoint:** generation-bound CPU alpha masks are committed with the corresponding
+visual transforms and sampled through the inverse committed matrix. Transparent pixels return
+native hit-test transparency. Body drag capture and top-level movement run in the Win32 window
+procedure, independent of frame rendering. This is a transitional single-host implementation;
+output-local host migration and layer-transform dragging remain the intended multi-output design.
+Dialogue pixels are detected, but native dialogue-click event routing is not implemented yet.
 
 ### Phase 3: independent dialogue layers
 

@@ -13,6 +13,7 @@
 struct EidolonPortraitRenderer {
     SDL_Renderer *renderer;
     SDL_Texture *textures[EIDOLON_PORTRAIT_MAX_EXPRESSIONS];
+    SDL_Surface *surfaces[EIDOLON_PORTRAIT_MAX_EXPRESSIONS];
     EidolonPortraitConfig config;
     char config_path[EIDOLON_PORTRAIT_PATH_CAPACITY];
     char asset_directory[EIDOLON_PORTRAIT_PATH_CAPACITY];
@@ -462,8 +463,15 @@ static void destroy_textures(SDL_Texture **textures, size_t count) {
     }
 }
 
-static bool load_textures(EidolonPortraitRenderer *portrait, const EidolonPortraitConfig *config,
-                          SDL_Texture **textures, int *width, int *height) {
+static void destroy_surfaces(SDL_Surface **surfaces, size_t count) {
+    for (size_t index = 0U; index < count; ++index) {
+        SDL_DestroySurface(surfaces[index]);
+        surfaces[index] = NULL;
+    }
+}
+
+static bool load_images(EidolonPortraitRenderer *portrait, const EidolonPortraitConfig *config,
+                        SDL_Texture **textures, SDL_Surface **surfaces, int *width, int *height) {
     for (size_t index = 0U; index < config->expression_count; ++index) {
         char path[1024];
         SDL_snprintf(path, sizeof(path), "%s/%s/%s", portrait->asset_directory, config->directory,
@@ -473,6 +481,17 @@ static bool load_textures(EidolonPortraitRenderer *portrait, const EidolonPortra
             set_error(portrait->error, sizeof(portrait->error), "could not load %s: %s", path,
                       SDL_GetError());
             destroy_textures(textures, config->expression_count);
+            destroy_surfaces(surfaces, config->expression_count);
+            return false;
+        }
+        SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_BGRA32);
+        SDL_DestroySurface(surface);
+        surface = converted;
+        if (surface == NULL) {
+            set_error(portrait->error, sizeof(portrait->error), "could not convert %s: %s", path,
+                      SDL_GetError());
+            destroy_textures(textures, config->expression_count);
+            destroy_surfaces(surfaces, config->expression_count);
             return false;
         }
         if (index == 0U) {
@@ -484,18 +503,22 @@ static bool load_textures(EidolonPortraitRenderer *portrait, const EidolonPortra
                       surface->h, *width, *height);
             SDL_DestroySurface(surface);
             destroy_textures(textures, config->expression_count);
+            destroy_surfaces(surfaces, config->expression_count);
             return false;
         }
-        textures[index] = SDL_CreateTextureFromSurface(portrait->renderer, surface);
-        SDL_DestroySurface(surface);
-        if (textures[index] == NULL) {
-            set_error(portrait->error, sizeof(portrait->error), "could not upload %s: %s", path,
-                      SDL_GetError());
-            destroy_textures(textures, config->expression_count);
-            return false;
+        surfaces[index] = surface;
+        if (portrait->renderer != NULL) {
+            textures[index] = SDL_CreateTextureFromSurface(portrait->renderer, surface);
+            if (textures[index] == NULL) {
+                set_error(portrait->error, sizeof(portrait->error), "could not upload %s: %s", path,
+                          SDL_GetError());
+                destroy_textures(textures, config->expression_count);
+                destroy_surfaces(surfaces, config->expression_count);
+                return false;
+            }
+            SDL_SetTextureScaleMode(textures[index], SDL_SCALEMODE_LINEAR);
+            SDL_SetTextureBlendMode(textures[index], SDL_BLENDMODE_BLEND);
         }
-        SDL_SetTextureScaleMode(textures[index], SDL_SCALEMODE_LINEAR);
-        SDL_SetTextureBlendMode(textures[index], SDL_BLENDMODE_BLEND);
     }
     return true;
 }
@@ -555,9 +578,10 @@ static bool reload_config(EidolonPortraitRenderer *portrait, uint64_t now_ms) {
     SDL_free(bytes);
 
     SDL_Texture *textures[EIDOLON_PORTRAIT_MAX_EXPRESSIONS] = {NULL};
+    SDL_Surface *surfaces[EIDOLON_PORTRAIT_MAX_EXPRESSIONS] = {NULL};
     int width = 0;
     int height = 0;
-    if (!load_textures(portrait, &config, textures, &width, &height)) {
+    if (!load_images(portrait, &config, textures, surfaces, &width, &height)) {
         return false;
     }
     for (size_t index = 0U; index < config.expression_count; ++index) {
@@ -566,11 +590,14 @@ static bool reload_config(EidolonPortraitRenderer *portrait, uint64_t now_ms) {
             set_error(portrait->error, sizeof(portrait->error),
                       "expression.%zu portrait crop exceeds %dx%d canvas", index, width, height);
             destroy_textures(textures, config.expression_count);
+            destroy_surfaces(surfaces, config.expression_count);
             return false;
         }
     }
     destroy_textures(portrait->textures, portrait->config.expression_count);
+    destroy_surfaces(portrait->surfaces, portrait->config.expression_count);
     SDL_memcpy(portrait->textures, textures, sizeof(textures));
+    SDL_memcpy(portrait->surfaces, surfaces, sizeof(surfaces));
     portrait->config = config;
     portrait->face_mode = config.default_face_mode;
     portrait->texture_width = width;
@@ -599,7 +626,7 @@ static bool reload_config(EidolonPortraitRenderer *portrait, uint64_t now_ms) {
 
 EidolonPortraitRenderer *eidolon_portrait_create(SDL_Renderer *renderer, const char *config_path,
                                                  const char *asset_directory) {
-    if (renderer == NULL || config_path == NULL || asset_directory == NULL) {
+    if (config_path == NULL || asset_directory == NULL) {
         SDL_SetError("missing portrait renderer input");
         return NULL;
     }
@@ -629,6 +656,7 @@ void eidolon_portrait_destroy(EidolonPortraitRenderer *portrait) {
         return;
     }
     destroy_textures(portrait->textures, portrait->config.expression_count);
+    destroy_surfaces(portrait->surfaces, portrait->config.expression_count);
     SDL_free(portrait);
 }
 
@@ -1033,6 +1061,40 @@ bool eidolon_portrait_draw_content(EidolonPortraitRenderer *portrait, SDL_Render
     }
     const bool rendered = SDL_RenderTexture(renderer, current, current_source, &destination);
     const bool restored = SDL_SetTextureBlendMode(current, previous_blend);
+    return rendered && restored;
+}
+
+bool eidolon_portrait_blit_content(EidolonPortraitRenderer *portrait, SDL_Surface *surface) {
+    if (!eidolon_portrait_ready(portrait) || surface == NULL || surface->w <= 0 ||
+        surface->h <= 0) {
+        return false;
+    }
+    SDL_Surface *current = portrait->surfaces[portrait->current_expression];
+    if (current == NULL) {
+        return false;
+    }
+    SDL_Rect source;
+    const SDL_Rect *source_ptr = NULL;
+    if (portrait->face_mode) {
+        const SDL_FRect crop =
+            portrait->config.expressions[portrait->current_expression].portrait_crop;
+        source = (SDL_Rect){
+            (int)SDL_floorf(crop.x),
+            (int)SDL_floorf(crop.y),
+            (int)SDL_ceilf(crop.w),
+            (int)SDL_ceilf(crop.h),
+        };
+        source_ptr = &source;
+    }
+    const SDL_Rect destination = {0, 0, surface->w, surface->h};
+    SDL_BlendMode previous_blend = SDL_BLENDMODE_INVALID;
+    if (!SDL_GetSurfaceBlendMode(current, &previous_blend) ||
+        !SDL_SetSurfaceBlendMode(current, SDL_BLENDMODE_NONE)) {
+        return false;
+    }
+    const bool rendered =
+        SDL_BlitSurfaceScaled(current, source_ptr, surface, &destination, SDL_SCALEMODE_LINEAR);
+    const bool restored = SDL_SetSurfaceBlendMode(current, previous_blend);
     return rendered && restored;
 }
 

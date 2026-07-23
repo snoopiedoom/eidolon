@@ -92,6 +92,7 @@ bool eidolon_portrait_content_size(const EidolonPortraitRenderer *portrait, uint
                                    uint32_t *height);
 bool eidolon_portrait_draw_content(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
                                    uint32_t width, uint32_t height);
+bool eidolon_portrait_blit_content(EidolonPortraitRenderer *portrait, SDL_Surface *surface);
 bool eidolon_portrait_draw_transform(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,
                                      const EidolonPortraitTransform *transform);
 bool eidolon_portrait_draw(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer,

@@ -92,6 +92,33 @@ static bool scene_contains_layer(const EidolonSceneSnapshot *scene, EidolonScene
     return false;
 }
 
+static void build_scene_commit(EidolonPresentation *presentation, const EidolonSceneSnapshot *scene,
+                               EidolonPresentationSceneCommit *commit) {
+    SDL_zero(*commit);
+    commit->revision = scene->revision;
+    commit->layer_count = scene->layer_count;
+    for (size_t index = 0U; index < scene->layer_count; ++index) {
+        EidolonPresentationCommittedLayer *committed = &commit->layers[index];
+        committed->scene = scene->layers[index];
+        EidolonPresentationLayerTarget *record =
+            find_layer_target(presentation, committed->scene.id);
+        if (record == NULL || record->active_slot >= EIDOLON_PRESENTATION_TARGET_SLOT_COUNT) {
+            continue;
+        }
+        const EidolonPresentationTargetResource *active = &record->resources[record->active_slot];
+        if (!active->allocated) {
+            continue;
+        }
+        committed->target = active->target;
+        committed->target_generation = active->generation;
+        committed->target_content_revision = record->applied_content_revision;
+        committed->target_width = active->width;
+        committed->target_height = active->height;
+        committed->alpha_mode = active->alpha_mode;
+        committed->has_target = true;
+    }
+}
+
 EidolonPresentation *
 eidolon_presentation_create_backend(const char *backend_name, uint64_t capabilities, void *context,
                                     const EidolonPresentationBackendOps *operations) {
@@ -249,13 +276,14 @@ bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
     }
     if (!staging->allocated) {
         const EidolonPresentationTarget target = {presentation->next_target_id++};
-        if (!presentation->operations.create_target(presentation->context, target, width, height,
-                                                    alpha_mode)) {
+        const uint64_t generation = presentation->next_target_generation++;
+        if (!presentation->operations.create_target(presentation->context, layer, target,
+                                                    generation, width, height, alpha_mode)) {
             return false;
         }
         *staging = (EidolonPresentationTargetResource){
             .target = target,
-            .generation = presentation->next_target_generation++,
+            .generation = generation,
             .width = width,
             .height = height,
             .alpha_mode = alpha_mode,
@@ -302,6 +330,14 @@ bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation
         SDL_SetError("presentation target update does not match staging state");
         return false;
     }
+    if (content_valid && presentation->operations.submit_target != NULL &&
+        !presentation->operations.submit_target(presentation->context, update->target,
+                                                update->generation)) {
+        record->staging_slot = EIDOLON_PRESENTATION_TARGET_SLOT_COUNT;
+        record->requested_content_revision = 0U;
+        record->update_in_progress = false;
+        return false;
+    }
     if (content_valid) {
         record->active_slot = record->staging_slot;
         record->applied_content_revision = record->requested_content_revision;
@@ -310,6 +346,37 @@ bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation
     record->requested_content_revision = 0U;
     record->update_in_progress = false;
     return true;
+}
+
+bool eidolon_presentation_set_target_alpha_mask(EidolonPresentation *presentation,
+                                                const EidolonPresentationTargetUpdate *update,
+                                                const uint8_t *pixels, size_t pitch,
+                                                uint8_t pixel_stride, uint8_t alpha_offset) {
+    if (presentation == NULL || update == NULL || !update->redraw_required || pixels == NULL ||
+        pixel_stride == 0U || alpha_offset >= pixel_stride ||
+        pitch < (size_t)update->width * (size_t)pixel_stride) {
+        SDL_SetError("invalid presentation target alpha mask");
+        return false;
+    }
+    for (size_t index = 0U; index < EIDOLON_SCENE_LAYER_CAPACITY; ++index) {
+        EidolonPresentationLayerTarget *record = &presentation->layer_targets[index];
+        if (!record->occupied || !record->update_in_progress ||
+            record->staging_slot >= EIDOLON_PRESENTATION_TARGET_SLOT_COUNT) {
+            continue;
+        }
+        const EidolonPresentationTargetResource *staging = &record->resources[record->staging_slot];
+        if (staging->target.value != update->target.value ||
+            staging->generation != update->generation || staging->width != update->width ||
+            staging->height != update->height) {
+            continue;
+        }
+        return presentation->operations.set_target_alpha_mask == NULL ||
+               presentation->operations.set_target_alpha_mask(presentation->context, update->target,
+                                                              update->generation, pixels, pitch,
+                                                              pixel_stride, alpha_offset);
+    }
+    SDL_SetError("presentation target alpha mask does not match staging state");
+    return false;
 }
 
 bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,
@@ -356,9 +423,12 @@ bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
     if (scene->revision == presentation->committed_scene_revision) {
         return true;
     }
-    if (presentation->operations.commit_scene != NULL &&
-        !presentation->operations.commit_scene(presentation->context, scene)) {
-        return false;
+    if (presentation->operations.commit_scene != NULL) {
+        EidolonPresentationSceneCommit commit;
+        build_scene_commit(presentation, scene, &commit);
+        if (!presentation->operations.commit_scene(presentation->context, &commit)) {
+            return false;
+        }
     }
     if (presentation->operations.destroy_target != NULL) {
         for (size_t index = 0U; index < EIDOLON_SCENE_LAYER_CAPACITY; ++index) {

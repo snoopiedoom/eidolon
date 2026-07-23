@@ -19,10 +19,12 @@ typedef struct TextSlot {
 } TextSlot;
 
 struct EidolonTextRenderer {
-    TTF_TextEngine *engine;
+    TTF_TextEngine *renderer_engine;
+    TTF_TextEngine *surface_engine;
     TTF_Font *font;
     TTF_Font *fallbacks[FALLBACK_FONT_CAPACITY];
-    TextSlot slots[EIDOLON_TEXT_SLOT_COUNT];
+    TextSlot renderer_slots[EIDOLON_TEXT_SLOT_COUNT];
+    TextSlot surface_slots[EIDOLON_TEXT_SLOT_COUNT];
 };
 
 static void add_fallback(EidolonTextRenderer *text_renderer, size_t slot, const char *path,
@@ -43,7 +45,7 @@ static void add_fallback(EidolonTextRenderer *text_renderer, size_t slot, const 
 
 EidolonTextRenderer *eidolon_text_renderer_create(SDL_Renderer *renderer, const char *font_path,
                                                   float point_size) {
-    if (renderer == NULL || font_path == NULL || !TTF_Init()) {
+    if (font_path == NULL || !TTF_Init()) {
         return NULL;
     }
     EidolonTextRenderer *text_renderer = SDL_calloc(1U, sizeof(*text_renderer));
@@ -51,9 +53,13 @@ EidolonTextRenderer *eidolon_text_renderer_create(SDL_Renderer *renderer, const 
         TTF_Quit();
         return NULL;
     }
-    text_renderer->engine = TTF_CreateRendererTextEngine(renderer);
+    if (renderer != NULL) {
+        text_renderer->renderer_engine = TTF_CreateRendererTextEngine(renderer);
+    }
+    text_renderer->surface_engine = TTF_CreateSurfaceTextEngine();
     text_renderer->font = TTF_OpenFont(font_path, point_size);
-    if (text_renderer->engine == NULL || text_renderer->font == NULL) {
+    if ((renderer != NULL && text_renderer->renderer_engine == NULL) ||
+        text_renderer->surface_engine == NULL || text_renderer->font == NULL) {
         eidolon_text_renderer_destroy(text_renderer);
         return NULL;
     }
@@ -71,7 +77,8 @@ void eidolon_text_renderer_destroy(EidolonTextRenderer *text_renderer) {
         return;
     }
     for (size_t index = 0U; index < EIDOLON_TEXT_SLOT_COUNT; ++index) {
-        TTF_DestroyText(text_renderer->slots[index].text);
+        TTF_DestroyText(text_renderer->renderer_slots[index].text);
+        TTF_DestroyText(text_renderer->surface_slots[index].text);
     }
     if (text_renderer->font != NULL) {
         TTF_ClearFallbackFonts(text_renderer->font);
@@ -80,28 +87,33 @@ void eidolon_text_renderer_destroy(EidolonTextRenderer *text_renderer) {
         TTF_CloseFont(text_renderer->fallbacks[index]);
     }
     TTF_CloseFont(text_renderer->font);
-    TTF_DestroyRendererTextEngine(text_renderer->engine);
+    if (text_renderer->renderer_engine != NULL) {
+        TTF_DestroyRendererTextEngine(text_renderer->renderer_engine);
+    }
+    if (text_renderer->surface_engine != NULL) {
+        TTF_DestroySurfaceTextEngine(text_renderer->surface_engine);
+    }
     SDL_free(text_renderer);
     TTF_Quit();
 }
 
-bool eidolon_text_renderer_draw(EidolonTextRenderer *text_renderer, size_t slot_index,
-                                const char *text, size_t length, float x, float y, int wrap_width,
-                                SDL_Color color) {
-    if (text_renderer == NULL || slot_index >= EIDOLON_TEXT_SLOT_COUNT || text == NULL ||
-        length >= TEXT_CACHE_CAPACITY) {
-        return false;
+static TextSlot *prepare_text(EidolonTextRenderer *text_renderer, TTF_TextEngine *engine,
+                              TextSlot *slots, size_t slot_index, const char *text, size_t length,
+                              int wrap_width, SDL_Color color) {
+    if (text_renderer == NULL || engine == NULL || slots == NULL ||
+        slot_index >= EIDOLON_TEXT_SLOT_COUNT || text == NULL || length >= TEXT_CACHE_CAPACITY) {
+        return NULL;
     }
-    TextSlot *slot = &text_renderer->slots[slot_index];
+    TextSlot *slot = &slots[slot_index];
     if (slot->text == NULL) {
-        slot->text = TTF_CreateText(text_renderer->engine, text_renderer->font, "", 0U);
+        slot->text = TTF_CreateText(engine, text_renderer->font, "", 0U);
         if (slot->text == NULL) {
-            return false;
+            return NULL;
         }
     }
     if (!slot->initialized || slot->length != length || memcmp(slot->content, text, length) != 0) {
         if (!TTF_SetTextString(slot->text, text, length)) {
-            return false;
+            return NULL;
         }
         SDL_memcpy(slot->content, text, length);
         slot->content[length] = '\0';
@@ -109,17 +121,44 @@ bool eidolon_text_renderer_draw(EidolonTextRenderer *text_renderer, size_t slot_
     }
     if (!slot->initialized || slot->wrap_width != wrap_width) {
         if (!TTF_SetTextWrapWidth(slot->text, wrap_width)) {
-            return false;
+            return NULL;
         }
         slot->wrap_width = wrap_width;
     }
     if (!slot->initialized || slot->color.r != color.r || slot->color.g != color.g ||
         slot->color.b != color.b || slot->color.a != color.a) {
         if (!TTF_SetTextColor(slot->text, color.r, color.g, color.b, color.a)) {
-            return false;
+            return NULL;
         }
         slot->color = color;
     }
     slot->initialized = true;
+    return slot;
+}
+
+bool eidolon_text_renderer_draw(EidolonTextRenderer *text_renderer, size_t slot_index,
+                                const char *text, size_t length, float x, float y, int wrap_width,
+                                SDL_Color color) {
+    if (text_renderer == NULL) {
+        return false;
+    }
+    TextSlot *slot =
+        prepare_text(text_renderer, text_renderer->renderer_engine, text_renderer->renderer_slots,
+                     slot_index, text, length, wrap_width, color);
+    if (slot == NULL) {
+        return false;
+    }
     return TTF_DrawRendererText(slot->text, x, y);
+}
+
+bool eidolon_text_renderer_draw_surface(EidolonTextRenderer *text_renderer, size_t slot_index,
+                                        const char *text, size_t length, int x, int y,
+                                        int wrap_width, SDL_Color color, SDL_Surface *surface) {
+    if (text_renderer == NULL || surface == NULL) {
+        return false;
+    }
+    TextSlot *slot =
+        prepare_text(text_renderer, text_renderer->surface_engine, text_renderer->surface_slots,
+                     slot_index, text, length, wrap_width, color);
+    return slot != NULL && TTF_DrawSurfaceText(slot->text, x, y, surface);
 }

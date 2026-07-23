@@ -58,6 +58,23 @@ seams. `primary` pins bubbles to the primary work area. `virtual` permits the bo
 all usable displays. `custom` uses the persisted rectangle; negative coordinates are valid. Reset
 returns the complete policy to its inherited default.
 
+## Experimental presentation backend
+
+Windows developers can opt into the incomplete native composition path for controlled visual
+evaluation:
+
+```powershell
+$env:EIDOLON_PRESENTATION_BACKEND = "win32_dcomp"
+.\build\windows\eidolon.exe
+```
+
+This override deliberately remains outside the saved user-settings contract while the backend is
+under construction. It currently supports portrait and dialogue layers, generation-bound CPU alpha
+masks, transformed per-pixel hit testing, and Win32-owned body dragging. Dialogue click routing,
+sprite and 3D targets, device-loss recovery, output-local host migration, and default enablement
+remain unfinished. An explicit native request fails closed if host or graphics initialization
+fails; normal startup and every snapshot continue to use `sdl_window_legacy`.
+
 ## 2D character manifest
 
 `config/character.cfg` is strict, versioned, and hot-reloaded. Invalid edits retain the last good

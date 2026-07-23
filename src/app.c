@@ -9,6 +9,10 @@
 #include "presentation_sdl_legacy.h"
 #include "settings_ui.h"
 
+#if defined(_WIN32)
+#include "platform/windows_dcomp.h"
+#endif
+
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
 #define EVENT_BATCH_LIMIT 128U
 #define EVENT_PRESSURE_LOG_INTERVAL_MS 1000U
@@ -499,7 +503,15 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
 }
 
 static uint64_t current_display_interval_ns(const EidolonApp *app) {
-    const SDL_DisplayID display = SDL_GetDisplayForWindow(app->window);
+    EidolonPresentationGeometry geometry;
+    SDL_DisplayID display = 0U;
+    if (eidolon_presentation_get_geometry(app->presentation, &geometry)) {
+        const SDL_Rect bounds = {geometry.x, geometry.y, geometry.width, geometry.height};
+        display = SDL_GetDisplayForRect(&bounds);
+    }
+    if (display == 0U) {
+        display = SDL_GetPrimaryDisplay();
+    }
     const SDL_DisplayMode *mode = display != 0U ? SDL_GetCurrentDisplayMode(display) : NULL;
     return eidolon_frame_interval_ns(mode != NULL ? mode->refresh_rate_numerator : 0,
                                      mode != NULL ? mode->refresh_rate_denominator : 0,
@@ -592,6 +604,10 @@ static void poll_motion_config(EidolonApp *app, uint64_t now_ms) {
 }
 
 static bool load_atlas(EidolonApp *app) {
+    if (app->renderer == NULL) {
+        SDL_SetError("sprite rendering requires the SDL legacy presentation");
+        return false;
+    }
     if (app->atlas != NULL) {
         return true;
     }
@@ -641,6 +657,10 @@ static bool ensure_portrait(EidolonApp *app) {
 }
 
 static bool ensure_model(EidolonApp *app) {
+    if (app->renderer == NULL) {
+        SDL_SetError("3D rendering requires the SDL legacy presentation");
+        return false;
+    }
     if (app->model != NULL) {
         return true;
     }
@@ -922,7 +942,7 @@ static void apply_legacy_layout(EidolonApp *app, float scale, SDL_FPoint body_ce
 }
 
 static void reflow_overlay_layout(EidolonApp *app, float scale) {
-    if (app->window == NULL || app->window_coordinate_scale <= 0.0F) {
+    if (app->window_coordinate_scale <= 0.0F) {
         return;
     }
     const SDL_FPoint body_center = current_body_global_center(app);
@@ -1058,14 +1078,14 @@ static bool update_display_metrics(EidolonApp *app) {
     if (display_scale <= 0.0F) {
         display_scale = 1.0F;
     }
-    float pixel_density = SDL_GetWindowPixelDensity(app->window);
+    float pixel_density = app->window != NULL ? SDL_GetWindowPixelDensity(app->window) : 1.0F;
     if (pixel_density <= 0.0F) {
         pixel_density = 1.0F;
     }
 
     app->display_scale = display_scale;
     app->window_coordinate_scale = display_scale / pixel_density;
-    if (!SDL_SetRenderScale(app->renderer, display_scale, display_scale)) {
+    if (app->renderer != NULL && !SDL_SetRenderScale(app->renderer, display_scale, display_scale)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not apply display scale: %s",
                     SDL_GetError());
     }
@@ -1202,32 +1222,61 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         }
     }
 
-    const SDL_WindowFlags flags =
-        app->snapshot_mode ? SDL_WINDOW_HIDDEN
-                           : SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS |
-                                 SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    const EidolonSdlLegacyConfig presentation_config = {
-        .title = "Eidolon",
-        .width = EIDOLON_WINDOW_WIDTH,
-        .height = EIDOLON_WINDOW_HEIGHT,
-        .window_flags = flags,
-    };
-    app->presentation = eidolon_sdl_legacy_presentation_create(&presentation_config);
+    const char *presentation_override =
+        !app->snapshot_mode ? SDL_getenv("EIDOLON_PRESENTATION_BACKEND") : NULL;
+    const bool native_presentation_requested =
+        presentation_override != NULL && strcmp(presentation_override, "win32_dcomp") == 0;
+#if defined(_WIN32)
+    if (native_presentation_requested) {
+        SDL_Rect bounds = {0, 0, EIDOLON_WINDOW_WIDTH, EIDOLON_WINDOW_HEIGHT};
+        (void)SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds);
+        const EidolonWin32DcompConfig presentation_config = {
+            .title = "Eidolon",
+            .x = bounds.x + bounds.w - EIDOLON_WINDOW_WIDTH - 24,
+            .y = bounds.y + bounds.h - EIDOLON_WINDOW_HEIGHT - 24,
+            .width = EIDOLON_WINDOW_WIDTH,
+            .height = EIDOLON_WINDOW_HEIGHT,
+            .visible = true,
+        };
+        app->presentation = eidolon_win32_dcomp_presentation_create(&presentation_config);
+        if (app->presentation == NULL) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "DirectComposition presentation creation failed: %s", SDL_GetError());
+            return false;
+        }
+    }
+#else
+    (void)presentation_override;
+    if (native_presentation_requested) {
+        SDL_SetError("win32_dcomp is available only on Windows");
+        return false;
+    }
+#endif
+    if (!native_presentation_requested) {
+        const SDL_WindowFlags flags =
+            app->snapshot_mode ? SDL_WINDOW_HIDDEN
+                               : SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS |
+                                     SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        const EidolonSdlLegacyConfig presentation_config = {
+            .title = "Eidolon",
+            .width = EIDOLON_WINDOW_WIDTH,
+            .height = EIDOLON_WINDOW_HEIGHT,
+            .window_flags = flags,
+        };
+        app->presentation = eidolon_sdl_legacy_presentation_create(&presentation_config);
+    }
     if (app->presentation == NULL) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation creation failed: %s",
                      SDL_GetError());
         return false;
     }
-    app->window = eidolon_sdl_legacy_window(app->presentation);
-    app->renderer = eidolon_sdl_legacy_renderer(app->presentation);
-    if (app->window == NULL || app->renderer == NULL) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation resources unavailable: %s",
-                     SDL_GetError());
-        return false;
+    if (!native_presentation_requested) {
+        app->window = eidolon_sdl_legacy_window(app->presentation);
+        app->renderer = eidolon_sdl_legacy_renderer(app->presentation);
     }
     eidolon_log_write("renderer", "presentation=%s graphics=%s capabilities=0x%llx",
                       eidolon_presentation_backend_name(app->presentation),
-                      SDL_GetRendererName(app->renderer),
+                      app->renderer != NULL ? SDL_GetRendererName(app->renderer) : "direct3d11",
                       (unsigned long long)eidolon_presentation_capabilities(app->presentation));
 
     app->text_renderer = eidolon_text_renderer_create(app->renderer, EIDOLON_FONT_PATH, 12.0F);
@@ -1243,6 +1292,10 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
 
     if (!ensure_portrait(app)) {
+        if (app->renderer == NULL) {
+            eidolon_log_write("portrait", "native presentation requires a portrait body");
+            return false;
+        }
         eidolon_log_write("portrait", "initialization failed; trying legacy renderers: %s",
                           SDL_GetError());
         SDL_ClearError();
@@ -1370,6 +1423,10 @@ bool eidolon_app_set_render_mode(EidolonApp *app, EidolonRenderMode mode) {
     if (mode < 0 || mode >= EIDOLON_RENDER_MODE_COUNT) {
         return false;
     }
+    if (app->renderer == NULL && mode != EIDOLON_RENDER_MODE_PORTRAIT) {
+        SDL_SetError("the native presentation proof currently supports portrait bodies only");
+        return false;
+    }
     bool ready = false;
     switch (mode) {
     case EIDOLON_RENDER_MODE_SPRITE:
@@ -1450,7 +1507,12 @@ void eidolon_app_log_presentation_metrics(const EidolonApp *app) {
         window_width = geometry.width;
         window_height = geometry.height;
     }
-    (void)SDL_GetCurrentRenderOutputSize(app->renderer, &output_width, &output_height);
+    if (app->renderer != NULL) {
+        (void)SDL_GetCurrentRenderOutputSize(app->renderer, &output_width, &output_height);
+    } else {
+        output_width = window_width;
+        output_height = window_height;
+    }
     eidolon_log_write(
         "renderer",
         "presentation scale=%.2fx logical=%dx%d window=%dx%d output=%dx%d target=%d "
@@ -1702,7 +1764,9 @@ void eidolon_app_set_vsync(EidolonApp *app, bool enabled) {
         SDL_ClearError();
     }
     int active = 0;
-    if (!SDL_GetRenderVSync(app->renderer, &active)) {
+    if (app->renderer == NULL) {
+        active = 0;
+    } else if (!SDL_GetRenderVSync(app->renderer, &active)) {
         eidolon_log_write("renderer", "could not query active vsync: %s", SDL_GetError());
         SDL_ClearError();
         active = 0;
@@ -1998,7 +2062,8 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         return;
     }
     SDL_Event render_event = *event;
-    if (!SDL_ConvertEventToRenderCoordinates(app->renderer, &render_event)) {
+    if (app->renderer != NULL &&
+        !SDL_ConvertEventToRenderCoordinates(app->renderer, &render_event)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not convert input coordinates: %s",
                     SDL_GetError());
     }
