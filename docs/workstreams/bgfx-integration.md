@@ -303,6 +303,19 @@ been enabled.
 
 ## Evidence log
 
+### 2026-07-23: SDL legacy raster boundary accepted
+
+- live scene orchestration no longer binds SDL targets, clears the SDL host, rasterizes portrait or
+  dialogue pixels, modulates cached textures, or composites body textures directly;
+- `raster_sdl_legacy` owns those operations explicitly, including direct-draw fallback when a
+  backend target cannot be updated;
+- `draw.c` retains SDL renderer access only inside the deliberately quarantined hidden-snapshot
+  path;
+- the adapter depends on portrait, dialogue, text, and presentation contracts rather than the
+  complete application state;
+- `make check`, the Windows debug build, formatting, and whitespace validation passed; the owner
+  accepted portrait, dialogue, sprite, 3D, fading, and interaction behavior.
+
 ### 2026-07-23: legacy dialogue targets accepted
 
 - each visible session now resolves a presentation-owned target through its stable scene-layer id;

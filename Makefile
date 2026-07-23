@@ -32,6 +32,7 @@ COMMON_SOURCES := \
 	src/pose_solver.c \
 	src/presentation.c \
 	src/presentation_sdl_legacy.c \
+	src/raster_sdl_legacy.c \
 	src/portrait.c \
 	src/portrait_motion.c \
 	src/relay_core.c \
