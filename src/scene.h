@@ -17,6 +17,13 @@ typedef enum EidolonSceneLayerKind {
     EIDOLON_SCENE_LAYER_TRANSIENT,
 } EidolonSceneLayerKind;
 
+typedef enum EidolonSceneInteractionPolicy {
+    EIDOLON_SCENE_INTERACTION_PASS_THROUGH,
+    EIDOLON_SCENE_INTERACTION_ACTIVATE,
+    EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR,
+    EIDOLON_SCENE_INTERACTION_ROUTE_POINTER,
+} EidolonSceneInteractionPolicy;
+
 typedef struct EidolonSceneRect {
     float x;
     float y;
@@ -27,6 +34,7 @@ typedef struct EidolonSceneRect {
 typedef struct EidolonSceneLayerInput {
     uint64_t stable_key;
     EidolonSceneLayerKind kind;
+    EidolonSceneInteractionPolicy interaction;
     uint64_t content_token;
     uint32_t content_width;
     uint32_t content_height;
@@ -43,6 +51,7 @@ typedef struct EidolonSceneLayerSnapshot {
     EidolonSceneLayerId id;
     uint64_t stable_key;
     EidolonSceneLayerKind kind;
+    EidolonSceneInteractionPolicy interaction;
     uint64_t content_revision;
     uint64_t presentation_revision;
     uint32_t content_width;

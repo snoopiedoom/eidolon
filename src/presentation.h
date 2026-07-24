@@ -73,6 +73,33 @@ typedef struct EidolonPresentationGeometry {
     int height;
 } EidolonPresentationGeometry;
 
+typedef enum EidolonPresentationEventKind {
+    EIDOLON_PRESENTATION_EVENT_NONE,
+    EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED,
+    EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
+    EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED,
+    EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED,
+    EIDOLON_PRESENTATION_EVENT_HOST_GEOMETRY_CHANGED,
+    EIDOLON_PRESENTATION_EVENT_OUTPUT_CHANGED,
+    EIDOLON_PRESENTATION_EVENT_OUTPUT_SCALE_CHANGED,
+    EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+    EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED,
+} EidolonPresentationEventKind;
+
+typedef struct EidolonPresentationEvent {
+    EidolonPresentationEventKind kind;
+    uint64_t sequence;
+    uint64_t monotonic_ns;
+    uint64_t scene_revision;
+    EidolonPresentationHost host;
+    EidolonSceneLayerId layer;
+    EidolonPresentationGeometry geometry;
+    float host_x;
+    float host_y;
+    float layer_x;
+    float layer_y;
+} EidolonPresentationEvent;
+
 typedef struct EidolonPresentationBackendOps {
     void (*destroy)(void *context);
     bool (*configure_host)(void *context);
@@ -84,6 +111,7 @@ typedef struct EidolonPresentationBackendOps {
     bool (*begin_interactive_move)(void *context);
     void (*suspend_input_region)(void *context);
     bool (*update_input_region)(void *context);
+    bool (*poll_event)(void *context, EidolonPresentationEvent *event);
     bool (*create_target)(void *context, EidolonSceneLayerId layer,
                           EidolonPresentationTarget target, uint64_t generation, uint32_t width,
                           uint32_t height, EidolonPresentationAlphaMode alpha_mode);
@@ -122,6 +150,8 @@ bool eidolon_presentation_set_vsync(EidolonPresentation *presentation, int inter
 bool eidolon_presentation_begin_interactive_move(EidolonPresentation *presentation);
 void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation);
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation);
+bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
+                                     EidolonPresentationEvent *event);
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                                               EidolonSceneLayerId layer, uint32_t width,
                                               uint32_t height,

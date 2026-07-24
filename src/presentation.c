@@ -226,6 +226,26 @@ bool eidolon_presentation_update_input_region(EidolonPresentation *presentation)
            presentation->operations.update_input_region(presentation->context);
 }
 
+bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
+                                     EidolonPresentationEvent *event) {
+    if (presentation == NULL || event == NULL || presentation->operations.poll_event == NULL) {
+        return false;
+    }
+    EidolonPresentationEvent next;
+    SDL_zero(next);
+    if (!presentation->operations.poll_event(presentation->context, &next)) {
+        return false;
+    }
+    if (next.kind <= EIDOLON_PRESENTATION_EVENT_NONE ||
+        next.kind > EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED || next.sequence == 0U ||
+        next.host.value != presentation->host.value) {
+        SDL_SetError("invalid presentation event");
+        return false;
+    }
+    *event = next;
+    return true;
+}
+
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                                               EidolonSceneLayerId layer, uint32_t width,
                                               uint32_t height,

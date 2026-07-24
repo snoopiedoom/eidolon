@@ -291,6 +291,11 @@ renderer. The default production runtime still uses `sdl_window_legacy`. An expl
 `EIDOLON_PRESENTATION_BACKEND=win32_dcomp` environment override now enables the incomplete
 portrait-only DirectComposition path for owner-controlled evaluation; it is not a shipped default.
 
+The first backend-neutral interaction slice is compiled: committed layer policy replaces
+layer-kind inference, Win32 translates activation and native move lifecycle into a bounded C17
+queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
+completion. Interactive parity, output/DPI events, and SDL-legacy queue parity remain Gate 6 work.
+
 ## Restart checklist
 
 1. Read this file, `docs/design/native-presentation.md`, and
@@ -304,6 +309,22 @@ portrait-only DirectComposition path for owner-controlled evaluation; it is not 
    handoff.
 
 ## Evidence log
+
+### 2026-07-24: presentation event slice compiled
+
+- scene publication commits interaction policy atomically with presentation state;
+- fixed-size events contain copied ids/scalars only, and the common fixed-capacity queue assigns
+  sequence ids without allocation;
+- queue overflow discards ambiguous transient history and exposes one resync event before later
+  terminal events;
+- Win32 cached-alpha hit testing resolves the committed topmost layer, keeps capture and native
+  movement immediate, and emits activation or move completion without calling `EidolonApp`;
+- the application maps stable layer ids to current session bubbles, discards retired mappings, and
+  performs one final post-drag display/layout reconciliation;
+- all ordinary regressions, the focused queue/contract tests, the hidden DirectComposition backend
+  smoke, the normal Windows build, and whitespace validation pass;
+- dialogue activation, cancel-on-drag, release reflow, and mixed-DPI behavior still require
+  owner-controlled confirmation.
 
 ### 2026-07-24: native interaction accepted; event contract is next
 

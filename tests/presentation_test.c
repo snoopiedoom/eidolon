@@ -16,6 +16,8 @@ typedef struct FakePresentation {
     unsigned int destroy_count;
     int vsync_interval;
     bool input_suspended;
+    bool event_pending;
+    EidolonPresentationEvent event;
 } FakePresentation;
 
 static void fake_destroy(void *context) {
@@ -71,6 +73,16 @@ static void fake_suspend_input(void *context) {
 static bool fake_update_input(void *context) {
     FakePresentation *fake = context;
     fake->input_suspended = false;
+    return true;
+}
+
+static bool fake_poll_event(void *context, EidolonPresentationEvent *event) {
+    FakePresentation *fake = context;
+    if (!fake->event_pending) {
+        return false;
+    }
+    *event = fake->event;
+    fake->event_pending = false;
     return true;
 }
 
@@ -139,6 +151,7 @@ int main(void) {
         .begin_interactive_move = fake_begin_move,
         .suspend_input_region = fake_suspend_input,
         .update_input_region = fake_update_input,
+        .poll_event = fake_poll_event,
         .create_target = fake_create_target,
         .destroy_target = fake_destroy_target,
         .set_target_alpha_mask = fake_set_target_alpha_mask,
@@ -177,6 +190,26 @@ int main(void) {
     assert(fake.input_suspended);
     assert(eidolon_presentation_update_input_region(presentation));
     assert(!fake.input_suspended);
+    EidolonPresentationEvent presentation_event;
+    assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
+    fake.event = (EidolonPresentationEvent){
+        .kind = EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED,
+        .sequence = 1U,
+        .monotonic_ns = 100U,
+        .scene_revision = 1U,
+        .host = {1U},
+        .layer = {7U},
+        .geometry = fake.geometry,
+        .host_x = 12.0F,
+        .host_y = 18.0F,
+        .layer_x = 4.0F,
+        .layer_y = 6.0F,
+    };
+    fake.event_pending = true;
+    assert(eidolon_presentation_poll_event(presentation, &presentation_event));
+    assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED);
+    assert(presentation_event.layer.value == 7U && presentation_event.sequence == 1U);
+    assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
     const EidolonSceneSnapshot scene = {
         .revision = 2U,
         .layer_count = 1U,

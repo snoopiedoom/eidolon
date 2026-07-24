@@ -63,6 +63,7 @@ int main() {
                 layer,
                 1U,
                 EIDOLON_SCENE_LAYER_BODY,
+                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR,
                 1U,
                 1U,
                 128U,

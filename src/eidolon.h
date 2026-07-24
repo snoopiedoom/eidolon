@@ -136,6 +136,8 @@ typedef struct EidolonApp {
     SDL_FRect body_rect;
     bool body_rect_initialized;
     SDL_FRect bubble_rects[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    EidolonSceneLayerId bubble_layers[EIDOLON_VISIBLE_SESSION_CAPACITY];
+    EidolonSceneLayerId fallback_dialogue_layer;
     EidolonBubbleSide bubble_sides[EIDOLON_VISIBLE_SESSION_CAPACITY];
     bool bubble_rect_valid[EIDOLON_VISIBLE_SESSION_CAPACITY];
     EidolonBubbleBoundsMode bubble_bounds_mode;

@@ -77,7 +77,8 @@ overrides with reset-to-inheritance semantics.
 - pixel alpha drives click-through while coarse Win32 regions keep DWM region cost bounded;
 - `sdl_window_legacy` remains the default, while the opt-in portrait-only `win32_dcomp` backend owns
   a no-redirection host, independent body/dialogue targets, premultiplied D3D11 submission,
-  DirectComposition transforms/opacity/z-order, cached-alpha hit testing, and native body dragging;
+  DirectComposition transforms/opacity/z-order, cached-alpha hit testing, native body dragging,
+  and bounded presentation events for dialogue activation and final-move reflow;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
@@ -90,8 +91,9 @@ overrides with reset-to-inheritance semantics.
   persistence.
 
 The owner accepted the opt-in DirectComposition portrait/dialogue output, transparent per-pixel
-click-through, smooth native body dragging, and cross-monitor movement. Native dialogue activation
-and mixed-DPI event delivery remain implementation work rather than unverified claims.
+click-through, smooth native body dragging, and cross-monitor movement. Native dialogue activation,
+activation cancellation, and one-reflow drag completion now compile and pass deterministic contract
+tests, but remain unconfirmed interactively. Mixed-DPI event delivery remains implementation work.
 
 ## Known limitations
 
@@ -104,8 +106,8 @@ and mixed-DPI event delivery remain implementation work rather than unverified c
   depend on update order;
 - monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
   renderer reports tighter visible geometry;
-- the DirectComposition backend detects opaque dialogue pixels but has no backend-neutral product
-  event path yet, so native bubble clicks do not advance dialogue;
+- presentation output/DPI, graphics-reset, close, and routed-pointer events are specified but not
+  yet emitted; SDL legacy still uses its existing direct SDL input path;
 - the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
 - native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
@@ -123,12 +125,12 @@ and mixed-DPI event delivery remain implementation work rather than unverified c
 
 ## Next priorities
 
-1. implement the backend-neutral presentation event and committed layer-interaction-policy contract
-   described in `docs/design/presentation-events.md`;
-2. route native dialogue activation and drag completion into `EidolonApp`, with one final reflow and
-   no application calls from `WndProc`;
-3. integrate output/DPI changes and presentation readiness with the native event/wait boundary,
+1. confirm native dialogue activation, cancellation, final drag reflow, and click-through against
+   the opt-in DirectComposition backend;
+2. integrate output/DPI changes and presentation readiness with the native event/wait boundary,
    preserving placement and animation across mixed-DPI monitors;
+3. give `sdl_window_legacy` equivalent presentation-event meaning without regressing its existing
+   behavior;
 4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
 5. expose native presentation as a persisted setting only after the portrait path has event,
    output, cadence, and recovery parity;

@@ -2001,6 +2001,81 @@ static void end_primary_interaction(EidolonApp *app) {
     app->primary_session_slot = -1;
 }
 
+static void advance_session_bubble(EidolonApp *app, int slot, uint64_t now_ms) {
+    if (!eidolon_session_registry_advance(&app->session_registry, slot, now_ms)) {
+        return;
+    }
+    EidolonSessionEntry *entry = eidolon_session_registry_at_slot(&app->session_registry, slot);
+    if (entry != NULL) {
+        activate_dialogue_performance(app, &entry->dialogue,
+                                      session_attention_direction(app, entry), now_ms);
+    }
+}
+
+static void advance_fallback_dialogue(EidolonApp *app, uint64_t now_ms) {
+    const size_t previous_cursor = app->dialogue.cursor;
+    eidolon_dialogue_advance(&app->dialogue, now_ms);
+    if (app->dialogue.cursor != previous_cursor) {
+        activate_dialogue_performance(app, &app->dialogue, -1.0F, now_ms);
+    }
+}
+
+static void finish_native_move(EidolonApp *app) {
+    const SDL_FPoint body_center = current_body_global_center(app);
+    update_presentation_policy(app);
+    if (update_display_metrics(app)) {
+        restore_body_global_center(app, body_center);
+    }
+    app->bubble_display_id = 0U;
+    reflow_overlay_layout(app, app->model_scale);
+    app->hit_test_initialized = false;
+    app->native_drag_completed = true;
+}
+
+static void handle_presentation_event(EidolonApp *app, const EidolonPresentationEvent *event) {
+    const uint64_t now_ms = SDL_GetTicks();
+    switch (event->kind) {
+    case EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED:
+        for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+            if (app->bubble_layers[slot].value == event->layer.value) {
+                advance_session_bubble(app, slot, now_ms);
+                return;
+            }
+        }
+        if (app->fallback_dialogue_layer.value == event->layer.value) {
+            advance_fallback_dialogue(app, now_ms);
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED:
+        finish_native_move(app);
+        break;
+    case EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED:
+        app->native_drag_completed = true;
+        break;
+    case EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED:
+        finish_native_move(app);
+        eidolon_log_write("input", "presentation event queue resynchronized");
+        break;
+    case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
+    case EIDOLON_PRESENTATION_EVENT_HOST_GEOMETRY_CHANGED:
+    case EIDOLON_PRESENTATION_EVENT_OUTPUT_CHANGED:
+    case EIDOLON_PRESENTATION_EVENT_OUTPUT_SCALE_CHANGED:
+    case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
+    case EIDOLON_PRESENTATION_EVENT_NONE:
+        break;
+    }
+}
+
+static size_t drain_presentation_events(EidolonApp *app, size_t limit) {
+    size_t count = 0U;
+    EidolonPresentationEvent event;
+    while (count < limit && eidolon_presentation_poll_event(app->presentation, &event)) {
+        handle_presentation_event(app, &event);
+        ++count;
+    }
+    return count;
+}
+
 static bool point_in_model_rect(const EidolonApp *app, float x, float y) {
     return app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D && app->model != NULL &&
            point_in_rect(x, y, &app->body_rect);
@@ -2135,23 +2210,10 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         if (event->button.button == SDL_BUTTON_LEFT) {
             if (!app->primary_moved &&
                 app->primary_interaction == EIDOLON_PRIMARY_INTERACTION_SESSION_BUBBLE) {
-                if (eidolon_session_registry_advance(&app->session_registry,
-                                                     app->primary_session_slot, SDL_GetTicks())) {
-                    EidolonSessionEntry *entry = eidolon_session_registry_at_slot(
-                        &app->session_registry, app->primary_session_slot);
-                    if (entry != NULL) {
-                        activate_dialogue_performance(app, &entry->dialogue,
-                                                      session_attention_direction(app, entry),
-                                                      SDL_GetTicks());
-                    }
-                }
+                advance_session_bubble(app, app->primary_session_slot, SDL_GetTicks());
             } else if (!app->primary_moved &&
                        app->primary_interaction == EIDOLON_PRIMARY_INTERACTION_DIALOGUE_BUBBLE) {
-                const size_t previous_cursor = app->dialogue.cursor;
-                eidolon_dialogue_advance(&app->dialogue, SDL_GetTicks());
-                if (app->dialogue.cursor != previous_cursor) {
-                    activate_dialogue_performance(app, &app->dialogue, -1.0F, SDL_GetTicks());
-                }
+                advance_fallback_dialogue(app, SDL_GetTicks());
             }
             end_primary_interaction(app);
         } else if (event->button.button == SDL_BUTTON_MIDDLE) {
@@ -2196,6 +2258,8 @@ void eidolon_app_run(EidolonApp *app) {
             handle_event(app, &event);
             ++event_count;
         }
+        event_count += drain_presentation_events(
+            app, event_count < EVENT_BATCH_LIMIT ? EVENT_BATCH_LIMIT - event_count : 0U);
         if (!app->running) {
             break;
         }

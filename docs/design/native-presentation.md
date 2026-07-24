@@ -315,6 +315,10 @@ terms. Native callbacks may answer hit testing, capture pointers, and perform ac
 immediately. Dialogue activation, final reflow, body behavior, and session-facing actions cross a
 bounded fixed-size event queue; a native callback never invokes application behavior directly.
 
+The initial `win32_dcomp` implementation now commits interaction policy with each layer and carries
+dialogue activation plus native move lifecycle through that queue. Output/DPI and reset events,
+SDL-legacy queue parity, and owner-controlled interaction confirmation remain open.
+
 ## Output topology and DPI
 
 Hosts are output-local where the platform supports it. Logical scene coordinates are independent

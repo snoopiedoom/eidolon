@@ -112,6 +112,7 @@ static bool append_dialogue_scene_layer(EidolonApp *app, EidolonSceneLayerInput 
     layers[(*layer_count)++] = (EidolonSceneLayerInput){
         .stable_key = stable_key,
         .kind = EIDOLON_SCENE_LAYER_DIALOGUE,
+        .interaction = EIDOLON_SCENE_INTERACTION_ACTIVATE,
         .content_token = dialogue_content_token(app, dialogue, title, points_right, now_ms),
         .content_width = (uint32_t)SDL_max(1, (int)SDL_ceilf(padded.w)),
         .content_height = (uint32_t)SDL_max(1, (int)SDL_ceilf(padded.h)),
@@ -157,6 +158,7 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
         layers[layer_count++] = (EidolonSceneLayerInput){
             .stable_key = SCENE_BODY_KEY,
             .kind = EIDOLON_SCENE_LAYER_BODY,
+            .interaction = EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR,
             .content_token = body_content_token(app),
             .content_width = content_width,
             .content_height = content_height,
@@ -197,6 +199,27 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             eidolon_log_write("renderer", "scene publication failed: %s", SDL_GetError());
             scene_failure_reported = true;
         }
+        return;
+    }
+
+    for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
+        app->bubble_layers[slot] = (EidolonSceneLayerId){0U};
+        const EidolonSessionEntry *session =
+            eidolon_session_registry_at_slot_const(&app->session_registry, slot);
+        if (session == NULL || !app->bubble_rect_valid[slot]) {
+            continue;
+        }
+        const EidolonSceneLayerSnapshot *bubble =
+            eidolon_scene_snapshot_layer(&app->scene_snapshot, dialogue_stable_key(session, slot));
+        if (bubble != NULL) {
+            app->bubble_layers[slot] = bubble->id;
+        }
+    }
+    app->fallback_dialogue_layer = (EidolonSceneLayerId){0U};
+    const EidolonSceneLayerSnapshot *fallback =
+        eidolon_scene_snapshot_layer(&app->scene_snapshot, SCENE_FALLBACK_DIALOGUE_KEY);
+    if (fallback != NULL) {
+        app->fallback_dialogue_layer = fallback->id;
     }
 }
 

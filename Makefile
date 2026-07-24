@@ -32,6 +32,7 @@ COMMON_SOURCES := \
 	src/pose.c \
 	src/pose_solver.c \
 	src/presentation.c \
+	src/presentation_event_queue.c \
 	src/presentation_sdl_legacy.c \
 	src/raster_sdl_legacy.c \
 	src/portrait.c \
@@ -194,7 +195,8 @@ WIN32_DCOMP_BACKEND_SMOKE := $(BUILD_ROOT)/tests/$(MODE)/windows_dcomp_backend_s
 WIN32_DCOMP_BACKEND_SMOKE_OBJECT := $(OBJ_DIR)/tests/windows_dcomp_backend_smoke.o
 
 $(WIN32_DCOMP_BACKEND_SMOKE): $(WIN32_DCOMP_BACKEND_SMOKE_OBJECT) \
-		$(OBJ_DIR)/src/presentation.o $(OBJ_DIR)/src/scene.o \
+		$(OBJ_DIR)/src/presentation.o $(OBJ_DIR)/src/presentation_event_queue.o \
+		$(OBJ_DIR)/src/scene.o \
 		$(OBJ_DIR)/src/platform/windows_dcomp.o
 	$(make-dir)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -518,6 +520,7 @@ AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
 EXPRESSION_DIRECTOR_TEST := $(TEST_DIR)/expression_director_test$(EXE)
 FRAME_CLOCK_TEST := $(TEST_DIR)/frame_clock_test$(EXE)
 PRESENTATION_TEST := $(TEST_DIR)/presentation_test$(EXE)
+PRESENTATION_EVENT_QUEUE_TEST := $(TEST_DIR)/presentation_event_queue_test$(EXE)
 SCENE_TEST := $(TEST_DIR)/scene_test$(EXE)
 BUBBLE_LAYOUT_TEST := $(TEST_DIR)/bubble_layout_test$(EXE)
 SESSION_REGISTRY_TEST := $(TEST_DIR)/session_registry_test$(EXE)
@@ -617,6 +620,11 @@ $(PRESENTATION_TEST): tests/presentation_test.c src/presentation.c src/scene.c |
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(PRESENTATION_EVENT_QUEUE_TEST): tests/presentation_event_queue_test.c \
+		src/presentation_event_queue.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 $(SCENE_TEST): tests/scene_test.c src/scene.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
@@ -668,7 +676,8 @@ codex-relay-test: $(CODEX_RELAY_TEST)
 check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
-	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
+	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
+	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
@@ -688,6 +697,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_
 	$(EXPRESSION_DIRECTOR_TEST)
 	$(FRAME_CLOCK_TEST)
 	$(PRESENTATION_TEST)
+	$(PRESENTATION_EVENT_QUEUE_TEST)
 	$(SCENE_TEST)
 	$(BUBBLE_LAYOUT_TEST)
 	$(SESSION_REGISTRY_TEST)

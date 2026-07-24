@@ -15,6 +15,24 @@ only conceal the coupling.
 
 Eidolon needs a bounded C17 event contract between presentation backends and application behavior.
 
+## Implementation status
+
+The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
+
+- scene layers commit `pass_through`, `activate`, `move_anchor`, or `route_pointer` policy with
+  their visual/input state;
+- a fixed-capacity common queue assigns monotonic sequence ids and converts overflow into one
+  observable resync event;
+- Win32 performs hit testing, capture, and host movement immediately, then emits activation and
+  move lifecycle events without calling application behavior from `WndProc`;
+- `EidolonApp` drains those events before simulation, advances the matching current dialogue
+  layer, and performs one final layout reflow after native movement.
+
+This checkpoint does not yet emit output/DPI, graphics-reset, close, or routed-pointer events.
+`sdl_window_legacy` still reaches equivalent product behavior through the existing SDL event path
+rather than this presentation queue. Both are explicit remaining parity work, and the Windows
+interaction behavior still requires owner-controlled visual confirmation.
+
 ## Goals
 
 - normalize presentation input and lifecycle events without erasing platform capabilities;
@@ -68,8 +86,7 @@ The common `presentation` layer owns:
 
 Scene publication owns each layer's interaction policy. A backend must not infer permanent product
 behavior from `EIDOLON_SCENE_LAYER_BODY` or `EIDOLON_SCENE_LAYER_DIALOGUE`. The current
-DirectComposition checkpoint does infer body dragging from layer kind; the first event-contract
-implementation replaces that transitional behavior with committed policy.
+DirectComposition implementation uses committed policy rather than layer kind.
 
 Session, dialogue, affect, persona, and body systems never receive native platform events directly.
 

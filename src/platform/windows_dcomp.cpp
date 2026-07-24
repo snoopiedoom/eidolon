@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "platform/windows_dcomp.h"
+#include "presentation_event_queue.h"
 #include "presentation_internal.h"
 
 #include <SDL3/SDL.h>
@@ -21,6 +22,7 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"EidolonDirectCompositionHost";
 constexpr size_t kTargetCapacity = EIDOLON_SCENE_LAYER_CAPACITY * 2U;
 constexpr float kPi = 3.14159265358979323846F;
+constexpr LONG kActivationDragThreshold = 4L;
 
 struct DcompTarget {
     EidolonSceneLayerId layer = {};
@@ -40,9 +42,17 @@ struct DcompTarget {
     float pending_offset_y = 0.0F;
     float committed_offset_x = 0.0F;
     float committed_offset_y = 0.0F;
-    EidolonSceneLayerKind pending_kind = EIDOLON_SCENE_LAYER_TRANSIENT;
-    EidolonSceneLayerKind committed_kind = EIDOLON_SCENE_LAYER_TRANSIENT;
+    EidolonSceneInteractionPolicy pending_interaction = EIDOLON_SCENE_INTERACTION_PASS_THROUGH;
+    EidolonSceneInteractionPolicy committed_interaction = EIDOLON_SCENE_INTERACTION_PASS_THROUGH;
+    uint64_t pending_scene_revision = 0U;
+    uint64_t committed_scene_revision = 0U;
     bool occupied = false;
+};
+
+struct HitTestResult {
+    DcompTarget *target = nullptr;
+    float layer_x = 0.0F;
+    float layer_y = 0.0F;
 };
 
 struct Win32DcompPresentation {
@@ -58,13 +68,18 @@ struct Win32DcompPresentation {
     IDCompositionVisual *root = nullptr;
     DcompTarget targets[kTargetCapacity] = {};
     DcompTarget *input_order[kTargetCapacity] = {};
+    EidolonPresentationEventQueue event_queue = {};
     size_t input_count = 0U;
     POINT drag_cursor_origin = {};
     POINT drag_window_origin = {};
+    POINT activation_cursor_origin = {};
+    EidolonSceneLayerId interaction_layer = {};
+    uint64_t interaction_scene_revision = 0U;
     bool visible = false;
     bool com_initialized = false;
     bool input_suspended = false;
     bool dragging = false;
+    bool activation_pending = false;
 };
 
 template <typename Interface> void release(Interface *&object) {
@@ -86,13 +101,15 @@ Win32DcompPresentation *window_backend(HWND window) {
     return reinterpret_cast<Win32DcompPresentation *>(GetWindowLongPtrW(window, GWLP_USERDATA));
 }
 
-DcompTarget *hit_test(Win32DcompPresentation *backend, float client_x, float client_y) {
+HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float client_y) {
+    HitTestResult result;
     if (backend == nullptr || backend->input_suspended) {
-        return nullptr;
+        return result;
     }
     for (size_t index = backend->input_count; index > 0U; --index) {
         DcompTarget *target = backend->input_order[index - 1U];
-        if (target == nullptr || !target->occupied || target->alpha_mask == nullptr) {
+        if (target == nullptr || !target->occupied || target->alpha_mask == nullptr ||
+            target->committed_interaction == EIDOLON_SCENE_INTERACTION_PASS_THROUGH) {
             continue;
         }
         const D2D_MATRIX_3X2_F &matrix = target->committed_matrix;
@@ -113,10 +130,39 @@ DcompTarget *hit_test(Win32DcompPresentation *backend, float client_x, float cli
         const size_t pixel = static_cast<size_t>(source_y) * static_cast<size_t>(target->width) +
                              static_cast<size_t>(source_x);
         if (target->alpha_mask[pixel] > 8U) {
-            return target;
+            result.target = target;
+            result.layer_x = source_x;
+            result.layer_y = source_y;
+            return result;
         }
     }
-    return nullptr;
+    return result;
+}
+
+EidolonPresentationGeometry current_geometry(Win32DcompPresentation *backend) {
+    RECT bounds = {};
+    if (backend == nullptr || !GetWindowRect(backend->window, &bounds)) {
+        return {};
+    }
+    return {
+        bounds.left,
+        bounds.top,
+        bounds.right - bounds.left,
+        bounds.bottom - bounds.top,
+    };
+}
+
+bool enqueue_event(Win32DcompPresentation *backend, EidolonPresentationEventKind kind,
+                   EidolonSceneLayerId layer, uint64_t scene_revision, float host_x, float host_y,
+                   float layer_x, float layer_y) {
+    if (backend == nullptr || kind == EIDOLON_PRESENTATION_EVENT_NONE) {
+        return false;
+    }
+    const EidolonPresentationEvent event = {
+        kind,   0U,     SDL_GetTicksNS(), scene_revision, {1U}, layer, current_geometry(backend),
+        host_x, host_y, layer_x,          layer_y,
+    };
+    return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
 bool start_drag(Win32DcompPresentation *backend) {
@@ -160,18 +206,36 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_NCHITTEST: {
         POINT cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         ScreenToClient(window, &cursor);
-        return hit_test(backend, static_cast<float>(cursor.x), static_cast<float>(cursor.y)) !=
-                       nullptr
+        return hit_test(backend, static_cast<float>(cursor.x), static_cast<float>(cursor.y))
+                           .target != nullptr
                    ? HTCLIENT
                    : HTTRANSPARENT;
     }
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_LBUTTONDOWN: {
-        DcompTarget *target = hit_test(backend, static_cast<float>(GET_X_LPARAM(lparam)),
-                                       static_cast<float>(GET_Y_LPARAM(lparam)));
-        if (target != nullptr && target->committed_kind == EIDOLON_SCENE_LAYER_BODY) {
-            (void)start_drag(backend);
+        const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+        const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+        const HitTestResult hit = hit_test(backend, host_x, host_y);
+        if (hit.target == nullptr || backend == nullptr) {
+            return 0;
+        }
+        backend->interaction_layer = hit.target->layer;
+        backend->interaction_scene_revision = hit.target->committed_scene_revision;
+        if (hit.target->committed_interaction == EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR) {
+            if (start_drag(backend)) {
+                (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
+                                    backend->interaction_layer, backend->interaction_scene_revision,
+                                    host_x, host_y, hit.layer_x, hit.layer_y);
+            } else {
+                backend->interaction_layer = {};
+                backend->interaction_scene_revision = 0U;
+            }
+        } else if (hit.target->committed_interaction == EIDOLON_SCENE_INTERACTION_ACTIVATE) {
+            backend->activation_pending = GetCursorPos(&backend->activation_cursor_origin) != FALSE;
+            if (backend->activation_pending) {
+                SetCapture(window);
+            }
         }
         return 0;
     }
@@ -188,11 +252,59 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
             }
         }
         return 0;
-    case WM_LBUTTONUP:
-        stop_drag(backend, true);
+    case WM_LBUTTONUP: {
+        const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+        const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+        if (backend != nullptr && backend->dragging) {
+            const EidolonSceneLayerId layer = backend->interaction_layer;
+            const uint64_t scene_revision = backend->interaction_scene_revision;
+            stop_drag(backend, true);
+            (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED, layer,
+                                scene_revision, host_x, host_y, 0.0F, 0.0F);
+            backend->interaction_layer = {};
+            backend->interaction_scene_revision = 0U;
+        } else if (backend != nullptr && backend->activation_pending) {
+            POINT cursor = {};
+            const bool cursor_valid = GetCursorPos(&cursor) != FALSE;
+            const LONG moved_x = cursor_valid
+                                     ? std::abs(cursor.x - backend->activation_cursor_origin.x)
+                                     : kActivationDragThreshold + 1L;
+            const LONG moved_y = cursor_valid
+                                     ? std::abs(cursor.y - backend->activation_cursor_origin.y)
+                                     : kActivationDragThreshold + 1L;
+            const HitTestResult hit = hit_test(backend, host_x, host_y);
+            const bool activated = hit.target != nullptr &&
+                                   hit.target->layer.value == backend->interaction_layer.value &&
+                                   moved_x <= kActivationDragThreshold &&
+                                   moved_y <= kActivationDragThreshold;
+            const EidolonSceneLayerId layer = backend->interaction_layer;
+            const uint64_t scene_revision = backend->interaction_scene_revision;
+            backend->activation_pending = false;
+            backend->interaction_layer = {};
+            backend->interaction_scene_revision = 0U;
+            if (GetCapture() == window) {
+                ReleaseCapture();
+            }
+            if (activated) {
+                (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED, layer,
+                                    scene_revision, host_x, host_y, hit.layer_x, hit.layer_y);
+            }
+        }
         return 0;
+    }
     case WM_CAPTURECHANGED:
-        stop_drag(backend, false);
+        if (backend != nullptr && backend->dragging) {
+            const EidolonSceneLayerId layer = backend->interaction_layer;
+            const uint64_t scene_revision = backend->interaction_scene_revision;
+            stop_drag(backend, false);
+            (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED, layer,
+                                scene_revision, 0.0F, 0.0F, 0.0F, 0.0F);
+        }
+        if (backend != nullptr) {
+            backend->activation_pending = false;
+            backend->interaction_layer = {};
+            backend->interaction_scene_revision = 0U;
+        }
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -344,13 +456,30 @@ bool begin_interactive_move(void *opaque) {
 void suspend_input_region(void *opaque) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     backend->input_suspended = true;
-    stop_drag(backend, true);
+    if (backend->dragging) {
+        const EidolonSceneLayerId layer = backend->interaction_layer;
+        const uint64_t scene_revision = backend->interaction_scene_revision;
+        stop_drag(backend, true);
+        (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED, layer,
+                            scene_revision, 0.0F, 0.0F, 0.0F, 0.0F);
+    }
+    backend->activation_pending = false;
+    backend->interaction_layer = {};
+    backend->interaction_scene_revision = 0U;
+    if (GetCapture() == backend->window) {
+        ReleaseCapture();
+    }
 }
 
 bool update_input_region(void *opaque) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     backend->input_suspended = false;
     return true;
+}
+
+bool poll_event(void *opaque, EidolonPresentationEvent *event) {
+    auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    return eidolon_presentation_event_queue_poll(&backend->event_queue, event);
 }
 
 bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationTarget id,
@@ -468,7 +597,7 @@ bool submit_target(void *opaque, EidolonPresentationTarget id, uint64_t generati
 }
 
 bool configure_layer(Win32DcompPresentation *backend,
-                     const EidolonPresentationCommittedLayer &committed) {
+                     const EidolonPresentationCommittedLayer &committed, uint64_t scene_revision) {
     DcompTarget *target = find_target(backend, committed.target, committed.target_generation);
     if (target == nullptr || target->width != committed.target_width ||
         target->height != committed.target_height) {
@@ -500,7 +629,8 @@ bool configure_layer(Win32DcompPresentation *backend,
     target->pending_matrix = matrix;
     target->pending_offset_x = committed.scene.bounds.x - static_cast<float>(host.x);
     target->pending_offset_y = committed.scene.bounds.y - static_cast<float>(host.y);
-    target->pending_kind = committed.scene.kind;
+    target->pending_interaction = committed.scene.interaction;
+    target->pending_scene_revision = scene_revision;
     return hresult_ok(target->transform->SetMatrix(target->pending_matrix),
                       "IDCompositionMatrixTransform::SetMatrix") &&
            hresult_ok(target->visual->SetOffsetX(target->pending_offset_x),
@@ -539,7 +669,7 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
     IDCompositionVisual *previous = nullptr;
     for (size_t index = 0U; index < count; ++index) {
         const EidolonPresentationCommittedLayer &layer = commit->layers[order[index]];
-        if (!configure_layer(backend, layer)) {
+        if (!configure_layer(backend, layer, commit->revision)) {
             return false;
         }
         DcompTarget *target = find_target(backend, layer.target, layer.target_generation);
@@ -559,7 +689,8 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
         target->committed_matrix = target->pending_matrix;
         target->committed_offset_x = target->pending_offset_x;
         target->committed_offset_y = target->pending_offset_y;
-        target->committed_kind = target->pending_kind;
+        target->committed_interaction = target->pending_interaction;
+        target->committed_scene_revision = target->pending_scene_revision;
         backend->input_order[backend->input_count++] = target;
     }
     return true;
@@ -573,6 +704,7 @@ bool present(void *opaque) {
 bool initialize_backend(Win32DcompPresentation *backend, const EidolonWin32DcompConfig *config) {
     backend->instance = GetModuleHandleW(nullptr);
     backend->visible = config->visible;
+    eidolon_presentation_event_queue_init(&backend->event_queue);
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(com_result)) {
         backend->com_initialized = true;
@@ -659,6 +791,7 @@ eidolon_win32_dcomp_presentation_create(const EidolonWin32DcompConfig *config) {
         begin_interactive_move,
         suspend_input_region,
         update_input_region,
+        poll_event,
         create_target,
         destroy_target,
         set_target_alpha_mask,
