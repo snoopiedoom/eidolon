@@ -14,6 +14,8 @@
 #include "platform/windows_dcomp.h"
 #endif
 
+#include <stdlib.h>
+
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
 #define EVENT_BATCH_LIMIT 128U
 #define EVENT_PRESSURE_LOG_INTERVAL_MS 1000U
@@ -708,10 +710,7 @@ static SDL_FRect legacy_body_rect(const EidolonApp *app, float scale, int canvas
                        width, height};
 }
 
-static SDL_FPoint current_body_global_center(const EidolonApp *app) {
-    int window_x = 0;
-    int window_y = 0;
-    (void)presentation_position(app, &window_x, &window_y);
+static SDL_FPoint body_global_center_at(const EidolonApp *app, int window_x, int window_y) {
     const SDL_FRect body =
         app->body_rect_initialized
             ? app->body_rect
@@ -721,6 +720,13 @@ static SDL_FPoint current_body_global_center(const EidolonApp *app) {
         (float)window_x + (body.x + body.w * 0.5F) * app->window_coordinate_scale,
         (float)window_y + (body.y + body.h * 0.5F) * app->window_coordinate_scale,
     };
+}
+
+static SDL_FPoint current_body_global_center(const EidolonApp *app) {
+    int window_x = 0;
+    int window_y = 0;
+    (void)presentation_position(app, &window_x, &window_y);
+    return body_global_center_at(app, window_x, window_y);
 }
 
 static void restore_body_global_center(EidolonApp *app, SDL_FPoint center) {
@@ -1222,6 +1228,65 @@ static void apply_settings_layer(EidolonApp *app, const EidolonUserSettings *set
     app->user_settings_applying = was_applying;
 }
 
+static bool presentation_backend_is(const EidolonPresentation *presentation,
+                                    const char *backend_name) {
+    return presentation != NULL && backend_name != NULL &&
+           SDL_strcmp(eidolon_presentation_backend_name(presentation), backend_name) == 0;
+}
+
+static bool presentation_test_hidden(void) {
+#if !defined(NDEBUG)
+    const char *hidden_test = SDL_getenv("EIDOLON_PRESENTATION_TEST_HIDDEN");
+    return hidden_test != NULL && SDL_strcmp(hidden_test, "1") == 0;
+#else
+    return false;
+#endif
+}
+
+static EidolonPresentation *create_sdl_legacy_presentation(bool snapshot_mode, bool start_hidden,
+                                                            int width, int height) {
+    SDL_WindowFlags flags =
+        snapshot_mode ? SDL_WINDOW_HIDDEN
+                      : SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS |
+                            SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (start_hidden || presentation_test_hidden()) {
+        flags |= SDL_WINDOW_HIDDEN;
+    }
+    const EidolonSdlLegacyConfig config = {
+        .title = "Eidolon",
+        .width = width,
+        .height = height,
+        .window_flags = flags,
+    };
+    return eidolon_sdl_legacy_presentation_create(&config);
+}
+
+#if defined(_WIN32)
+static EidolonPresentation *
+create_win32_dcomp_presentation(const EidolonPresentationGeometry *geometry) {
+#if !defined(NDEBUG)
+    const char *fail_create = SDL_getenv("EIDOLON_DCOMP_TEST_FAIL_CREATE");
+    if (fail_create != NULL && SDL_strcmp(fail_create, "1") == 0) {
+        SDL_SetError("forced deterministic DirectComposition creation failure");
+        return NULL;
+    }
+#endif
+    bool visible = true;
+#if !defined(NDEBUG)
+    visible = !presentation_test_hidden();
+#endif
+    const EidolonWin32DcompConfig config = {
+        .title = "Eidolon",
+        .x = geometry != NULL ? geometry->x : 0,
+        .y = geometry != NULL ? geometry->y : 0,
+        .width = geometry != NULL ? geometry->width : EIDOLON_WINDOW_WIDTH,
+        .height = geometry != NULL ? geometry->height : EIDOLON_WINDOW_HEIGHT,
+        .visible = visible,
+    };
+    return eidolon_win32_dcomp_presentation_create(&config);
+}
+#endif
+
 bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     SDL_zero(*app);
     app->snapshot_mode = mode == EIDOLON_APP_SNAPSHOT;
@@ -1286,68 +1351,75 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         !app->snapshot_mode ? SDL_getenv("EIDOLON_PRESENTATION_BACKEND") : NULL;
     const bool native_presentation_requested =
         presentation_override != NULL && strcmp(presentation_override, "win32_dcomp") == 0;
+    char presentation_fallback_reason[256] = "";
 #if defined(_WIN32)
     if (native_presentation_requested) {
-        const EidolonWin32DcompConfig presentation_config = {
-            .title = "Eidolon",
-            .x = 0,
-            .y = 0,
-            .width = EIDOLON_WINDOW_WIDTH,
-            .height = EIDOLON_WINDOW_HEIGHT,
-            .visible = true,
-        };
-        app->presentation = eidolon_win32_dcomp_presentation_create(&presentation_config);
+        app->presentation = create_win32_dcomp_presentation(NULL);
         if (app->presentation == NULL) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "DirectComposition presentation creation failed: %s", SDL_GetError());
-            return false;
+            SDL_strlcpy(presentation_fallback_reason, SDL_GetError(),
+                        sizeof(presentation_fallback_reason));
+            SDL_ClearError();
         }
     }
 #else
     (void)presentation_override;
     if (native_presentation_requested) {
-        SDL_SetError("win32_dcomp is available only on Windows");
-        return false;
+        SDL_strlcpy(presentation_fallback_reason,
+                    "win32_dcomp is available only on Windows",
+                    sizeof(presentation_fallback_reason));
     }
 #endif
-    if (!native_presentation_requested) {
-        const SDL_WindowFlags flags =
-            app->snapshot_mode ? SDL_WINDOW_HIDDEN
-                               : SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS |
-                                     SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-        const EidolonSdlLegacyConfig presentation_config = {
-            .title = "Eidolon",
-            .width = EIDOLON_WINDOW_WIDTH,
-            .height = EIDOLON_WINDOW_HEIGHT,
-            .window_flags = flags,
-        };
-        app->presentation = eidolon_sdl_legacy_presentation_create(&presentation_config);
+    if (app->presentation == NULL) {
+        app->presentation = create_sdl_legacy_presentation(
+            app->snapshot_mode, false, EIDOLON_WINDOW_WIDTH, EIDOLON_WINDOW_HEIGHT);
     }
     if (app->presentation == NULL) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation creation failed: %s",
                      SDL_GetError());
         return false;
     }
+    bool native_presentation_active =
+        presentation_backend_is(app->presentation, "win32_dcomp");
     EidolonPresentationEnvironment initial_environment;
     if (eidolon_presentation_get_environment(app->presentation, &initial_environment)) {
         app->presentation_environment = initial_environment;
         app->presentation_environment_valid = true;
         app->applied_environment_revision = initial_environment.revision;
-    } else if (native_presentation_requested) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation environment bootstrap failed: %s",
-                     SDL_GetError());
-        return false;
+    } else if (native_presentation_active) {
+        SDL_strlcpy(presentation_fallback_reason, SDL_GetError(),
+                    sizeof(presentation_fallback_reason));
+        eidolon_presentation_destroy(app->presentation);
+        app->presentation = create_sdl_legacy_presentation(
+            app->snapshot_mode, false, EIDOLON_WINDOW_WIDTH, EIDOLON_WINDOW_HEIGHT);
+        if (app->presentation == NULL) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Presentation fallback creation failed after environment error: %s",
+                         SDL_GetError());
+            return false;
+        }
+        native_presentation_active = false;
+        if (eidolon_presentation_get_environment(app->presentation, &initial_environment)) {
+            app->presentation_environment = initial_environment;
+            app->presentation_environment_valid = true;
+            app->applied_environment_revision = initial_environment.revision;
+        } else {
+            SDL_ClearError();
+        }
     } else {
         SDL_ClearError();
     }
-    if (!native_presentation_requested) {
+    if (!native_presentation_active) {
         app->window = eidolon_sdl_legacy_window(app->presentation);
         app->renderer = eidolon_sdl_legacy_renderer(app->presentation);
     }
-    eidolon_log_write("renderer", "presentation=%s graphics=%s capabilities=0x%llx",
+    eidolon_log_write("renderer",
+                      "presentation requested=%s active=%s graphics=%s capabilities=0x%llx%s%s",
+                      native_presentation_requested ? "win32_dcomp" : "sdl_window_legacy",
                       eidolon_presentation_backend_name(app->presentation),
                       app->renderer != NULL ? SDL_GetRendererName(app->renderer) : "direct3d11",
-                      (unsigned long long)eidolon_presentation_capabilities(app->presentation));
+                      (unsigned long long)eidolon_presentation_capabilities(app->presentation),
+                      presentation_fallback_reason[0] != '\0' ? " fallback_reason=" : "",
+                      presentation_fallback_reason);
 
     app->text_renderer = eidolon_text_renderer_create(app->renderer, EIDOLON_FONT_PATH, 12.0F);
     if (app->text_renderer == NULL) {
@@ -1362,7 +1434,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
 
     if (!ensure_portrait(app)) {
-        if (app->renderer == NULL) {
+        if (native_presentation_active) {
             eidolon_log_write("portrait", "native presentation requires a portrait body");
             return false;
         }
@@ -2188,15 +2260,19 @@ static void handle_presentation_event(EidolonApp *app, const EidolonPresentation
         break;
     case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
         if (event->data.graphics.reset_kind == EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS) {
+            eidolon_presentation_invalidate_targets(app->presentation);
             app->hit_test_initialized = false;
             eidolon_model_request_redraw(app->model);
             eidolon_log_write("renderer",
-                              "presentation targets reset; model redraw requested");
+                              "presentation targets invalidated; redraw requested");
         } else {
-            eidolon_log_write(
-                "renderer", "presentation graphics reset kind=%d; restart required",
-                (int)event->data.graphics.reset_kind);
-            app->running = false;
+            app->presentation_recovery_pending = true;
+            if (event->data.graphics.reset_kind > app->presentation_recovery_kind) {
+                app->presentation_recovery_kind = event->data.graphics.reset_kind;
+            }
+            eidolon_log_write("renderer", "presentation recovery requested kind=%d backend=%s",
+                              (int)event->data.graphics.reset_kind,
+                              eidolon_presentation_backend_name(app->presentation));
         }
         break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
@@ -2331,6 +2407,217 @@ static void handle_routed_pointer(EidolonApp *app, const EidolonPresentationEven
     }
 }
 
+static const char *
+presentation_reset_name(EidolonPresentationGraphicsResetKind reset_kind) {
+    switch (reset_kind) {
+    case EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS:
+        return "targets";
+    case EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE:
+        return "device";
+    case EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND:
+        return "backend";
+    case EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE:
+        break;
+    }
+    return "unknown";
+}
+
+static void discard_recovery_presentation(EidolonApp *app) {
+    eidolon_event_pump_destroy(app->event_pump);
+    app->event_pump = NULL;
+    if (app->renderer != NULL) {
+        if (app->text_renderer != NULL) {
+            (void)eidolon_text_renderer_set_renderer(app->text_renderer, NULL);
+        }
+        (void)eidolon_portrait_set_renderer(app->portrait, NULL);
+    }
+    eidolon_presentation_destroy(app->presentation);
+    app->presentation = NULL;
+    app->window = NULL;
+    app->renderer = NULL;
+}
+
+static bool activate_recovery_presentation(EidolonApp *app,
+                                           EidolonPresentation *presentation,
+                                           const EidolonPresentationGeometry *geometry,
+                                           SDL_FPoint body_center) {
+    if (presentation == NULL || geometry == NULL) {
+        SDL_SetError("invalid presentation recovery candidate");
+        return false;
+    }
+    app->presentation = presentation;
+    if (!eidolon_presentation_set_geometry(presentation, geometry) ||
+        !eidolon_presentation_sync_host(presentation)) {
+        return false;
+    }
+
+    EidolonPresentationEnvironment environment;
+    if (!eidolon_presentation_get_environment(presentation, &environment)) {
+        return false;
+    }
+
+    if (presentation_backend_is(presentation, "sdl_window_legacy")) {
+        app->window = eidolon_sdl_legacy_window(presentation);
+        app->renderer = eidolon_sdl_legacy_renderer(presentation);
+        if (app->renderer == NULL ||
+            !eidolon_portrait_set_renderer(app->portrait, app->renderer) ||
+            (app->text_renderer != NULL &&
+             !eidolon_text_renderer_set_renderer(app->text_renderer, app->renderer))) {
+            return false;
+        }
+    }
+    app->event_pump = eidolon_event_pump_create(presentation, app->settings_ui);
+    if (app->event_pump == NULL) {
+        return false;
+    }
+
+    app->presentation_environment = environment;
+    app->presentation_environment_valid = true;
+    app->presentation_environment_pending = false;
+    app->presentation_move_completion_pending = false;
+    app->presentation_resync_pending = false;
+    app->applied_environment_revision = environment.revision;
+    app->bubble_output.value = 0U;
+    (void)update_display_metrics(app);
+    eidolon_app_set_vsync(app, app->vsync_enabled);
+    restore_body_global_center(app, body_center);
+    reflow_overlay_layout(app, app->model_scale);
+    app->hit_test_initialized = false;
+    eidolon_model_request_redraw(app->model);
+
+    if (!eidolon_draw_frame(app) ||
+        !eidolon_presentation_configure_host(app->presentation) ||
+        (app->window != NULL && !presentation_test_hidden() &&
+         !SDL_ShowWindow(app->window))) {
+        return false;
+    }
+    return true;
+}
+
+static void finish_recovery_test_if_requested(EidolonApp *app) {
+#if !defined(NDEBUG)
+    const char *exit_after_recovery =
+        SDL_getenv("EIDOLON_PRESENTATION_TEST_EXIT_AFTER_RECOVERY");
+    if (exit_after_recovery != NULL &&
+        SDL_strcmp(exit_after_recovery, "1") == 0) {
+        app->running = false;
+    }
+#else
+    (void)app;
+#endif
+}
+
+static bool recover_presentation(EidolonApp *app) {
+    if (!app->presentation_recovery_pending || app->presentation == NULL) {
+        return true;
+    }
+    const EidolonPresentationGraphicsResetKind reset_kind =
+        app->presentation_recovery_kind;
+    char previous_backend[48];
+    SDL_strlcpy(previous_backend, eidolon_presentation_backend_name(app->presentation),
+                sizeof(previous_backend));
+    if (SDL_strcmp(previous_backend, "win32_dcomp") != 0) {
+        eidolon_log_write(
+            "renderer",
+            "presentation recovery unavailable requested=%s active=%s reset=%s; shutting down",
+            previous_backend, previous_backend, presentation_reset_name(reset_kind));
+        app->presentation_recovery_pending = false;
+        app->presentation_recovery_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE;
+        app->running = false;
+        return false;
+    }
+
+    EidolonPresentationGeometry geometry = {
+        .x = 0,
+        .y = 0,
+        .width = SDL_max(1, app->window_width),
+        .height = SDL_max(1, app->window_height),
+    };
+    if (!eidolon_presentation_get_geometry(app->presentation, &geometry) &&
+        app->presentation_environment_valid &&
+        (app->presentation_environment.valid_fields &
+         EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY) != 0U) {
+        geometry = app->presentation_environment.host_geometry;
+    }
+    const SDL_FPoint body_center = body_global_center_at(app, geometry.x, geometry.y);
+    end_primary_interaction(app);
+    end_model_rotation_drag(app);
+    eidolon_event_pump_destroy(app->event_pump);
+    app->event_pump = NULL;
+    eidolon_presentation_destroy(app->presentation);
+    app->presentation = NULL;
+    app->window = NULL;
+    app->renderer = NULL;
+
+    char native_failure[256] = "";
+#if defined(_WIN32)
+    bool force_fallback = false;
+#if !defined(NDEBUG)
+    const char *force_fallback_value =
+        SDL_getenv("EIDOLON_DCOMP_TEST_FORCE_RECOVERY_FALLBACK");
+    force_fallback =
+        force_fallback_value != NULL && SDL_strcmp(force_fallback_value, "1") == 0;
+#endif
+    EidolonPresentation *candidate =
+        force_fallback ? NULL : create_win32_dcomp_presentation(&geometry);
+    if (candidate != NULL &&
+        activate_recovery_presentation(app, candidate, &geometry, body_center)) {
+        app->presentation_recovery_pending = false;
+        app->presentation_recovery_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE;
+        app->native_drag_completed = true;
+        eidolon_log_write(
+            "renderer",
+            "presentation recovered requested=win32_dcomp active=win32_dcomp reset=%s",
+            presentation_reset_name(reset_kind));
+        eidolon_app_log_presentation_metrics(app);
+        finish_recovery_test_if_requested(app);
+        return true;
+    }
+    SDL_strlcpy(native_failure,
+                force_fallback ? "forced deterministic recovery fallback" : SDL_GetError(),
+                sizeof(native_failure));
+    if (candidate != NULL) {
+        discard_recovery_presentation(app);
+    }
+    SDL_ClearError();
+#else
+    SDL_strlcpy(native_failure, "win32_dcomp is unavailable",
+                sizeof(native_failure));
+#endif
+
+    EidolonPresentation *fallback = create_sdl_legacy_presentation(
+        false, true, SDL_max(1, geometry.width), SDL_max(1, geometry.height));
+    if (fallback != NULL &&
+        activate_recovery_presentation(app, fallback, &geometry, body_center)) {
+        app->presentation_recovery_pending = false;
+        app->presentation_recovery_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE;
+        app->native_drag_completed = true;
+        eidolon_log_write(
+            "renderer",
+            "presentation fallback requested=win32_dcomp active=sdl_window_legacy reset=%s "
+            "fallback_reason=%s",
+            presentation_reset_name(reset_kind), native_failure);
+        eidolon_app_log_presentation_metrics(app);
+        finish_recovery_test_if_requested(app);
+        return true;
+    }
+
+    char fallback_failure[256];
+    SDL_strlcpy(fallback_failure, SDL_GetError(), sizeof(fallback_failure));
+    if (fallback != NULL) {
+        discard_recovery_presentation(app);
+    }
+    app->presentation_recovery_pending = false;
+    app->presentation_recovery_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE;
+    app->running = false;
+    eidolon_log_write(
+        "renderer",
+        "presentation recovery failed requested=win32_dcomp active=none reset=%s "
+        "native_error=%s fallback_error=%s",
+        presentation_reset_name(reset_kind), native_failure, fallback_failure);
+    return false;
+}
+
 static void handle_app_event(EidolonApp *app, const EidolonAppEvent *event) {
     switch (event->kind) {
     case EIDOLON_APP_EVENT_QUIT_REQUESTED:
@@ -2393,6 +2680,21 @@ void eidolon_app_run(EidolonApp *app) {
     uint64_t next_hitch_log_ms = 0U;
     uint64_t pending_hitch_count = 0U;
     double pending_hitch_max_ms = 0.0;
+#if defined(_WIN32) && !defined(NDEBUG)
+    uint64_t dcomp_test_reset_after_frames = 0U;
+    uint64_t presented_frame_count = 0U;
+    bool dcomp_test_reset_injected = false;
+    const char *dcomp_test_reset_value =
+        SDL_getenv("EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES");
+    if (dcomp_test_reset_value != NULL) {
+        char *end = NULL;
+        const unsigned long long parsed =
+            strtoull(dcomp_test_reset_value, &end, 10);
+        if (end != dcomp_test_reset_value && *end == '\0' && parsed > 0U) {
+            dcomp_test_reset_after_frames = (uint64_t)parsed;
+        }
+    }
+#endif
     while (app->running) {
         EidolonAppEvent event;
         size_t event_count = 0U;
@@ -2417,6 +2719,20 @@ void eidolon_app_run(EidolonApp *app) {
         }
         event_count += drain_presentation_events(
             app, event_count < EVENT_BATCH_LIMIT ? EVENT_BATCH_LIMIT - event_count : 0U);
+        if (app->presentation_recovery_pending) {
+            if (!recover_presentation(app)) {
+                break;
+            }
+            if (!app->running) {
+                break;
+            }
+            now_ns = SDL_GetTicksNS();
+            eidolon_frame_clock_set_interval(&frame_clock, now_ns,
+                                             app->presentation_interval_ns);
+            frame_clock.previous_frame_ns = 0U;
+            frame_clock_software_paced = app->presentation_software_paced;
+            continue;
+        }
         if (!app->running) {
             break;
         }
@@ -2619,7 +2935,21 @@ void eidolon_app_run(EidolonApp *app) {
             eidolon_app_set_model_scale(app, app->model_scale);
         }
         eidolon_model_update(app->model, now_ms);
-        eidolon_draw_frame(app);
+        (void)eidolon_draw_frame(app);
+#if defined(_WIN32) && !defined(NDEBUG)
+        ++presented_frame_count;
+        if (!dcomp_test_reset_injected && dcomp_test_reset_after_frames > 0U &&
+            presented_frame_count >= dcomp_test_reset_after_frames &&
+            presentation_backend_is(app->presentation, "win32_dcomp")) {
+            dcomp_test_reset_injected = true;
+            eidolon_log_write(
+                "renderer",
+                "injecting deterministic DirectComposition device reset frame=%llu",
+                (unsigned long long)presented_frame_count);
+            (void)eidolon_win32_dcomp_test_inject_graphics_reset(
+                app->presentation, EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE);
+        }
+#endif
         eidolon_settings_ui_draw(app->settings_ui, app);
         flush_user_settings(app, false);
         if (frame_clock_software_paced) {

@@ -337,11 +337,31 @@ bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
         if (backend->device != nullptr && FAILED(backend->device->GetDeviceRemovedReason())) {
             reset_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE;
         }
-        backend->graphics_reset_pending = true;
-        (void)enqueue_structural_event(
-            backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind);
+        if (enqueue_structural_event(
+                backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind)) {
+            backend->graphics_reset_pending = true;
+        }
     }
     return false;
+}
+
+bool inject_graphics_reset(Win32DcompPresentation *backend,
+                           EidolonPresentationGraphicsResetKind reset_kind) {
+    if (backend == nullptr ||
+        (reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE &&
+         reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND)) {
+        SDL_SetError("invalid DirectComposition graphics reset injection");
+        return false;
+    }
+    if (backend->graphics_reset_pending) {
+        return true;
+    }
+    if (!enqueue_structural_event(
+            backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind)) {
+        return false;
+    }
+    backend->graphics_reset_pending = true;
+    return true;
 }
 
 bool start_drag(Win32DcompPresentation *backend) {
@@ -626,18 +646,21 @@ void destroy_target_resource(DcompTarget &target) {
     target = {};
 }
 
-bool acquire_back_buffer(DcompTarget &target) {
+bool acquire_back_buffer(Win32DcompPresentation *backend, DcompTarget &target) {
     if (target.back_buffer != nullptr) {
         return true;
     }
-    return hresult_ok(target.swap_chain->GetBuffer(0U, __uuidof(ID3D11Texture2D),
-                                                   reinterpret_cast<void **>(&target.back_buffer)),
-                      "composition swap-chain GetBuffer(0)");
+    return graphics_hresult_ok(
+        backend,
+        target.swap_chain->GetBuffer(0U, __uuidof(ID3D11Texture2D),
+                                     reinterpret_cast<void **>(&target.back_buffer)),
+        "composition swap-chain GetBuffer(0)");
 }
 
 void destroy_backend(void *opaque) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     stop_drag(backend, true);
+    stop_pointer_routing(backend, true);
     if (backend->root != nullptr) {
         backend->root->RemoveAllVisuals();
     }
@@ -1122,6 +1145,10 @@ bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationT
                    uint64_t generation, uint32_t width, uint32_t height,
                    EidolonPresentationAlphaMode alpha_mode) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    if (backend->graphics_reset_pending) {
+        SDL_SetError("DirectComposition graphics recovery is pending");
+        return false;
+    }
     if (alpha_mode != EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED) {
         SDL_SetError("DirectComposition targets require premultiplied alpha");
         return false;
@@ -1166,22 +1193,29 @@ bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationT
         destroy_target_resource(*target);
         return false;
     }
-    if (!hresult_ok(backend->factory->CreateSwapChainForComposition(backend->device, &description,
-                                                                    nullptr, &target->swap_chain),
-                    "CreateSwapChainForComposition") ||
-        !hresult_ok(backend->composition_device->CreateVisual(&target->visual),
-                    "IDCompositionDevice::CreateVisual") ||
-        !hresult_ok(target->visual->SetContent(target->swap_chain),
-                    "IDCompositionVisual::SetContent") ||
-        !hresult_ok(backend->composition_device->CreateEffectGroup(&target->effect),
-                    "IDCompositionDevice::CreateEffectGroup") ||
-        !hresult_ok(target->effect->SetOpacity(1.0F), "IDCompositionEffectGroup::SetOpacity") ||
-        !hresult_ok(target->visual->SetEffect(target->effect), "IDCompositionVisual::SetEffect") ||
-        !hresult_ok(backend->composition_device->CreateMatrixTransform(&target->transform),
-                    "IDCompositionDevice::CreateMatrixTransform") ||
-        !hresult_ok(target->visual->SetTransform(target->transform),
-                    "IDCompositionVisual::SetTransform") ||
-        !acquire_back_buffer(*target)) {
+    if (!graphics_hresult_ok(
+            backend,
+            backend->factory->CreateSwapChainForComposition(backend->device, &description, nullptr,
+                                                            &target->swap_chain),
+            "CreateSwapChainForComposition") ||
+        !graphics_hresult_ok(backend,
+                             backend->composition_device->CreateVisual(&target->visual),
+                             "IDCompositionDevice::CreateVisual") ||
+        !graphics_hresult_ok(backend, target->visual->SetContent(target->swap_chain),
+                             "IDCompositionVisual::SetContent") ||
+        !graphics_hresult_ok(backend,
+                             backend->composition_device->CreateEffectGroup(&target->effect),
+                             "IDCompositionDevice::CreateEffectGroup") ||
+        !graphics_hresult_ok(backend, target->effect->SetOpacity(1.0F),
+                             "IDCompositionEffectGroup::SetOpacity") ||
+        !graphics_hresult_ok(backend, target->visual->SetEffect(target->effect),
+                             "IDCompositionVisual::SetEffect") ||
+        !graphics_hresult_ok(
+            backend, backend->composition_device->CreateMatrixTransform(&target->transform),
+            "IDCompositionDevice::CreateMatrixTransform") ||
+        !graphics_hresult_ok(backend, target->visual->SetTransform(target->transform),
+                             "IDCompositionVisual::SetTransform") ||
+        !acquire_back_buffer(backend, *target)) {
         destroy_target_resource(*target);
         return false;
     }
@@ -1219,6 +1253,10 @@ bool set_target_alpha_mask(void *opaque, EidolonPresentationTarget id, uint64_t 
 
 bool submit_target(void *opaque, EidolonPresentationTarget id, uint64_t generation) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    if (backend->graphics_reset_pending) {
+        SDL_SetError("DirectComposition graphics recovery is pending");
+        return false;
+    }
     DcompTarget *target = find_target(backend, id, generation);
     if (target == nullptr) {
         SDL_SetError("DirectComposition target generation is stale");
@@ -1268,18 +1306,22 @@ bool configure_layer(Win32DcompPresentation *backend,
     target->pending_offset_y = committed.scene.bounds.y - static_cast<float>(host.y);
     target->pending_interaction = committed.scene.interaction;
     target->pending_scene_revision = scene_revision;
-    return hresult_ok(target->transform->SetMatrix(target->pending_matrix),
-                      "IDCompositionMatrixTransform::SetMatrix") &&
-           hresult_ok(target->visual->SetOffsetX(target->pending_offset_x),
-                      "IDCompositionVisual::SetOffsetX") &&
-           hresult_ok(target->visual->SetOffsetY(target->pending_offset_y),
-                      "IDCompositionVisual::SetOffsetY") &&
-           hresult_ok(target->effect->SetOpacity(committed.scene.opacity),
-                      "IDCompositionEffectGroup::SetOpacity");
+    return graphics_hresult_ok(backend, target->transform->SetMatrix(target->pending_matrix),
+                               "IDCompositionMatrixTransform::SetMatrix") &&
+           graphics_hresult_ok(backend, target->visual->SetOffsetX(target->pending_offset_x),
+                               "IDCompositionVisual::SetOffsetX") &&
+           graphics_hresult_ok(backend, target->visual->SetOffsetY(target->pending_offset_y),
+                               "IDCompositionVisual::SetOffsetY") &&
+           graphics_hresult_ok(backend, target->effect->SetOpacity(committed.scene.opacity),
+                               "IDCompositionEffectGroup::SetOpacity");
 }
 
 bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    if (backend->graphics_reset_pending) {
+        SDL_SetError("DirectComposition graphics recovery is pending");
+        return false;
+    }
     size_t order[EIDOLON_SCENE_LAYER_CAPACITY] = {};
     size_t count = 0U;
     for (size_t index = 0U; index < commit->layer_count; ++index) {
@@ -1300,7 +1342,8 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
         order[insertion] = candidate;
     }
 
-    if (!hresult_ok(backend->root->RemoveAllVisuals(), "IDCompositionVisual::RemoveAllVisuals")) {
+    if (!graphics_hresult_ok(backend, backend->root->RemoveAllVisuals(),
+                             "IDCompositionVisual::RemoveAllVisuals")) {
         return false;
     }
     IDCompositionVisual *previous = nullptr;
@@ -1310,8 +1353,9 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
             return false;
         }
         DcompTarget *target = find_target(backend, layer.target, layer.target_generation);
-        if (!hresult_ok(backend->root->AddVisual(target->visual, previous != nullptr, previous),
-                        "IDCompositionVisual::AddVisual")) {
+        if (!graphics_hresult_ok(
+                backend, backend->root->AddVisual(target->visual, previous != nullptr, previous),
+                "IDCompositionVisual::AddVisual")) {
             return false;
         }
         previous = target->visual;
@@ -1335,8 +1379,8 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
 }
 
 bool present(void *opaque) {
-    (void)opaque;
-    return true;
+    const auto *backend = static_cast<const Win32DcompPresentation *>(opaque);
+    return backend != nullptr && !backend->graphics_reset_pending;
 }
 
 bool initialize_backend(Win32DcompPresentation *backend, const EidolonWin32DcompConfig *config) {
@@ -1476,5 +1520,12 @@ extern "C" ID3D11Texture2D *eidolon_win32_dcomp_target_texture(EidolonPresentati
         SDL_SetError("DirectComposition target generation is unavailable");
         return nullptr;
     }
-    return acquire_back_buffer(*resource) ? resource->back_buffer : nullptr;
+    return acquire_back_buffer(backend, *resource) ? resource->back_buffer : nullptr;
+}
+
+extern "C" bool eidolon_win32_dcomp_test_inject_graphics_reset(
+    EidolonPresentation *presentation, EidolonPresentationGraphicsResetKind reset_kind) {
+    auto *backend = static_cast<Win32DcompPresentation *>(
+        eidolon_presentation_backend_context(presentation, "win32_dcomp"));
+    return inject_graphics_reset(backend, reset_kind);
 }

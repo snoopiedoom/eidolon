@@ -108,6 +108,8 @@ typedef struct EidolonApp {
     bool presentation_environment_pending;
     bool presentation_move_completion_pending;
     bool presentation_resync_pending;
+    bool presentation_recovery_pending;
+    EidolonPresentationGraphicsResetKind presentation_recovery_kind;
     uint64_t applied_environment_revision;
     EidolonPresentationEnvironment presentation_environment;
     int primary_session_slot;

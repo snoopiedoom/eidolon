@@ -170,6 +170,22 @@ int main() {
             std::fprintf(stderr, "native capture cancellation failed: %s\n", SDL_GetError());
             goto cleanup;
         }
+        if (!eidolon_win32_dcomp_test_inject_graphics_reset(
+                presentation, EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE) ||
+            !eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED ||
+            event.data.graphics.reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE ||
+            eidolon_presentation_present(presentation)) {
+            std::fprintf(stderr, "native graphics reset injection failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        if (!eidolon_win32_dcomp_test_inject_graphics_reset(
+                presentation, EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE) ||
+            eidolon_presentation_poll_event(presentation, &event)) {
+            std::fprintf(stderr, "native graphics reset deduplication failed: %s\n",
+                         SDL_GetError());
+            goto cleanup;
+        }
         SendMessageW(window, WM_CLOSE, 0U, 0U);
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED) {

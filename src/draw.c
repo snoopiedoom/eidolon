@@ -126,7 +126,7 @@ static bool append_dialogue_scene_layer(EidolonApp *app, EidolonSceneLayerInput 
     return true;
 }
 
-static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
+static bool publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
                                    const EidolonPortraitTransform *portrait_transform) {
     EidolonPresentationGeometry host = {
         .width = app->window_width,
@@ -203,7 +203,7 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             eidolon_log_write("renderer", "scene publication failed: %s", SDL_GetError());
             scene_failure_reported = true;
         }
-        return;
+        return false;
     }
 
     for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
@@ -225,6 +225,7 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
     if (fallback != NULL) {
         app->fallback_dialogue_layer = fallback->id;
     }
+    return true;
 }
 
 static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform *transform) {
@@ -288,12 +289,12 @@ static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform
     return eidolon_sdl_legacy_composite_portrait(app->presentation, update.target, transform);
 }
 
-static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
+static bool draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                                  const EidolonDialogue *dialogue, const char *title,
                                  size_t title_slot, size_t body_slot, uint64_t stable_key,
                                  float opacity) {
     if (opacity <= 0.0F) {
-        return;
+        return true;
     }
     const bool points_right =
         bubble->x + bubble->w * 0.5F < app->body_rect.x + app->body_rect.w * 0.5F;
@@ -328,7 +329,7 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                         (unsigned long long)update.content_revision, update.width, update.height);
                 } else if (!eidolon_presentation_target_for_layer(app->presentation, layer->id,
                                                                   &update)) {
-                    return;
+                    return false;
                 }
             } else
 #endif
@@ -341,7 +342,7 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                 const bool update_finished = eidolon_presentation_finish_target_update(
                     app->presentation, &update, content_valid);
                 if (raster_result == EIDOLON_SDL_LEGACY_RASTER_HOST_RESTORE_FAILED) {
-                    return;
+                    return false;
                 }
                 if (update_finished && content_valid) {
                     eidolon_log_write(
@@ -358,7 +359,7 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
         }
 
         if (native_targets) {
-            return;
+            return true;
         }
         const SDL_FRect destination = {
             bubble->x - BUBBLE_LAYER_PADDING,
@@ -368,23 +369,23 @@ static void draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
         };
         if (eidolon_sdl_legacy_composite_dialogue(app->presentation, update.target, &destination,
                                                   opacity)) {
-            return;
+            return true;
         }
     }
 
 direct_draw:
     if (native_targets) {
-        return;
+        return false;
     }
-    (void)eidolon_sdl_legacy_draw_dialogue(app->presentation, app->text_renderer,
-                                           app->dialogue_theme, bubble, dialogue, title, title_slot,
-                                           body_slot, opacity, points_right);
+    return eidolon_sdl_legacy_draw_dialogue(app->presentation, app->text_renderer,
+                                            app->dialogue_theme, bubble, dialogue, title,
+                                            title_slot, body_slot, opacity, points_right);
 }
 
-static void draw_scene(EidolonApp *app) {
+static bool draw_scene(EidolonApp *app) {
     const bool native_targets = compositor_targets_active(app);
     if (!native_targets && !eidolon_sdl_legacy_clear_host(app->presentation)) {
-        return;
+        return false;
     }
 
     const uint64_t now_ms = SDL_GetTicks();
@@ -395,35 +396,44 @@ static void draw_scene(EidolonApp *app) {
         portrait_active && eidolon_portrait_evaluate_transform(
                                app->portrait, app->body_rect.x, app->body_rect.y, app->body_rect.w,
                                app->body_rect.h, now_ms, &portrait_transform);
-    publish_scene_snapshot(app, now_ms, portrait_transform_ready ? &portrait_transform : NULL);
+    if (!publish_scene_snapshot(app, now_ms,
+                                portrait_transform_ready ? &portrait_transform : NULL)) {
+        return false;
+    }
+    bool scene_drawn = true;
     const size_t visible_sessions = eidolon_session_registry_visible_count(&app->session_registry);
     if (visible_sessions > 0U) {
         for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
             const EidolonSessionEntry *session =
                 eidolon_session_registry_at_slot_const(&app->session_registry, slot);
             if (session != NULL && app->bubble_rect_valid[slot]) {
-                draw_dialogue_bubble(app, &app->bubble_rects[slot], &session->dialogue,
-                                     session->title, TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
-                                     TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot,
-                                     dialogue_stable_key(session, slot),
-                                     eidolon_session_entry_opacity(session, now_ms));
+                const bool bubble_drawn = draw_dialogue_bubble(
+                    app, &app->bubble_rects[slot], &session->dialogue, session->title,
+                    TEXT_SLOT_DIALOGUE_TITLE_BASE + (size_t)slot,
+                    TEXT_SLOT_DIALOGUE_BODY_BASE + (size_t)slot,
+                    dialogue_stable_key(session, slot),
+                    eidolon_session_entry_opacity(session, now_ms));
+                scene_drawn = bubble_drawn && scene_drawn;
             }
         }
     } else if (app->state == EIDOLON_STATE_REVIEW && eidolon_dialogue_is_active(&app->dialogue)) {
         const SDL_FRect bubble = {17.0F, 16.0F, EIDOLON_BUBBLE_WIDTH, EIDOLON_BUBBLE_HEIGHT};
-        draw_dialogue_bubble(app, &bubble, &app->dialogue, "EIDOLON",
-                             TEXT_SLOT_DIALOGUE_TITLE_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
-                             TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
-                             SCENE_FALLBACK_DIALOGUE_KEY, 1.0F);
+        scene_drawn =
+            draw_dialogue_bubble(
+                app, &bubble, &app->dialogue, "EIDOLON",
+                TEXT_SLOT_DIALOGUE_TITLE_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
+                TEXT_SLOT_DIALOGUE_BODY_BASE + EIDOLON_VISIBLE_SESSION_CAPACITY,
+                SCENE_FALLBACK_DIALOGUE_KEY, 1.0F) &&
+            scene_drawn;
     }
 
     if (portrait_active) {
-        const bool rendered =
+        bool rendered =
             portrait_transform_ready && draw_portrait_target(app, &portrait_transform);
         if (!native_targets && !rendered && portrait_transform_ready) {
             SDL_ClearError();
-            (void)eidolon_sdl_legacy_draw_portrait(app->presentation, app->portrait,
-                                                   &portrait_transform);
+            rendered = eidolon_sdl_legacy_draw_portrait(app->presentation, app->portrait,
+                                                        &portrait_transform);
         }
         if (!portrait_transform_ready || !rendered) {
             static bool portrait_draw_reported = false;
@@ -432,6 +442,7 @@ static void draw_scene(EidolonApp *app) {
                 portrait_draw_reported = true;
             }
         }
+        scene_drawn = portrait_transform_ready && rendered && scene_drawn;
     } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
                eidolon_model_texture(app->model) != NULL) {
         SDL_Texture *model_texture = eidolon_model_texture(app->model);
@@ -443,12 +454,18 @@ static void draw_scene(EidolonApp *app) {
                               rendered ? "yes" : "no", SDL_GetError());
             model_draw_reported = true;
         }
+        scene_drawn = rendered && scene_drawn;
     } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_SPRITE &&
                app->atlas != NULL) {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
-        (void)eidolon_sdl_legacy_draw_sprite(app->presentation, app->atlas, &source,
-                                             &app->body_rect);
+        scene_drawn =
+            eidolon_sdl_legacy_draw_sprite(app->presentation, app->atlas, &source,
+                                           &app->body_rect) &&
+            scene_drawn;
+    } else {
+        scene_drawn = false;
     }
+    return scene_drawn;
 }
 
 static int hit_test_mode(const EidolonApp *app) {
@@ -505,10 +522,12 @@ static void update_hit_test_if_needed(EidolonApp *app) {
     }
 }
 
-void eidolon_draw_frame(EidolonApp *app) {
-    draw_scene(app);
+bool eidolon_draw_frame(EidolonApp *app) {
+    const bool scene_drawn = draw_scene(app);
     update_hit_test_if_needed(app);
-    if (!eidolon_presentation_commit_scene(app->presentation, &app->scene_snapshot)) {
+    const bool scene_committed =
+        eidolon_presentation_commit_scene(app->presentation, &app->scene_snapshot);
+    if (!scene_committed) {
         static bool scene_commit_failure_reported = false;
         if (!scene_commit_failure_reported) {
             eidolon_log_write("renderer", "scene commit failed backend=%s error=%s",
@@ -516,7 +535,8 @@ void eidolon_draw_frame(EidolonApp *app) {
             scene_commit_failure_reported = true;
         }
     }
-    if (!eidolon_presentation_present(app->presentation)) {
+    const bool presented = eidolon_presentation_present(app->presentation);
+    if (!presented) {
         static bool present_failure_reported = false;
         if (!present_failure_reported) {
             eidolon_log_write("renderer", "presentation failed backend=%s error=%s",
@@ -524,6 +544,7 @@ void eidolon_draw_frame(EidolonApp *app) {
             present_failure_reported = true;
         }
     }
+    return scene_drawn && scene_committed && presented;
 }
 
 bool eidolon_draw_snapshot(EidolonApp *app, const char *path) {

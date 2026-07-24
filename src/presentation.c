@@ -665,6 +665,19 @@ void eidolon_presentation_release_target(EidolonPresentation *presentation,
     }
 }
 
+void eidolon_presentation_invalidate_targets(EidolonPresentation *presentation) {
+    if (presentation == NULL || presentation->operations.destroy_target == NULL) {
+        return;
+    }
+    for (size_t index = 0U; index < EIDOLON_SCENE_LAYER_CAPACITY; ++index) {
+        EidolonPresentationLayerTarget *record = &presentation->layer_targets[index];
+        if (record->occupied) {
+            release_layer_target(presentation, record);
+        }
+    }
+    presentation->committed_scene_revision = 0U;
+}
+
 bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
                                        const EidolonSceneSnapshot *scene) {
     if (presentation == NULL || scene == NULL || scene->revision == 0U ||

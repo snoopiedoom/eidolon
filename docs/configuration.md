@@ -73,10 +73,22 @@ under construction. It currently supports portrait and dialogue layers, generati
 masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
 body dragging, revisioned output/DPI state, and bounded host-close/graphics-reset requests. Sprite
 and 3D targets, product-level native 3D pointer use, physical output-removal proof, device-loss
-recovery, output-local host migration, and default enablement remain unfinished. The backend-level
-routed-pointer contract is covered deterministically. An explicit native request fails closed if
-host or graphics initialization fails; normal startup and every snapshot continue to use
-`sdl_window_legacy`.
+evidence on real hardware failure, output-local host migration, and default enablement remain
+unfinished. The
+backend-level routed-pointer contract is covered deterministically. If native host/graphics
+creation or environment bootstrap fails, startup logs the reason and selects
+`sdl_window_legacy`. A device/backend reset during native operation stops submissions, attempts one
+fresh DirectComposition reconstruction from current product state, then logs and selects
+`sdl_window_legacy` if that reconstruction cannot present a complete current frame. Normal startup
+without the override and every snapshot continue to use `sdl_window_legacy`.
+
+Debug builds expose deterministic recovery probes. Set
+`EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES` to a positive frame count to inject a device reset, and
+optionally set `EIDOLON_DCOMP_TEST_FORCE_RECOVERY_FALLBACK=1` to force the SDL branch.
+`EIDOLON_DCOMP_TEST_FAIL_CREATE=1` forces startup fallback.
+`EIDOLON_PRESENTATION_TEST_HIDDEN=1` and
+`EIDOLON_PRESENTATION_TEST_EXIT_AFTER_RECOVERY=1` support hidden automation. Release builds ignore
+these test hooks.
 
 The Windows legacy fallback delegates character dragging to the native top-level move loop.
 Animation and dialogue presentation may pause until release; this is a documented fallback

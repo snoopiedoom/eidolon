@@ -301,18 +301,19 @@ queue, and `EidolonApp` routes activation by stable current layer id and reflows
 completion. The owner accepted that interaction slice. Both Windows backends now publish
 revisioned active-host environments and caller-owned topology. Both also publish host-close and
 typed graphics-reset requests through the common queue. Both route middle-button authoring through
-the common pointer contract; SDL 3D routed rotation is owner-confirmed, while transactional
-graphics recovery remains Gate 6 work under
+the common pointer contract; SDL 3D routed rotation is owner-confirmed. Transactional
+DirectComposition reconstruction and explicit runtime fallback are compiled and deterministically
+proven, and their visible continuity and interaction are owner-accepted. Real device-loss evidence
+remains Gate 6 work under
 [`docs/design/presentation-events.md`](../design/presentation-events.md) and
 [`docs/design/presentation-environment.md`](../design/presentation-environment.md).
 
 Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal native top-level move
 loop and pauses application-driven animation while dragging. That is an established fallback
-limitation, not an unfinished DirectComposition cadence patch. The next Gate 6 goal is to finish
-the native event, output-removal, recovery, and visual-parity work required to make
-`win32_dcomp` ready for normal Windows selection. The remaining SDL click, settings,
-mixed-DPI/output, placement, and post-drag cadence checks are required before that promotion, but
-do not block native implementation.
+limitation, not an unfinished DirectComposition cadence patch. The immediate checkpoint is
+deterministic output-removal proof; native visual parity follows. The remaining SDL click,
+settings, mixed-DPI/output, placement, and post-drag cadence checks are required before normal
+Windows selection, but do not block native implementation.
 
 ## Restart checklist
 
@@ -357,6 +358,26 @@ do not block native implementation.
 - contract, queue, and DirectComposition close-smoke coverage pass alongside `make` and
   `make check`;
 - transactional DirectComposition device recreation or explicit runtime fallback remains open.
+
+### 2026-07-24: bounded DirectComposition recovery compiled
+
+- target reset now invalidates presentation-owned target generations, so an unchanged content
+  revision still receives fresh raster resources and hit-test state;
+- device/backend reset ends transient interaction, replaces only presentation/event-pump resources,
+  reapplies authoritative environment and cadence, preserves the body anchor and application-owned
+  session/dialogue/expression/scene state, then submits the newest complete frame;
+- one fresh DirectComposition reconstruction is attempted; incomplete creation, drawing, commit, or
+  presentation falls through to an explicitly logged `sdl_window_legacy` runtime;
+- portrait textures and renderer-backed text slots rebind transactionally to the SDL fallback while
+  retained CPU surfaces, font state, and semantic performance remain owned by their existing
+  application objects;
+- failed D3D11, DXGI, and DirectComposition operations now classify reset-worthy HRESULTs and stop
+  further target submission while one reset request is pending;
+- the DirectComposition smoke injects device reset deterministically and verifies deduplication and
+  unhealthy presentation; hidden end-to-end probes pass for same-process native reconstruction and
+  forced SDL fallback;
+- the owner accepted visible placement, continuity, and interaction for both injected recovery
+  branches; physical output-removal behavior remains the next deterministic proof.
 
 ### 2026-07-24: legacy modal drag recorded; DirectComposition made the next goal
 

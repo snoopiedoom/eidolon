@@ -374,6 +374,7 @@ bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,
                                            EidolonPresentationTargetUpdate *target);
 void eidolon_presentation_release_target(EidolonPresentation *presentation,
                                          EidolonSceneLayerId layer);
+void eidolon_presentation_invalidate_targets(EidolonPresentation *presentation);
 bool eidolon_presentation_commit_scene(EidolonPresentation *presentation,
                                        const EidolonSceneSnapshot *scene);
 bool eidolon_presentation_present(EidolonPresentation *presentation);

@@ -332,8 +332,8 @@ activation, cancellation, click-through, movement, and final reflow. Presentatio
 publication, transactional application, and mixed-DPI behavior are owner-confirmed; reset events
 and host close now cross the common queue. Middle-button routed input is compiled for both Windows
 backends; SDL 3D rotation outside the host bounds, `Shift`+middle roll, double-middle reset, and
-preserved left dragging are owner-confirmed. Graphics recovery and physical output removal remain
-open.
+preserved left dragging are owner-confirmed. Injected native reconstruction and SDL fallback are
+also owner-confirmed; real device loss and physical output removal remain open.
 
 ## Output topology and DPI
 
@@ -710,8 +710,12 @@ cross-monitor behavior, body-context settings without focus theft, final reflow,
 environment/topology delivery, and one transactional mixed-DPI application update.
 Host close and graphics-reset requests now cross the same bounded presentation event contract for
 both Windows backends. Target reset requests invalidate cached hit testing and request a redraw;
-device/backend reset requests stop the runtime cleanly until transactional recovery or fallback is
-implemented.
+device/backend reset requests stop submissions and transient capture, preserve product state, and
+attempt one fresh DirectComposition reconstruction. A candidate must commit and present the newest
+complete scene before acceptance; otherwise the runtime explicitly rebinds portrait/text raster
+resources to a new `sdl_window_legacy` backend. Hidden deterministic probes pass for both native
+reconstruction and forced SDL fallback; the owner accepted visible placement, continuity, and
+interaction after both injected branches.
 
 The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
 observation confirmed that application-driven animation pauses during that native top-level move.
@@ -868,7 +872,8 @@ Automated snapshots do not prove desktop feel.
 - compositor disconnect: release native objects, keep non-presentation state, and retry only through
   bounded platform policy;
 - device loss: stop submissions, recreate graphics and presentation resources, then submit the
-  newest scene revision;
+  newest scene revision; on Windows, attempt one fresh DirectComposition reconstruction, then log
+  and select `sdl_window_legacy` if the native candidate cannot present a complete current frame;
 - permission rejected on Android: remain app-hosted;
 - application backgrounded on iOS: persist state and stop expensive rendering;
 - unsupported feature: degrade through declared capability mapping rather than platform-name checks

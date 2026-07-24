@@ -28,6 +28,8 @@ ID3D11DeviceContext *eidolon_win32_dcomp_device_context(EidolonPresentation *pre
 ID3D11Texture2D *eidolon_win32_dcomp_target_texture(EidolonPresentation *presentation,
                                                     EidolonPresentationTarget target,
                                                     uint64_t generation);
+bool eidolon_win32_dcomp_test_inject_graphics_reset(
+    EidolonPresentation *presentation, EidolonPresentationGraphicsResetKind reset_kind);
 
 #ifdef __cplusplus
 }

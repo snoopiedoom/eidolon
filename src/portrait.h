@@ -70,6 +70,7 @@ bool eidolon_portrait_config_parse(const char *text, size_t length, EidolonPortr
 EidolonPortraitRenderer *eidolon_portrait_create(SDL_Renderer *renderer, const char *config_path,
                                                  const char *asset_directory);
 void eidolon_portrait_destroy(EidolonPortraitRenderer *portrait);
+bool eidolon_portrait_set_renderer(EidolonPortraitRenderer *portrait, SDL_Renderer *renderer);
 void eidolon_portrait_update(EidolonPortraitRenderer *portrait, uint64_t now_ms);
 void eidolon_portrait_set_state(EidolonPortraitRenderer *portrait, EidolonState state,
                                 uint64_t now_ms);

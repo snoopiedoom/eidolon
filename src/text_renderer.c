@@ -19,6 +19,7 @@ typedef struct TextSlot {
 } TextSlot;
 
 struct EidolonTextRenderer {
+    SDL_Renderer *renderer;
     TTF_TextEngine *renderer_engine;
     TTF_TextEngine *surface_engine;
     TTF_Font *font;
@@ -56,6 +57,7 @@ EidolonTextRenderer *eidolon_text_renderer_create(SDL_Renderer *renderer, const 
     if (renderer != NULL) {
         text_renderer->renderer_engine = TTF_CreateRendererTextEngine(renderer);
     }
+    text_renderer->renderer = renderer;
     text_renderer->surface_engine = TTF_CreateSurfaceTextEngine();
     text_renderer->font = TTF_OpenFont(font_path, point_size);
     if ((renderer != NULL && text_renderer->renderer_engine == NULL) ||
@@ -95,6 +97,35 @@ void eidolon_text_renderer_destroy(EidolonTextRenderer *text_renderer) {
     }
     SDL_free(text_renderer);
     TTF_Quit();
+}
+
+bool eidolon_text_renderer_set_renderer(EidolonTextRenderer *text_renderer,
+                                        SDL_Renderer *renderer) {
+    if (text_renderer == NULL) {
+        SDL_SetError("missing text renderer");
+        return false;
+    }
+    if (text_renderer->renderer == renderer) {
+        return true;
+    }
+
+    TTF_TextEngine *engine = NULL;
+    if (renderer != NULL) {
+        engine = TTF_CreateRendererTextEngine(renderer);
+        if (engine == NULL) {
+            return false;
+        }
+    }
+    for (size_t index = 0U; index < EIDOLON_TEXT_SLOT_COUNT; ++index) {
+        TTF_DestroyText(text_renderer->renderer_slots[index].text);
+        SDL_zero(text_renderer->renderer_slots[index]);
+    }
+    if (text_renderer->renderer_engine != NULL) {
+        TTF_DestroyRendererTextEngine(text_renderer->renderer_engine);
+    }
+    text_renderer->renderer = renderer;
+    text_renderer->renderer_engine = engine;
+    return true;
 }
 
 static TextSlot *prepare_text(EidolonTextRenderer *text_renderer, TTF_TextEngine *engine,

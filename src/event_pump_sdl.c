@@ -43,6 +43,7 @@ static void route_event(EidolonEventPump *pump, const SDL_Event *source, Eidolon
     SDL_zero(*event);
     event->monotonic_ns = source->common.timestamp;
     const bool presentation_owned =
+        pump->presentation_window != NULL &&
         eidolon_sdl_legacy_handle_event(pump->presentation, source);
     if (eidolon_settings_ui_handle_event(pump->settings_ui, source)) {
         return;

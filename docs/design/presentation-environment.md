@@ -282,7 +282,13 @@ The owner confirmed the Win32 cross-monitor environment transaction and bubble-b
 Close and typed graphics-reset notification now cross the presentation event contract.
 Middle-button routed-pointer parity, including SDL capture beyond the host bounds, is
 owner-confirmed.
-Transactional graphics recovery and physical output-removal proof remain open.
+Device/backend reset now replaces only presentation and raster resources: it preserves the current
+body anchor and application-owned session, dialogue, expression, motion, and scene state; applies
+the replacement backend's authoritative environment; reflows once; and must present the newest
+complete scene before the replacement is accepted. One native reconstruction is attempted before
+an explicit SDL fallback. Hidden deterministic probes cover both branches; visible recovery and
+the resulting interaction are owner-accepted. Real device loss and physical output-removal proof
+remain open.
 The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
 application consumption until release; native cadence acceptance belongs to `win32_dcomp`. Its
 mixed-DPI/output/placement and post-drag resumption still require owner confirmation before native
@@ -351,6 +357,12 @@ configured conservative fallback
 
 Changing environment does not reset dialogue reveal, expression performance, motion phase, session
 ownership, or persona state.
+
+Device/backend replacement uses the same preservation rule. It captures the strongest current body
+anchor, ends transient pointer interactions, destroys only the failed presentation/event-pump
+resources, bootstraps the candidate's authoritative environment and cadence, restores the anchor,
+reflows once, and publishes the newest application-owned scene. A candidate is not made visible or
+accepted until that complete scene commits and presents successfully.
 
 ## Relationship to native movement
 

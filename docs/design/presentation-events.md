@@ -35,14 +35,17 @@ The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
 Close and graphics-reset requests now cross the presentation queue for both Windows backends.
 DirectComposition emits one typed device/backend reset request after a failed present or compositor
 commit; SDL translates its target/device reset events at the presentation boundary. The application
-redraws after target reset and exits cleanly after device/backend reset until transactional recovery
-or fallback exists. Both Windows backends now emit routed middle-button mouse events through the
-presentation queue; the SDL-backed event adapter still translates primary pointer and
-application-command behavior into fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no
-longer enter `EidolonApp`. The owner confirmed native activation, body-context settings,
-cancel-on-drag, click-through, smooth movement, one stable final reflow, and SDL 3D routed rotation
-beyond the host bounds. The no-activate native host deliberately does not claim keyboard focus or
-register a system-wide `F1` hotkey; right-click is its reliable settings entry point.
+invalidates cached targets and redraws even when the content revision is unchanged after a target
+reset. A device/backend reset stops submissions and capture, preserves application state, and
+attempts one fresh DirectComposition reconstruction; failure to submit a complete current scene
+selects a newly bound SDL fallback, while failure of both paths stops cleanly. Both Windows
+backends now emit routed middle-button mouse events through the presentation queue; the SDL-backed
+event adapter still translates primary pointer and application-command behavior into fixed-size
+`EidolonAppEvent` values. Raw `SDL_Event` values no longer enter `EidolonApp`. The owner confirmed
+native activation, body-context settings, cancel-on-drag, click-through, smooth movement, one
+stable final reflow, and SDL 3D routed rotation beyond the host bounds. The no-activate native host
+deliberately does not claim keyboard focus or register a system-wide `F1` hotkey; right-click is
+its reliable settings entry point.
 The Windows SDL fallback still delegates character movement to the modal native top-level move
 loop, so its animation cadence can pause until release. Equivalent event meaning does not imply
 equivalent compositor cadence.
@@ -336,7 +339,8 @@ must remain bounded and must not call application code while holding a backend l
 - scale changes mid-interaction: retain the strongest valid anchor, publish a new environment
   revision, and ensure move completion identifies the observed revision;
 - graphics reset: stop target submissions, enqueue one reset request, and keep non-presentation
-  state alive;
+  state alive; invalidate and redraw targets locally, or replace device/backend presentation
+  resources through one bounded native reconstruction followed by explicit fallback;
 - application drains slowly: native manipulation may continue, but only bounded/coalesced state is
   retained;
 - malformed backend event: reject it at the common boundary and increment a bounded diagnostic.
@@ -378,8 +382,9 @@ must remain bounded and must not call application code while holding a backend l
 7. [x] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests.
 8. [~] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
    checks. The native portrait path is accepted; the legacy modal-drag limitation is confirmed and
-   documented, while the remaining SDL fallback regression pass and physical output-removal
-   behavior remain pre-default acceptance work.
+   documented. Hidden deterministic probes cover native reconstruction and forced SDL fallback;
+   both recovery branches are owner-accepted. The remaining SDL fallback regression pass and
+   physical output-removal behavior remain pre-default acceptance work.
 
 Environment and topology implementation proceeds through the separate sequence in
 [`presentation-environment.md`](presentation-environment.md).
