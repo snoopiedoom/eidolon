@@ -33,6 +33,11 @@ Floating control values are canonicalized before hashing and snapshot comparison
 A bounded ring exposes dropped-record count. Trace overflow does not affect plan or control
 decisions.
 
+`make epr-trace` runs the fixed first-slice clock and emits normalized JSONL plus a summary
+containing record count, eviction count, trace hash, final canonical-control hash, revision, and
+plan generation. Re-running identical source produces identical bytes. Solve/control/projection
+records are semantic checkpoints rather than one record per 20 ms sample.
+
 ## Automated evidence
 
 `make check` must reach tests for:
@@ -41,6 +46,7 @@ decisions.
 - permutation-independent behavior and resource decisions;
 - transactional incremental temporal insertion;
 - monotonic phases and no replay after interruption;
+- no reactivation of an interrupted semantic beat on a later plan revision;
 - explicit grants for every non-neutral control contribution;
 - stale intent/plan rejection;
 - whole-state rollback on injected realizer/solve/projection failure;
@@ -79,4 +85,3 @@ final control was accepted.
 
 The owner judges only whether the rendered sequence reads correctly and feels alive, plus artistic
 tuning and body suitability. That judgment does not replace deterministic structural checks.
-

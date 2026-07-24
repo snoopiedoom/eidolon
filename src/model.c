@@ -4,6 +4,8 @@
 #include "log.h"
 #include "motion.h"
 #include "pose_solver.h"
+#include "vrm_body.h"
+#include "vrm_projection.h"
 
 #include <float.h>
 #include <limits.h>
@@ -17,26 +19,13 @@
 #include <windows.h>
 #endif
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wconversion"
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#pragma clang diagnostic ignored "-Wdouble-promotion"
-#pragma clang diagnostic ignored "-Wlanguage-extension-token"
-#pragma clang diagnostic ignored "-Wshadow"
-#pragma clang diagnostic ignored "-Wsign-conversion"
-#endif
-#define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
 
 #if !defined(_WIN32)
 #define MODEL_TARGET_WIDTH 1536
 #define MODEL_TARGET_HEIGHT 1536
 #endif
-#define MODEL_MAX_JOINTS 128
+#define MODEL_MAX_JOINTS 256
 #if !defined(_WIN32)
 #define MODEL_READBACK_COUNT 3
 #endif
@@ -44,10 +33,24 @@
 
 typedef struct EidolonModelVertex {
     float position[3];
+    float neutral_delta[3];
+    float focused_delta[3];
     float texcoord[2];
     Uint16 joints[4];
     float weights[4];
 } EidolonModelVertex;
+
+typedef struct EidolonModelScene {
+    float model_view_projection[16];
+    float expression_weights[4];
+} EidolonModelScene;
+
+typedef struct EidolonModelMaterial {
+    float base_color_factor[4];
+    float alpha_cutoff;
+    float alpha_mode;
+    float padding[2];
+} EidolonModelMaterial;
 
 #if !defined(_WIN32)
 typedef struct EidolonModelReadback {
@@ -62,6 +65,8 @@ typedef struct EidolonModelDraw {
     Uint32 first_index;
     Uint32 index_count;
     Uint32 texture_index;
+    EidolonModelMaterial material;
+    bool alpha_blend;
 } EidolonModelDraw;
 
 typedef struct EidolonCpuGeometry {
@@ -87,8 +92,11 @@ struct EidolonModelRenderer {
     ID3D11InputLayout *input_layout;
     ID3D11Buffer *scene_buffer;
     ID3D11Buffer *bones_buffer;
+    ID3D11Buffer *material_buffer;
     ID3D11RasterizerState *rasterizer;
     ID3D11DepthStencilState *depth_state;
+    ID3D11DepthStencilState *depth_state_no_write;
+    ID3D11BlendState *alpha_blend;
     ID3D11RenderTargetView *color_rtv;
     ID3D11Texture2D *depth_texture;
     ID3D11DepthStencilView *depth_dsv;
@@ -99,6 +107,7 @@ struct EidolonModelRenderer {
     SDL_GPUTexture **textures;
     SDL_GPUSampler *sampler;
     SDL_GPUGraphicsPipeline *pipeline;
+    SDL_GPUGraphicsPipeline *alpha_pipeline;
     SDL_GPUTexture *color_target;
     SDL_GPUTexture *depth_target;
 #endif
@@ -109,7 +118,11 @@ struct EidolonModelRenderer {
     EidolonMotionRig motion;
     EidolonHumanoidProfile humanoid;
     EidolonSemanticPose semantic_pose;
+    EidolonVrmBody vrm_body;
+    EidolonVrmProjection vrm_projection;
+    EidolonEprBodyProfile body_profile;
     bool humanoid_ready;
+    bool vrm_ready;
     bool semantic_pose_active;
     bool semantic_pose_failed;
     Uint16 joint_nodes[MODEL_MAX_JOINTS];
@@ -127,6 +140,9 @@ struct EidolonModelRenderer {
     float pitch_radians;
     float roll_radians;
     float rotation_pivot[3];
+    float view_scale;
+    float view_depth_scale;
+    bool fit_vrm_view;
     uint64_t transform_revision;
     uint64_t presented_transform_revision;
     int target_width;
@@ -255,6 +271,40 @@ static void set_rotation_pivot(EidolonModelRenderer *model, const EidolonCpuGeom
     for (size_t axis = 0; axis < 3; ++axis) {
         model->rotation_pivot[axis] = (minimum[axis] + maximum[axis]) * 0.5F;
     }
+    if (model->vrm_ready) {
+        const float width = maximum[0] - minimum[0];
+        const float height = maximum[1] - minimum[1];
+        const float depth = maximum[2] - minimum[2];
+        if (height > 0.0001F) {
+            model->view_scale = 1.70F / height;
+            model->view_depth_scale = 0.80F / SDL_max(depth, 0.10F);
+            model->fit_vrm_view = true;
+            eidolon_log_write(
+                "model",
+                "VRM geometry fit width=%.3f height=%.3f depth=%.3f center=%.3f,%.3f,%.3f "
+                "scale=%.3f",
+                width, height, depth, model->rotation_pivot[0], model->rotation_pivot[1],
+                model->rotation_pivot[2], model->view_scale);
+        }
+    }
+}
+
+static void model_projection(const EidolonModelRenderer *model, float projection[16]) {
+    if (!model->fit_vrm_view) {
+        static const float legacy[16] = {
+            1.4F, 0.0F, 0.0F,   0.0F, 0.0F, 1.4F,    0.0F, 0.0F,
+            0.0F, 0.0F, -0.55F, 0.0F, 0.0F, -0.784F, 0.5F, 1.0F,
+        };
+        SDL_memcpy(projection, legacy, sizeof(legacy));
+        return;
+    }
+    matrix_identity(projection);
+    projection[0] = model->view_scale;
+    projection[5] = model->view_scale;
+    projection[10] = -model->view_depth_scale;
+    projection[12] = -model->rotation_pivot[0] * model->view_scale;
+    projection[13] = -model->rotation_pivot[1] * model->view_scale;
+    projection[14] = 0.5F + model->rotation_pivot[2] * model->view_depth_scale;
 }
 
 static const cgltf_accessor *primitive_attribute(const cgltf_primitive *primitive,
@@ -262,16 +312,54 @@ static const cgltf_accessor *primitive_attribute(const cgltf_primitive *primitiv
     return cgltf_find_accessor(primitive, type, index);
 }
 
+static bool data_has_extension(const cgltf_data *data, const char *name) {
+    for (cgltf_size index = 0; index < data->data_extensions_count; ++index) {
+        const cgltf_extension *extension = &data->data_extensions[index];
+        if (extension->name != NULL && SDL_strcmp(extension->name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool primitive_is_supported(const cgltf_primitive *primitive) {
     return primitive->type == cgltf_primitive_type_triangles &&
            primitive_attribute(primitive, cgltf_attribute_type_position, 0) != NULL;
 }
 
-static bool build_motion_rig(EidolonModelRenderer *model, const cgltf_data *data) {
-    if (data->skins_count != 1 || data->skins[0].joints_count == 0 ||
+static bool skins_share_joint_palette(const cgltf_data *data) {
+    const cgltf_skin *reference = &data->skins[0];
+    for (cgltf_size skin_index = 1; skin_index < data->skins_count; ++skin_index) {
+        const cgltf_skin *skin = &data->skins[skin_index];
+        if (skin->joints_count != reference->joints_count || skin->inverse_bind_matrices == NULL) {
+            return false;
+        }
+        for (cgltf_size joint = 0; joint < reference->joints_count; ++joint) {
+            cgltf_float reference_matrix[16];
+            cgltf_float matrix[16];
+            if (skin->joints[joint] != reference->joints[joint] ||
+                !cgltf_accessor_read_float(reference->inverse_bind_matrices, joint,
+                                           reference_matrix, 16) ||
+                !cgltf_accessor_read_float(skin->inverse_bind_matrices, joint, matrix, 16)) {
+                return false;
+            }
+            for (size_t component = 0; component < 16U; ++component) {
+                if (SDL_fabsf((float)reference_matrix[component] - (float)matrix[component]) >
+                    0.00001F) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+static bool build_motion_rig(EidolonModelRenderer *model, const cgltf_data *data, bool vrm) {
+    if (data->skins_count == 0 || data->skins[0].joints_count == 0 ||
         data->skins[0].joints_count >= MODEL_MAX_JOINTS ||
-        data->skins[0].inverse_bind_matrices == NULL) {
-        SDL_SetError("model must contain one skin with fewer than %d joints", MODEL_MAX_JOINTS);
+        data->skins[0].inverse_bind_matrices == NULL || !skins_share_joint_palette(data)) {
+        SDL_SetError("model skins must share one palette with fewer than %d joints",
+                     MODEL_MAX_JOINTS);
         return false;
     }
     if (!eidolon_motion_init(&model->motion, (size_t)data->nodes_count)) {
@@ -301,6 +389,9 @@ static bool build_motion_rig(EidolonModelRenderer *model, const cgltf_data *data
             return false;
         }
         model->joint_nodes[joint_index] = (Uint16)node_index;
+    }
+    if (vrm) {
+        return eidolon_motion_rebuild_world(&model->motion);
     }
     if (!eidolon_motion_finalize(&model->motion)) {
         return false;
@@ -368,6 +459,28 @@ static Uint32 texture_index_for_material(const cgltf_data *data, const cgltf_mat
     return (Uint32)image_index + 1U;
 }
 
+static EidolonModelMaterial material_parameters(const cgltf_material *material) {
+    EidolonModelMaterial parameters = {
+        .base_color_factor = {1.0F, 1.0F, 1.0F, 1.0F},
+        .alpha_cutoff = 0.5F,
+        .alpha_mode = (float)cgltf_alpha_mode_opaque,
+    };
+    if (material == NULL) {
+        return parameters;
+    }
+    if (material->has_pbr_metallic_roughness) {
+        for (size_t component = 0; component < 4U; ++component) {
+            parameters.base_color_factor[component] =
+                (float)material->pbr_metallic_roughness.base_color_factor[component];
+        }
+    }
+    parameters.alpha_mode = (float)material->alpha_mode;
+    if (material->alpha_mode == cgltf_alpha_mode_mask) {
+        parameters.alpha_cutoff = (float)material->alpha_cutoff;
+    }
+    return parameters;
+}
+
 static void transform_position(const cgltf_float matrix[16], const cgltf_float source[3],
                                float destination[3]) {
     destination[0] =
@@ -378,8 +491,57 @@ static void transform_position(const cgltf_float matrix[16], const cgltf_float s
                              matrix[10] * source[2] + matrix[14]);
 }
 
+static void transform_direction(const cgltf_float matrix[16], const cgltf_float source[3],
+                                float destination[3]) {
+    destination[0] = (float)(matrix[0] * source[0] + matrix[4] * source[1] + matrix[8] * source[2]);
+    destination[1] = (float)(matrix[1] * source[0] + matrix[5] * source[1] + matrix[9] * source[2]);
+    destination[2] =
+        (float)(matrix[2] * source[0] + matrix[6] * source[1] + matrix[10] * source[2]);
+}
+
+static const cgltf_accessor *morph_position_accessor(const cgltf_primitive *primitive,
+                                                     size_t target) {
+    if (target >= (size_t)primitive->targets_count) {
+        return NULL;
+    }
+    const cgltf_morph_target *morph = &primitive->targets[target];
+    for (cgltf_size index = 0; index < morph->attributes_count; ++index) {
+        const cgltf_attribute *attribute = &morph->attributes[index];
+        if (attribute->type == cgltf_attribute_type_position && attribute->index == 0) {
+            return attribute->data;
+        }
+    }
+    return NULL;
+}
+
+static bool accumulate_expression_delta(const cgltf_primitive *primitive, size_t node_index,
+                                        size_t vertex_index, const cgltf_float world[16],
+                                        const EidolonVrmExpressionBind *binds, size_t bind_count,
+                                        float destination[3]) {
+    for (size_t bind_index = 0; bind_index < bind_count; ++bind_index) {
+        const EidolonVrmExpressionBind *bind = &binds[bind_index];
+        if (bind->node != node_index || bind->weight <= 0.0F) {
+            continue;
+        }
+        const cgltf_accessor *accessor = morph_position_accessor(primitive, bind->target);
+        cgltf_float delta[3];
+        float transformed[3];
+        if (accessor == NULL || vertex_index >= (size_t)accessor->count ||
+            !cgltf_accessor_read_float(accessor, (cgltf_size)vertex_index, delta,
+                                       SDL_arraysize(delta))) {
+            SDL_SetError("VRM expression morph target could not be decoded");
+            return false;
+        }
+        transform_direction(world, delta, transformed);
+        for (size_t axis = 0; axis < 3U; ++axis) {
+            destination[axis] += transformed[axis] * bind->weight;
+        }
+    }
+    return true;
+}
+
 static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
-                          EidolonCpuGeometry *geometry) {
+                          const EidolonVrmBody *vrm_body, EidolonCpuGeometry *geometry) {
     size_t vertex_cursor = 0;
     size_t index_cursor = 0;
     size_t draw_cursor = 0;
@@ -434,6 +596,18 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
                 }
                 transform_position(world, position,
                                    geometry->vertices[vertex_cursor + vertex_index].position);
+                EidolonModelVertex *vertex = &geometry->vertices[vertex_cursor + vertex_index];
+                if (vrm_body != NULL && vrm_body->has_expression &&
+                    (!accumulate_expression_delta(primitive, (size_t)node_index, vertex_index,
+                                                  world, vrm_body->neutral_binds,
+                                                  vrm_body->neutral_bind_count,
+                                                  vertex->neutral_delta) ||
+                     !accumulate_expression_delta(primitive, (size_t)node_index, vertex_index,
+                                                  world, vrm_body->focused_binds,
+                                                  vrm_body->focused_bind_count,
+                                                  vertex->focused_delta))) {
+                    return false;
+                }
 
                 if (texcoords != NULL) {
                     cgltf_float texcoord[2];
@@ -448,7 +622,6 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
                         (float)texcoord[1];
                 }
 
-                EidolonModelVertex *vertex = &geometry->vertices[vertex_cursor + vertex_index];
                 if (node->skin != NULL) {
                     cgltf_uint joint_values[4];
                     cgltf_float weight_values[4];
@@ -502,6 +675,9 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
                 .first_index = (Uint32)index_cursor,
                 .index_count = (Uint32)primitive_index_count,
                 .texture_index = texture_index_for_material(data, primitive->material),
+                .material = material_parameters(primitive->material),
+                .alpha_blend = primitive->material != NULL &&
+                               primitive->material->alpha_mode == cgltf_alpha_mode_blend,
             };
             vertex_cursor += primitive_vertex_count;
             index_cursor += primitive_index_count;
@@ -512,7 +688,7 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
 }
 
 static bool build_cpu_geometry(const cgltf_data *data, size_t identity_joint,
-                               EidolonCpuGeometry *geometry) {
+                               const EidolonVrmBody *vrm_body, EidolonCpuGeometry *geometry) {
     SDL_zero(*geometry);
     if (!count_geometry(data, geometry)) {
         return false;
@@ -527,7 +703,7 @@ static bool build_cpu_geometry(const cgltf_data *data, size_t identity_joint,
         return false;
     }
 
-    if (!fill_geometry(data, identity_joint, geometry)) {
+    if (!fill_geometry(data, identity_joint, vrm_body, geometry)) {
         cpu_geometry_destroy(geometry);
         return false;
     }
@@ -756,6 +932,10 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,
          (UINT)offsetof(EidolonModelVertex, position), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 1, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         (UINT)offsetof(EidolonModelVertex, neutral_delta), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 2, DXGI_FORMAT_R32G32B32_FLOAT, 0,
+         (UINT)offsetof(EidolonModelVertex, focused_delta), D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, (UINT)offsetof(EidolonModelVertex, texcoord),
          D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 0,
@@ -771,7 +951,9 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
     }
     SDL_free(pixel_code);
     SDL_free(vertex_code);
-    if (!created || !create_constant_buffer(model, sizeof(float) * 16U, &model->scene_buffer) ||
+    if (!created ||
+        !create_constant_buffer(model, sizeof(EidolonModelScene), &model->scene_buffer) ||
+        !create_constant_buffer(model, sizeof(EidolonModelMaterial), &model->material_buffer) ||
         !create_constant_buffer(model, sizeof(model->joint_palette), &model->bones_buffer)) {
         return false;
     }
@@ -788,14 +970,37 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
         return false;
     }
 
-    const D3D11_DEPTH_STENCIL_DESC depth = {
+    D3D11_DEPTH_STENCIL_DESC depth = {
         .DepthEnable = TRUE,
         .DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL,
         .DepthFunc = D3D11_COMPARISON_LESS_EQUAL,
     };
+    if (!d3d11_succeeded(
+            ID3D11Device_CreateDepthStencilState(model->device, &depth, &model->depth_state),
+            "creating D3D11 model depth state")) {
+        return false;
+    }
+    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    if (!d3d11_succeeded(ID3D11Device_CreateDepthStencilState(model->device, &depth,
+                                                              &model->depth_state_no_write),
+                         "creating D3D11 transparent model depth state")) {
+        return false;
+    }
+    const D3D11_BLEND_DESC blend = {
+        .RenderTarget = {{
+            .BlendEnable = TRUE,
+            .SrcBlend = D3D11_BLEND_SRC_ALPHA,
+            .DestBlend = D3D11_BLEND_INV_SRC_ALPHA,
+            .BlendOp = D3D11_BLEND_OP_ADD,
+            .SrcBlendAlpha = D3D11_BLEND_ONE,
+            .DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA,
+            .BlendOpAlpha = D3D11_BLEND_OP_ADD,
+            .RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL,
+        }},
+    };
     return d3d11_succeeded(
-        ID3D11Device_CreateDepthStencilState(model->device, &depth, &model->depth_state),
-        "creating D3D11 model depth state");
+        ID3D11Device_CreateBlendState(model->device, &blend, &model->alpha_blend),
+        "creating D3D11 transparent model blend state");
 }
 
 static bool create_color_target_view(EidolonModelRenderer *model, SDL_Texture *renderer_texture,
@@ -1065,10 +1270,7 @@ static void restore_d3d11_state(ID3D11DeviceContext *context, EidolonD3D11State 
 }
 
 static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
-    static const float projection[16] = {
-        1.4F, 0.0F, 0.0F,   0.0F, 0.0F, 1.4F,    0.0F, 0.0F,
-        0.0F, 0.0F, -0.55F, 0.0F, 0.0F, -0.784F, 0.5F, 1.0F,
-    };
+    float projection[16];
     float yaw_rotation[16];
     float pitch_rotation[16];
     float roll_rotation[16];
@@ -1078,7 +1280,8 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     float to_pivot[16];
     float rotation_from_pivot[16];
     float centered_rotation[16];
-    float model_view_projection[16];
+    EidolonModelScene scene;
+    model_projection(model, projection);
     matrix_rotation_y(model->yaw_radians, yaw_rotation);
     matrix_rotation_x(model->pitch_radians, pitch_rotation);
     matrix_rotation_z(model->roll_radians, roll_rotation);
@@ -1090,20 +1293,27 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
                        to_pivot);
     matrix_multiply(model_rotation, from_pivot, rotation_from_pivot);
     matrix_multiply(to_pivot, rotation_from_pivot, centered_rotation);
-    matrix_multiply(projection, centered_rotation, model_view_projection);
+    matrix_multiply(projection, centered_rotation, scene.model_view_projection);
+    scene.expression_weights[0] =
+        model->vrm_ready ? 1.0F - model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[1] =
+        model->vrm_ready ? model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[2] = 0.0F;
+    scene.expression_weights[3] = 0.0F;
 
-    eidolon_motion_update_idle(&model->motion, now_ms);
-    if (model->semantic_pose_active && model->humanoid_ready && !model->semantic_pose_failed &&
-        !eidolon_pose_solve(&model->motion, &model->humanoid, &model->semantic_pose)) {
-        eidolon_log_write("motion", "semantic pose disabled after solve failure: %s",
-                          SDL_GetError());
-        model->semantic_pose_failed = true;
-        SDL_ClearError();
+    if (!model->vrm_ready) {
         eidolon_motion_update_idle(&model->motion, now_ms);
+        if (model->semantic_pose_active && model->humanoid_ready && !model->semantic_pose_failed &&
+            !eidolon_pose_solve(&model->motion, &model->humanoid, &model->semantic_pose)) {
+            eidolon_log_write("motion", "semantic pose disabled after solve failure: %s",
+                              SDL_GetError());
+            model->semantic_pose_failed = true;
+            SDL_ClearError();
+            eidolon_motion_update_idle(&model->motion, now_ms);
+        }
     }
     if (!update_joint_palette(model) || !SDL_FlushRenderer(model->renderer) ||
-        !write_constant_buffer(model, model->scene_buffer, model_view_projection,
-                               sizeof(model_view_projection)) ||
+        !write_constant_buffer(model, model->scene_buffer, &scene, sizeof(scene)) ||
         !write_constant_buffer(model, model->bones_buffer, model->joint_palette,
                                sizeof(model->joint_palette))) {
         return false;
@@ -1142,13 +1352,23 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     ID3D11DeviceContext_VSSetConstantBuffers(model->context, 0, SDL_arraysize(constant_buffers),
                                              constant_buffers);
     ID3D11DeviceContext_PSSetSamplers(model->context, 0, 1, &model->sampler);
-    ID3D11DeviceContext_OMSetDepthStencilState(model->context, model->depth_state, 0);
-    ID3D11DeviceContext_OMSetBlendState(model->context, NULL, NULL, UINT_MAX);
+    ID3D11DeviceContext_PSSetConstantBuffers(model->context, 0, 1, &model->material_buffer);
 
+    bool rendered = true;
     for (size_t draw_index = 0; draw_index < model->draw_count; ++draw_index) {
         const EidolonModelDraw *draw = &model->draws[draw_index];
         const size_t texture_index =
             draw->texture_index < model->texture_count ? (size_t)draw->texture_index : 0;
+        if (!write_constant_buffer(model, model->material_buffer, &draw->material,
+                                   sizeof(draw->material))) {
+            rendered = false;
+            break;
+        }
+        ID3D11DeviceContext_OMSetDepthStencilState(
+            model->context, draw->alpha_blend ? model->depth_state_no_write : model->depth_state,
+            0);
+        ID3D11DeviceContext_OMSetBlendState(
+            model->context, draw->alpha_blend ? model->alpha_blend : NULL, NULL, UINT_MAX);
         ID3D11DeviceContext_PSSetShaderResources(model->context, 0, 1,
                                                  &model->textures[texture_index]);
         ID3D11DeviceContext_DrawIndexed(model->context, draw->index_count, draw->first_index, 0);
@@ -1157,6 +1377,9 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     ID3D11DeviceContext_PSSetShaderResources(model->context, 0, 1, &null_view);
     ID3D11DeviceContext_OMSetRenderTargets(model->context, 0, NULL, NULL);
     restore_d3d11_state(model->context, &saved_state);
+    if (!rendered) {
+        return false;
+    }
     model->last_submit_ms = now_ms;
     model->presented_frame_sequence += 1U;
     model->presented_transform_revision = model->transform_revision;
@@ -1447,7 +1670,7 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
         return false;
     }
     SDL_GPUShader *fragment_shader =
-        load_shader(model, shader_directory, "model.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+        load_shader(model, shader_directory, "model.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
     if (fragment_shader == NULL) {
         SDL_ReleaseGPUShader(model->device, vertex_shader);
         return false;
@@ -1483,9 +1706,21 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
             .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
             .offset = offsetof(EidolonModelVertex, weights),
         },
+        {
+            .location = 4,
+            .buffer_slot = 0,
+            .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+            .offset = offsetof(EidolonModelVertex, neutral_delta),
+        },
+        {
+            .location = 5,
+            .buffer_slot = 0,
+            .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+            .offset = offsetof(EidolonModelVertex, focused_delta),
+        },
     };
-    const SDL_GPUColorTargetDescription color_target = {.format = MODEL_COLOR_FORMAT};
-    const SDL_GPUGraphicsPipelineCreateInfo create_info = {
+    SDL_GPUColorTargetDescription color_target = {.format = MODEL_COLOR_FORMAT};
+    SDL_GPUGraphicsPipelineCreateInfo create_info = {
         .vertex_shader = vertex_shader,
         .fragment_shader = fragment_shader,
         .vertex_input_state =
@@ -1519,9 +1754,20 @@ static bool create_pipeline(EidolonModelRenderer *model, const char *shader_dire
             },
     };
     model->pipeline = SDL_CreateGPUGraphicsPipeline(model->device, &create_info);
+    color_target.blend_state = (SDL_GPUColorTargetBlendState){
+        .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+        .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+        .color_blend_op = SDL_GPU_BLENDOP_ADD,
+        .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+        .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+        .alpha_blend_op = SDL_GPU_BLENDOP_ADD,
+        .enable_blend = true,
+    };
+    create_info.depth_stencil_state.enable_depth_write = false;
+    model->alpha_pipeline = SDL_CreateGPUGraphicsPipeline(model->device, &create_info);
     SDL_ReleaseGPUShader(model->device, fragment_shader);
     SDL_ReleaseGPUShader(model->device, vertex_shader);
-    return model->pipeline != NULL;
+    return model->pipeline != NULL && model->alpha_pipeline != NULL;
 }
 
 static bool create_targets(EidolonModelRenderer *model, SDL_Renderer *renderer) {
@@ -1633,10 +1879,7 @@ static bool consume_readback(EidolonModelRenderer *model, EidolonModelReadback *
 }
 
 static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
-    static const float projection[16] = {
-        1.4F, 0.0F, 0.0F,   0.0F, 0.0F, 1.4F,    0.0F, 0.0F,
-        0.0F, 0.0F, -0.55F, 0.0F, 0.0F, -0.784F, 0.5F, 1.0F,
-    };
+    float projection[16];
     float yaw_rotation[16];
     float pitch_rotation[16];
     float roll_rotation[16];
@@ -1646,7 +1889,8 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     float to_pivot[16];
     float rotation_from_pivot[16];
     float centered_rotation[16];
-    float model_view_projection[16];
+    EidolonModelScene scene;
+    model_projection(model, projection);
     matrix_rotation_y(model->yaw_radians, yaw_rotation);
     matrix_rotation_x(model->pitch_radians, pitch_rotation);
     matrix_rotation_z(model->roll_radians, roll_rotation);
@@ -1658,7 +1902,13 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
                        to_pivot);
     matrix_multiply(model_rotation, from_pivot, rotation_from_pivot);
     matrix_multiply(to_pivot, rotation_from_pivot, centered_rotation);
-    matrix_multiply(projection, centered_rotation, model_view_projection);
+    matrix_multiply(projection, centered_rotation, scene.model_view_projection);
+    scene.expression_weights[0] =
+        model->vrm_ready ? 1.0F - model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[1] =
+        model->vrm_ready ? model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[2] = 0.0F;
+    scene.expression_weights[3] = 0.0F;
 
     EidolonModelReadback *readback = NULL;
     for (size_t offset = 0; offset < MODEL_READBACK_COUNT; ++offset) {
@@ -1675,14 +1925,16 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     readback->frame_sequence = ++model->next_frame_sequence;
     readback->transform_revision = model->transform_revision;
 
-    eidolon_motion_update_idle(&model->motion, now_ms);
-    if (model->semantic_pose_active && model->humanoid_ready && !model->semantic_pose_failed &&
-        !eidolon_pose_solve(&model->motion, &model->humanoid, &model->semantic_pose)) {
-        eidolon_log_write("motion", "semantic pose disabled after solve failure: %s",
-                          SDL_GetError());
-        model->semantic_pose_failed = true;
-        SDL_ClearError();
+    if (!model->vrm_ready) {
         eidolon_motion_update_idle(&model->motion, now_ms);
+        if (model->semantic_pose_active && model->humanoid_ready && !model->semantic_pose_failed &&
+            !eidolon_pose_solve(&model->motion, &model->humanoid, &model->semantic_pose)) {
+            eidolon_log_write("motion", "semantic pose disabled after solve failure: %s",
+                              SDL_GetError());
+            model->semantic_pose_failed = true;
+            SDL_ClearError();
+            eidolon_motion_update_idle(&model->motion, now_ms);
+        }
     }
     if (!update_joint_palette(model)) {
         return false;
@@ -1692,7 +1944,7 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     if (commands == NULL) {
         return false;
     }
-    SDL_PushGPUVertexUniformData(commands, 0, model_view_projection, sizeof(model_view_projection));
+    SDL_PushGPUVertexUniformData(commands, 0, &scene, sizeof(scene));
     SDL_PushGPUVertexUniformData(commands, 1, model->joint_palette, sizeof(model->joint_palette));
 
     const SDL_GPUColorTargetInfo color_target = {
@@ -1716,7 +1968,6 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
         return false;
     }
 
-    SDL_BindGPUGraphicsPipeline(render_pass, model->pipeline);
     SDL_BindGPUVertexBuffers(render_pass, 0,
                              &(SDL_GPUBufferBinding){.buffer = model->vertex_buffer}, 1);
     SDL_BindGPUIndexBuffer(render_pass, &(SDL_GPUBufferBinding){.buffer = model->index_buffer},
@@ -1729,6 +1980,10 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
             .texture = model->textures[texture_index],
             .sampler = model->sampler,
         };
+        SDL_PushGPUFragmentUniformData(commands, 0, &draw->material,
+                                       (Uint32)sizeof(draw->material));
+        SDL_BindGPUGraphicsPipeline(render_pass,
+                                    draw->alpha_blend ? model->alpha_pipeline : model->pipeline);
         SDL_BindGPUFragmentSamplers(render_pass, 0, &binding, 1);
         SDL_DrawGPUIndexedPrimitives(render_pass, draw->index_count, 1, draw->first_index, 0, 0);
     }
@@ -1919,18 +2174,51 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
         return NULL;
     }
 
-    EidolonCpuGeometry geometry;
-    if (!build_motion_rig(model, data) ||
-        !build_cpu_geometry(data, model->joint_count, &geometry)) {
+    const bool is_vrm = data_has_extension(data, "VRMC_vrm");
+    if (!is_vrm && data_has_extension(data, "VRM")) {
+        SDL_SetError("legacy VRM 0.x is not supported by the VRM 1.0 body path");
         cgltf_free(data);
         eidolon_model_destroy(model);
         return NULL;
     }
-    model->humanoid_ready = eidolon_humanoid_profile_init(&model->humanoid, &model->motion);
-    if (!model->humanoid_ready) {
-        eidolon_log_write("motion", "humanoid profile unavailable; target-space poses disabled: %s",
-                          SDL_GetError());
-        SDL_ClearError();
+    if (is_vrm) {
+        char error[256];
+        if (!eidolon_vrm_body_parse(data, &model->vrm_body, error, sizeof(error)) ||
+            !eidolon_vrm_body_make_profile(data, &model->vrm_body, &model->body_profile, error,
+                                           sizeof(error))) {
+            SDL_SetError("VRM 1.0 body validation failed: %s", error);
+            cgltf_free(data);
+            eidolon_model_destroy(model);
+            return NULL;
+        }
+    }
+
+    EidolonCpuGeometry geometry;
+    if (!build_motion_rig(model, data, is_vrm) ||
+        !build_cpu_geometry(data, model->joint_count, is_vrm ? &model->vrm_body : NULL,
+                            &geometry)) {
+        cgltf_free(data);
+        eidolon_model_destroy(model);
+        return NULL;
+    }
+    if (is_vrm) {
+        model->vrm_ready =
+            eidolon_vrm_projection_init(&model->vrm_projection, &model->vrm_body, &model->motion);
+        if (!model->vrm_ready) {
+            SDL_SetError("could not initialize VRM 1.0 control projection");
+            cpu_geometry_destroy(&geometry);
+            cgltf_free(data);
+            eidolon_model_destroy(model);
+            return NULL;
+        }
+    } else {
+        model->humanoid_ready = eidolon_humanoid_profile_init(&model->humanoid, &model->motion);
+        if (!model->humanoid_ready) {
+            eidolon_log_write("motion",
+                              "humanoid profile unavailable; target-space poses disabled: %s",
+                              SDL_GetError());
+            SDL_ClearError();
+        }
     }
     eidolon_motion_set_neutral_pose(&model->motion, neutral_pose);
     eidolon_motion_set_idle_tuning(&model->motion, idle_tuning);
@@ -1964,13 +2252,24 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
     const char *gpu_driver = SDL_GetGPUDeviceDriver(model->device);
     const char *frame_transfer = "asynchronous-readback";
 #endif
-    eidolon_log_write(
-        "model",
-        "loaded GLB draws=%zu textures=%zu joints=%zu target=%dx%d gpu=%s humanoid=%s "
-        "frame-transfer=%s",
-        model->draw_count, model->texture_count, model->joint_count, model->target_width,
-        model->target_height, gpu_driver != NULL ? gpu_driver : "unknown",
-        model->humanoid_ready ? "ready" : "unavailable", frame_transfer);
+    eidolon_log_write("model",
+                      "loaded %s draws=%zu textures=%zu joints=%zu target=%dx%d gpu=%s humanoid=%s "
+                      "frame-transfer=%s",
+                      model->vrm_ready ? "VRM 1.0" : "GLB", model->draw_count, model->texture_count,
+                      model->joint_count, model->target_width, model->target_height,
+                      gpu_driver != NULL ? gpu_driver : "unknown",
+                      (model->humanoid_ready || model->vrm_ready) ? "ready" : "unavailable",
+                      frame_transfer);
+    if (model->vrm_ready) {
+        eidolon_log_write("model",
+                          "VRM body '%s' by %s look-at=%s expression=%s spring=%s "
+                          "license=%s",
+                          model->vrm_body.name, model->vrm_body.author,
+                          model->vrm_body.has_look_at ? "yes" : "head-only",
+                          model->vrm_body.has_expression ? "neutral+relaxed" : "neutral-only",
+                          model->vrm_body.has_spring_bones ? "declared-not-simulated" : "absent",
+                          model->vrm_body.license_url);
+    }
     if (model->humanoid_ready) {
         eidolon_log_write(
             "motion", "humanoid metrics shoulders=%.4f arms=%.4f/%.4f torso=%.4f",
@@ -1978,6 +2277,34 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
             model->humanoid.arm_length[EIDOLON_HUMANOID_RIGHT], model->humanoid.torso_length);
     }
     return model;
+}
+
+bool eidolon_model_body_profile(const EidolonModelRenderer *model, EidolonEprBodyProfile *profile) {
+    if (model == NULL || profile == NULL || !model->vrm_ready || model->failed) {
+        return false;
+    }
+    *profile = model->body_profile;
+    return true;
+}
+
+bool eidolon_model_apply_control(EidolonModelRenderer *model,
+                                 const EidolonCanonicalControl *control) {
+    if (model == NULL || control == NULL || !model->vrm_ready || model->failed) {
+        return SDL_SetError("VRM control projection is unavailable");
+    }
+    if (!eidolon_vrm_projection_apply(&model->vrm_projection, &model->motion, control)) {
+        return SDL_SetError("VRM control revision %llu was stale or invalid",
+                            (unsigned long long)control->revision);
+    }
+    model->transform_revision += 1U;
+    return true;
+}
+
+const char *eidolon_model_body_name(const EidolonModelRenderer *model) {
+    if (model != NULL && model->vrm_ready && model->vrm_body.name[0] != '\0') {
+        return model->vrm_body.name;
+    }
+    return "Rio (Battle)";
 }
 
 void eidolon_model_update(EidolonModelRenderer *model, uint64_t now_ms) {
@@ -2030,6 +2357,12 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
     if (model->depth_state != NULL) {
         ID3D11DepthStencilState_Release(model->depth_state);
     }
+    if (model->depth_state_no_write != NULL) {
+        ID3D11DepthStencilState_Release(model->depth_state_no_write);
+    }
+    if (model->alpha_blend != NULL) {
+        ID3D11BlendState_Release(model->alpha_blend);
+    }
     if (model->rasterizer != NULL) {
         ID3D11RasterizerState_Release(model->rasterizer);
     }
@@ -2038,6 +2371,9 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
     }
     if (model->scene_buffer != NULL) {
         ID3D11Buffer_Release(model->scene_buffer);
+    }
+    if (model->material_buffer != NULL) {
+        ID3D11Buffer_Release(model->material_buffer);
     }
     if (model->input_layout != NULL) {
         ID3D11InputLayout_Release(model->input_layout);
@@ -2096,6 +2432,9 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
     if (release_gpu && model->pipeline != NULL) {
         SDL_ReleaseGPUGraphicsPipeline(model->device, model->pipeline);
     }
+    if (release_gpu && model->alpha_pipeline != NULL) {
+        SDL_ReleaseGPUGraphicsPipeline(model->device, model->alpha_pipeline);
+    }
     if (release_gpu && model->sampler != NULL) {
         SDL_ReleaseGPUSampler(model->device, model->sampler);
     }
@@ -2118,6 +2457,7 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
 #endif
     SDL_free(model->textures);
     SDL_free(model->draws);
+    eidolon_vrm_projection_destroy(&model->vrm_projection);
     eidolon_motion_destroy(&model->motion);
     SDL_free(model);
 }

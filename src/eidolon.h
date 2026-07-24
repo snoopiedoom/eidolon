@@ -14,6 +14,7 @@
 #include "dialogue.h"
 #include "model.h"
 #include "motion_config.h"
+#include "performance_fixture.h"
 #include "platform/ipc.h"
 #include "portrait.h"
 #include "pose.h"
@@ -71,6 +72,10 @@ typedef struct EidolonApp {
     SDL_Texture *atlas;
     EidolonTextRenderer *text_renderer;
     EidolonModelRenderer *model;
+    EidolonPerformanceRuntime performance_runtime;
+    EidolonPerformanceFixture performance_fixture;
+    bool performance_runtime_ready;
+    uint64_t performance_control_attempted_revision;
     EidolonPortraitRenderer *portrait;
     EidolonSettingsUi *settings_ui;
     EidolonEventPump *event_pump;

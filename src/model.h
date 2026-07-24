@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "epr/performance_runtime.h"
 #include "motion.h"
 #include "pose.h"
 
@@ -25,6 +26,10 @@ void eidolon_model_set_neutral_pose(EidolonModelRenderer *model, float arm_lower
 void eidolon_model_set_semantic_pose(EidolonModelRenderer *model, const EidolonSemanticPose *pose);
 void eidolon_model_clear_semantic_pose(EidolonModelRenderer *model);
 void eidolon_model_set_idle_tuning(EidolonModelRenderer *model, EidolonIdleTuning tuning);
+bool eidolon_model_body_profile(const EidolonModelRenderer *model, EidolonEprBodyProfile *profile);
+bool eidolon_model_apply_control(EidolonModelRenderer *model,
+                                 const EidolonCanonicalControl *control);
+const char *eidolon_model_body_name(const EidolonModelRenderer *model);
 bool eidolon_model_set_render_resolution(EidolonModelRenderer *model, int side);
 int eidolon_model_render_resolution(const EidolonModelRenderer *model);
 uint64_t eidolon_model_presented_transform_revision(const EidolonModelRenderer *model);

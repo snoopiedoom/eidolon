@@ -21,6 +21,8 @@ typedef enum EidolonEprBehaviorKind {
     EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION,
     EIDOLON_EPR_BEHAVIOR_GAZE_RESPONSE,
     EIDOLON_EPR_BEHAVIOR_GAZE_INTERRUPTED,
+    EIDOLON_EPR_BEHAVIOR_EXPRESSION_NEUTRAL,
+    EIDOLON_EPR_BEHAVIOR_EXPRESSION_FOCUSED,
     EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT,
     EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM
 } EidolonEprBehaviorKind;
@@ -82,8 +84,7 @@ bool eidolon_epr_plan_apply(const EidolonBehaviorPlan *previous,
                             const EidolonPerformanceIntent *intent, EidolonBehaviorPlan *candidate);
 const EidolonEprBehaviorUnit *eidolon_epr_plan_find(const EidolonBehaviorPlan *plan,
                                                     EidolonEprOpaqueId behavior);
-EidolonEprOpaqueId eidolon_epr_behavior_id(EidolonEprBehaviorKind kind,
-                                           EidolonEprOpaqueId cause);
+EidolonEprOpaqueId eidolon_epr_behavior_id(EidolonEprBehaviorKind kind, EidolonEprOpaqueId cause);
 EidolonEprAnchorId eidolon_epr_behavior_anchor_id(EidolonEprOpaqueId behavior,
                                                   EidolonEprBehaviorPhase phase);
 

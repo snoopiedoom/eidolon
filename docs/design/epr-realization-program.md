@@ -33,9 +33,11 @@ First-slice realizers are:
 
 ## Realization Program
 
-A program contains stable behavior/program ids, plan generation, modality, resource channels,
-anchor references, curve segments, normalized semantic targets, capability requirements, and
-fallback. Curves use integer tick intervals and deterministic interpolation.
+A first-slice program contains a schema version, stable behavior/program ids, semantic cause, plan
+generation, modality, resource and capability masks, copied phase anchors, normalized semantic
+targets, and bounded scalar parameters. Integer logical ticks and deterministic interpolation own
+all curve timing. The program set is compiled transactionally with a plan generation and is
+immutable while sampled.
 
 Programs contain no glTF node index, VRM JSON property, SDL type, D3D type, DirectComposition type,
 Win32 handle, scene layer, or presentation target.
@@ -45,21 +47,23 @@ Win32 handle, scene layer, or presentation target.
 The first-slice canonical state owns:
 
 - logical tick and monotonic revision;
-- semantic torso/chest/neck/head orientations;
-- left/right upper-arm, lower-arm, and hand orientations;
+- semantic torso and head orientations;
 - normalized eye and head gaze contributions plus semantic target;
-- named expression weights;
-- velocities needed for interruption cleanup;
+- a right-hand task-space target, elbow pole, solved elbow/hand positions, and wrist orientation;
+- right-arm velocity used for interruption continuity;
+- focused-expression weight;
 - validity and capability-degradation flags.
 
-It does not contain model-local matrices or GPU palette data.
+It does not contain left-arm pose, model-local bone orientations, matrices, or GPU palette data.
+The first VRM adapter lowers its bind T-pose left arm as a body-local neutral baseline; that is not
+a hidden EPR gesture channel.
 
 ## Composition order
 
 At each fixed control tick:
 
-1. clone the last valid state into a candidate;
-2. sample base posture programs;
+1. create one complete neutral candidate for the current plan generation;
+2. sample the granted base posture program;
 3. apply cooperative gaze/head composition;
 4. apply compatible seeded idle residuals;
 5. apply granted override gesture/cleanup channels;
@@ -68,7 +72,9 @@ At each fixed control tick:
 8. atomically commit the complete candidate and revision, or retain the last valid state;
 9. publish the immutable snapshot and deterministic normalized hash.
 
-There is no partial joint commit.
+Cleanup is the exception that deliberately receives captured current canonical state: the settle
+program begins from the actually solved hand and wrist at interruption, then transfers the arm to
+the new posture. There is no partial joint commit.
 
 ## Physical solving
 
@@ -82,4 +88,3 @@ channels. Missing required humanoid structure rejects the body profile before co
 Typed realizer, composition, solve, and capability feedback is attached to the current plan
 generation and trace. It may select a declared deterministic fallback. It cannot mutate source
 truth, resurrect stale behavior, or start an unbounded replan inside the control tick.
-

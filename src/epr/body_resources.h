@@ -55,10 +55,16 @@ typedef struct EidolonEprResourceGrant {
     uint16_t composition_rule;
 } EidolonEprResourceGrant;
 
+typedef struct EidolonEprResourceDenial {
+    EidolonEprOpaqueId behavior;
+    EidolonEprBodyResource resource;
+    EidolonEprClaimMode mode;
+} EidolonEprResourceDenial;
+
 typedef struct EidolonEprResourceResolution {
     EidolonEprResourceGrant grants[EIDOLON_EPR_RESOURCE_GRANT_CAPACITY];
     size_t grant_count;
-    EidolonEprOpaqueId denied[EIDOLON_EPR_RESOURCE_CLAIM_CAPACITY];
+    EidolonEprResourceDenial denied[EIDOLON_EPR_RESOURCE_CLAIM_CAPACITY];
     size_t denied_count;
 } EidolonEprResourceResolution;
 
@@ -67,8 +73,7 @@ int eidolon_epr_resource_rank_compare(const EidolonEprResourceRank *left,
 bool eidolon_epr_resource_resolve(const EidolonEprResourceClaim *claims, size_t claim_count,
                                   EidolonEprTick tick, EidolonEprResourceResolution *resolution);
 bool eidolon_epr_resource_is_granted(const EidolonEprResourceResolution *resolution,
-                                     EidolonEprOpaqueId behavior,
-                                     EidolonEprBodyResource resource);
+                                     EidolonEprOpaqueId behavior, EidolonEprBodyResource resource);
 EidolonEprOpaqueId
 eidolon_epr_resource_override_owner(const EidolonEprResourceResolution *resolution,
                                     EidolonEprBodyResource resource);

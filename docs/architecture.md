@@ -32,8 +32,8 @@ transparent desktop presentation + native hit testing
 
 This is the current implementation. Its presentation boundary is real, but the legacy path still
 retains transitional SDL renderer aliases and the native path currently supports only portraits.
-The approved EPR workstream inserts a renderer-neutral control boundary without changing source,
-session, scene, or presentation ownership:
+The first EPR slice inserts a renderer-neutral control boundary for an explicitly selected VRM
+body without changing source, session, scene, or presentation ownership:
 
 ```text
 accepted operational + semantic evidence
@@ -113,8 +113,8 @@ snapshots and prepared expression tracks.
 - `performance_runtime`, `behavior_plan`, `body_resources`, `realization`, `canonical_control`:
   approved EPR boundaries for immutable intent, plan generations, temporal commitment, explicit
   grants, modality programs, and whole-state control transactions;
-- `vrm_body`: VRM 1.0 metadata validation, body-profile/capability publication, and model-local
-  projection; it does not render or select behavior;
+- `vrm_body`, `vrm_projection`: VRM 1.0 validation and body-profile publication followed by
+  transactional model-local projection; neither renders or selects behavior;
 - `performance_trace`: bounded typed causal records; it observes decisions without owning them;
 - `draw`: transparent SDL composition, dialogue rendering, snapshots, and hit-mask invalidation;
 - `text_renderer`: SDL_ttf faces, fallback selection, and reusable cached text objects;
@@ -135,7 +135,8 @@ The active body renderer is selected at runtime:
 - **2D portrait** displays one full-canvas transparent expression image at a time. Expression art
   swaps atomically on the next rendered frame. Breathing, posture, delivery spring, attention, and
   semantic accents compose into one bottom-anchored transform.
-- **3D model** evaluates a skinned GLB hierarchy and procedural pose state, then renders into an
+- **3D model** evaluates a skinned GLB/VRM hierarchy. A selected VRM consumes complete EPR
+  canonical-control revisions; Rio retains its legacy procedural pose path. Both render into an
   SDL-owned GPU texture.
 
 Body selection must not initialize expensive inactive renderers unnecessarily. When the 2D

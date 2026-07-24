@@ -39,7 +39,9 @@ product capability is absent.
 Bunny Asuna is the alpha-driving portrait body: ten full-canvas expressions, full/bust framing,
 Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible agent
 session. The Mutsuki Dress v2 sprite remains a fallback. Rio's procedural 3D renderer remains
-selectable and is deliberately initialized only when requested.
+selectable and is deliberately initialized only when requested. A local VRM 1.0 body can now run
+the first complete EPR vertical slice through that existing SDL 3D presentation path; the portrait
+remains the shipped default.
 
 The settings/debug surface is a separate Dear ImGui window. Preferred renderer, portable
 presentation preference, display scale, portrait framing, 3D resolution/rotation, and dialogue
@@ -87,6 +89,19 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   cadence/layout application, and bounded device/backend reconstruction with an explicit logged SDL
   fallback;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
+- EPR accepts versioned synthetic Performance Intent, publishes incremental behavior plans and
+  immutable modality Realization Programs, dispatches fixed logical anchors, arbitrates explicit
+  body resources, atomically solves canonical control, and records a bounded deterministic causal
+  trace;
+- the first EPR scenario covers idle, attention/listening, thinking, streamed response, focused
+  expression, eye-first/head-follow gaze, a restrained right-arm contrast gesture, interruption,
+  current-state resource transfer and cleanup, guarded settling, and prevention of interrupted
+  phase replay;
+- one local VRM 1.0 path validates authoritative humanoid roles and optional morph/look-at
+  capabilities, projects monotonic control transactions, renders morph/material/alpha data, and
+  degrades optional capabilities locally;
+- deterministic performance snapshots and a hidden five-second SDL 3D run complete with the
+  portrait/default and native-presentation selections unchanged;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
 
@@ -96,6 +111,9 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   response and retain the new performance log if timing still feels wrong.
 - Switch all three body renderers through settings and confirm scale, framing, rotation, and restart
   persistence.
+- Judge the VRM EPR sequence as a performance: whether attention, thinking, contrast, interruption,
+  cleanup, and continued presence read correctly and feel alive. Structural trace and control
+  verification is automated.
 
 The owner accepted ordinary no-environment DirectComposition portrait/dialogue startup, transparent
 per-pixel click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
@@ -137,6 +155,13 @@ interaction after both injected recovery branches.
   part of normal verification;
 - Rio pose endpoints remain calibration work, not finished animation: relaxed is stiff, guarded is
   behind the body, and attentive/playful are unconvincing;
+- the first EPR ingress is a deterministic synthetic fixture behind the future A2 boundary; live
+  A2 source/session provenance is not duplicated here;
+- retired-plan compaction is not needed by the bounded first fixture but must land before
+  long-running live A2 evidence can produce unbounded performance episodes;
+- the VRM path implements the first focused morph and base PBR color/alpha subset; MToon shading,
+  spring bones, node constraints, fingers, locomotion, balance, and a broader gesture catalogue are
+  deferred;
 - planted feet, wrist orientation, lower-body IK, gaze/blink behavior, and secondary physics remain
   future 3D milestones;
 - ChatGPT Desktop chat and ZCode expose no verified attachable local stream, so their agent adapters
@@ -156,6 +181,10 @@ is complete and owner-accepted for the Windows 2D daily-driver path. DirectCompo
 normal portrait selection; `sdl_window_legacy` remains the explicit, capability, and failure
 fallback with its accepted modal-drag limitation.
 
+The separate EPR/VRM workstream is at its first owner-feel gate. Its implementation stays on
+`sdl_window_legacy`; native DirectComposition 3D and making 3D the default remain downstream of
+owner acceptance and do not alter A2 ownership.
+
 1. add source-instance identity and migrate registry ownership from legacy
    `(adapter kind, session id)` to durable `(source_id, session_id)`;
 2. expose source/adapter connection and failure state without moving ownership into the
@@ -171,8 +200,8 @@ fallback with its accepted modal-drag limitation.
 
 ## Deferred by the active roadmap
 
-- Rio pose calibration and making 3D the default body remain important, but do not interrupt the 2D
-  daily-driver alpha unless a shared renderer-neutral contract requires 3D validation.
+- native DirectComposition 3D, production-path EPR tuning, and making 3D the default body remain
+  downstream of owner acceptance of the first SDL EPR performance;
 - portrait-catalog expression annotation remains downstream of current Expression Director tuning
   and distributable character-package decisions.
 - conversational memory, persona-mediated output, and the local-first persona bridge are post-V1

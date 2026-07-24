@@ -64,6 +64,7 @@ make check                 # ordinary unit/regression suite
 make imgui-smoke           # generated C API + SDL backends
 make affect-check          # worker inference + async client
 make affect-benchmark      # cold/warm beat inference profile
+make epr-trace             # deterministic first-slice causal JSONL on stdout
 make log                   # tail the Windows debug log
 ```
 
@@ -103,7 +104,12 @@ exit:
 ./build/windows/eidolon.exe --snapshot-portrait-motion 1 120 build/windows/qa-expression.png
 ./build/windows/eidolon.exe --snapshot-pose 1 build/windows/qa-pose.png
 ./build/windows/eidolon.exe --snapshot-resolution 2048 build/windows/qa-2048.png
+./build/windows/eidolon.exe --snapshot-performance 3520 build/windows/qa-epr-peak.png
 ```
+
+`--snapshot-performance` accepts a fixed logical tick from 0 through 5000 milliseconds in 20 ms
+increments. It drives the synthetic EPR evidence fixture, projects the resulting canonical control
+through the selected VRM, and captures the existing SDL 3D path. It does not make 3D the default.
 
 Automated Blender inspection must use `--background`. `make model-mouth-calibrate` is the sole
 intentional live exception because it is an explicitly user-operated calibration tool.

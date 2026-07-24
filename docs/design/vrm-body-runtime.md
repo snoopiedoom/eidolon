@@ -15,27 +15,31 @@ The first path accepts binary glTF containing `VRMC_vrm` version 1.0 metadata. I
 
 - one usable skinned humanoid hierarchy;
 - required VRM humanoid roles and unique node bindings;
-- finite bind transforms and inverse-bind matrices;
-- hierarchy consistency and joint reach;
-- model license metadata suitable for local use.
+- finite role-node positions and non-zero right-arm segment lengths;
+- expression binds that reference a real mesh morph target with a position delta;
+- model name, author, license URL, commercial-use declaration, and credit declaration.
+
+The adapter records declared usage metadata; it does not decide whether the operator has legal
+authority to use an asset.
 
 VRM humanoid metadata is authoritative. Node-name aliases and Rio-specific bone names are not used
 to claim VRM conformance.
 
 ## Published body profile
 
-The adapter publishes:
+The VRM adapter retains the authoritative humanoid-role-to-node map, validated neutral/focused
+morph binds, metadata, and declarations for look-at, spring bones, and MToon. Its first-slice EPR
+body profile publishes:
 
-- semantic humanoid-role availability;
 - normalized forward, up, and right axes;
-- height, shoulder width, arm segment lengths, and conservative reach;
-- conservative semantic joint limits or validated body-specific limits;
-- look-at mode/ranges when present;
-- expression names/binds relevant to neutral and focused states;
-- optional node-constraint and spring-bone presence;
+- semantic shoulder/head positions, right-arm segment lengths, and conservative reach;
+- conservative shoulder/head and elbow limits;
+- required-humanoid/right-arm plus optional eyes/look-at and expression capability flags;
 - a deterministic body-profile fingerprint.
 
 EPR consumes only this profile. It does not read VRM extension structures.
+Body height, shoulder width, authored look-at ranges, and body-specific joint ranges are future
+profile extensions rather than values invented from incomplete data.
 
 ## Capability projection
 
@@ -54,15 +58,14 @@ gesture, dialogue, or session observation.
 
 For each new canonical revision:
 
-1. start from the adapter's last valid model-local projection;
+1. reset a private candidate to the VRM bind rotations;
 2. map semantic orientations into VRM humanoid local frames;
-3. apply head/torso and arm control;
+3. apply head/torso, a body-local relaxed left-arm baseline, and controlled right-arm state;
 4. apply VRM look-at/eye contribution when supported;
 5. apply expression weights when supported;
-6. reserve the documented node-constraint/spring update stage without pretending it ran;
-7. rebuild hierarchy and skinning palette;
-8. validate finite transforms and palette;
-9. publish the complete projection or retain the previous valid one.
+6. rebuild hierarchy and skinning palette;
+7. validate finite rotations and complete hierarchy evaluation;
+8. publish the complete projection or restore the previous valid rotations and expression.
 
 The renderer consumes a monotonic complete projection. A failed projection cannot expose half an
 arm or partially applied morph weights.
@@ -79,7 +82,8 @@ remain operational.
 ## Rendering boundary
 
 Existing model geometry, texture upload, skinning, camera, render target, and SDL texture handoff
-remain renderer responsibilities. VRM support may extend material/morph handling only where needed
-for the first body. EPR itself has no dependency on SDL, D3D11, DirectComposition, Windows, scene,
-or presentation headers.
-
+remain renderer responsibilities. The first body path supports skinned morph-position blending,
+base-color factors/textures, and opaque/mask/blend alpha. Full MToon shading, spring-bone
+simulation, and node-constraint evaluation are deliberately deferred even when their extensions
+are declared. EPR itself has no dependency on SDL, D3D11, DirectComposition, Windows, scene, or
+presentation headers.

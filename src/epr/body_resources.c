@@ -29,9 +29,10 @@ static bool claim_active(const EidolonEprResourceClaim *claim, EidolonEprTick ti
     return tick >= claim->start_tick && tick <= claim->end_tick;
 }
 
-static const EidolonEprResourceClaim *
-best_claim(const EidolonEprResourceClaim *claims, size_t claim_count, EidolonEprTick tick,
-           EidolonEprBodyResource resource, EidolonEprClaimMode mode) {
+static const EidolonEprResourceClaim *best_claim(const EidolonEprResourceClaim *claims,
+                                                 size_t claim_count, EidolonEprTick tick,
+                                                 EidolonEprBodyResource resource,
+                                                 EidolonEprClaimMode mode) {
     const EidolonEprResourceClaim *best = NULL;
     for (size_t index = 0; index < claim_count; ++index) {
         const EidolonEprResourceClaim *claim = &claims[index];
@@ -74,9 +75,13 @@ static bool grant_contains(const EidolonEprResourceResolution *resolution,
 
 static void sort_denied(EidolonEprResourceResolution *resolution) {
     for (size_t index = 1U; index < resolution->denied_count; ++index) {
-        const EidolonEprOpaqueId value = resolution->denied[index];
+        const EidolonEprResourceDenial value = resolution->denied[index];
         size_t insert = index;
-        while (insert > 0U && resolution->denied[insert - 1U] > value) {
+        while (insert > 0U && (resolution->denied[insert - 1U].resource > value.resource ||
+                               (resolution->denied[insert - 1U].resource == value.resource &&
+                                (resolution->denied[insert - 1U].mode > value.mode ||
+                                 (resolution->denied[insert - 1U].mode == value.mode &&
+                                  resolution->denied[insert - 1U].behavior > value.behavior))))) {
             resolution->denied[insert] = resolution->denied[insert - 1U];
             insert -= 1U;
         }
@@ -101,21 +106,16 @@ bool eidolon_epr_resource_resolve(const EidolonEprResourceClaim *claims, size_t 
                 return false;
             }
         } else {
-            if (!append_grant(
-                    resolution,
-                    best_claim(claims, claim_count, tick, resource, EIDOLON_EPR_CLAIM_BASE))) {
+            if (!append_grant(resolution, best_claim(claims, claim_count, tick, resource,
+                                                     EIDOLON_EPR_CLAIM_BASE))) {
                 return false;
             }
-            if (!append_grant(
-                    resolution,
-                    best_claim(claims, claim_count, tick, resource,
-                               EIDOLON_EPR_CLAIM_COOPERATIVE))) {
+            if (!append_grant(resolution, best_claim(claims, claim_count, tick, resource,
+                                                     EIDOLON_EPR_CLAIM_COOPERATIVE))) {
                 return false;
             }
-            if (!append_grant(
-                    resolution,
-                    best_claim(claims, claim_count, tick, resource,
-                               EIDOLON_EPR_CLAIM_ADDITIVE))) {
+            if (!append_grant(resolution, best_claim(claims, claim_count, tick, resource,
+                                                     EIDOLON_EPR_CLAIM_ADDITIVE))) {
                 return false;
             }
         }
@@ -128,7 +128,9 @@ bool eidolon_epr_resource_resolve(const EidolonEprResourceClaim *claims, size_t 
         if (resolution->denied_count >= EIDOLON_EPR_RESOURCE_CLAIM_CAPACITY) {
             return false;
         }
-        resolution->denied[resolution->denied_count] = claim->behavior;
+        resolution->denied[resolution->denied_count].behavior = claim->behavior;
+        resolution->denied[resolution->denied_count].resource = claim->resource;
+        resolution->denied[resolution->denied_count].mode = claim->mode;
         resolution->denied_count += 1U;
     }
     sort_denied(resolution);
@@ -136,8 +138,7 @@ bool eidolon_epr_resource_resolve(const EidolonEprResourceClaim *claims, size_t 
 }
 
 bool eidolon_epr_resource_is_granted(const EidolonEprResourceResolution *resolution,
-                                     EidolonEprOpaqueId behavior,
-                                     EidolonEprBodyResource resource) {
+                                     EidolonEprOpaqueId behavior, EidolonEprBodyResource resource) {
     if (resolution == NULL) {
         return false;
     }
@@ -159,8 +160,7 @@ eidolon_epr_resource_override_owner(const EidolonEprResourceResolution *resoluti
     for (size_t index = 0; index < resolution->grant_count; ++index) {
         const EidolonEprResourceGrant *grant = &resolution->grants[index];
         if (grant->resource == resource &&
-            (grant->mode == EIDOLON_EPR_CLAIM_OVERRIDE ||
-             grant->mode == EIDOLON_EPR_CLAIM_BASE)) {
+            (grant->mode == EIDOLON_EPR_CLAIM_OVERRIDE || grant->mode == EIDOLON_EPR_CLAIM_BASE)) {
             return grant->behavior;
         }
     }

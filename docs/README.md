@@ -39,6 +39,9 @@ particular implementation changes.
 - [Native presentation and graphics stack](design/native-presentation.md)
 - [Backend-neutral presentation events](design/presentation-events.md)
 - [Presentation environment and output topology](design/presentation-environment.md)
+- [Eidolon Performance Runtime](design/epr-overview.md) — ownership and pipeline overview, with
+  linked contracts for intent, behavior planning, resources, realization, VRM projection, and
+  deterministic validation.
 
 ## Active workstreams
 

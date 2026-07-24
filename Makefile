@@ -12,6 +12,7 @@ COMMON_SOURCES := \
 	src/animation.c \
 	src/app.c \
 	src/bubble_layout.c \
+	src/cgltf_impl.c \
 	src/conversation.c \
 	src/conversation_sources.c \
 	src/delivery.c \
@@ -20,6 +21,14 @@ COMMON_SOURCES := \
 	src/draw.c \
 	src/event_pump_sdl.c \
 	src/expression_director.c \
+	src/epr/behavior_plan.c \
+	src/epr/body_resources.c \
+	src/epr/modality_realizers.c \
+	src/epr/performance_intent.c \
+	src/epr/performance_runtime.c \
+	src/epr/performance_trace.c \
+	src/epr/realization_program.c \
+	src/epr/temporal.c \
 	src/frame_clock.c \
 	src/hook_output.c \
 	src/humanoid.c \
@@ -32,6 +41,7 @@ COMMON_SOURCES := \
 	src/motion_config.c \
 	src/pose.c \
 	src/pose_solver.c \
+	src/performance_fixture.c \
 	src/presentation.c \
 	src/presentation_event_queue.c \
 	src/presentation_sdl_legacy.c \
@@ -49,7 +59,9 @@ COMMON_SOURCES := \
 	src/settings_ui.c \
 	src/state.c \
 	src/text_renderer.c \
-	src/user_settings.c
+	src/user_settings.c \
+	src/vrm_body.c \
+	src/vrm_projection.c
 
 IMGUI_DIR := lib/imgui
 DEAR_BINDINGS_GENERATED := lib/dear_bindings/generated
@@ -170,7 +182,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check epr-boundary-check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -532,6 +544,9 @@ LIVE_SOURCE_TEST := $(TEST_DIR)/live_source_test$(EXE)
 RELAY_CORE_TEST := $(TEST_DIR)/relay_core_test$(EXE)
 CODEX_RELAY_TEST := $(TEST_DIR)/codex_relay_test$(EXE)
 PERFORMANCE_RUNTIME_TEST := $(TEST_DIR)/performance_runtime_test$(EXE)
+VRM_BODY_TEST := $(TEST_DIR)/vrm_body_test$(EXE)
+VRM_PROJECTION_TEST := $(TEST_DIR)/vrm_projection_test$(EXE)
+EPR_TRACE_TOOL := $(BUILD_ROOT)/tools/$(MODE)/epr-trace$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
@@ -677,9 +692,31 @@ $(CODEX_RELAY_TEST): tests/codex_relay_test.c src/conversation.c src/json_scan.c
 
 $(PERFORMANCE_RUNTIME_TEST): tests/performance_runtime_test.c src/epr/performance_intent.c \
 		src/epr/performance_trace.c src/epr/temporal.c src/epr/body_resources.c \
-		src/epr/behavior_plan.c src/epr/performance_runtime.c src/ik.c | $(TEST_RUNTIME)
+		src/epr/behavior_plan.c src/epr/realization_program.c \
+		src/epr/modality_realizers.c src/epr/performance_runtime.c src/performance_fixture.c \
+		src/ik.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRM_BODY_TEST): tests/vrm_body_test.c src/vrm_body.c src/cgltf_impl.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRM_PROJECTION_TEST): tests/vrm_projection_test.c src/vrm_projection.c src/motion.c | \
+		$(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(EPR_TRACE_TOOL): tools/epr_trace.c src/epr/performance_intent.c \
+		src/epr/performance_trace.c src/epr/temporal.c src/epr/body_resources.c \
+		src/epr/behavior_plan.c src/epr/realization_program.c \
+		src/epr/modality_realizers.c src/epr/performance_runtime.c src/performance_fixture.c \
+		src/ik.c Makefile
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $(filter-out Makefile,$^) -o $@
+
+epr-trace: $(EPR_TRACE_TOOL)
+	"$(EPR_TRACE_TOOL)"
 
 PROVIDER ?= codex
 PROVIDER_URL ?= ws://127.0.0.1:4500
@@ -697,7 +734,8 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
 	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
-	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST)
+	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST) $(VRM_BODY_TEST) \
+	$(VRM_PROJECTION_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -725,6 +763,8 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(CONVERSATION_TEST)
 	$(RELAY_CORE_TEST)
 	$(PERFORMANCE_RUNTIME_TEST)
+	$(VRM_BODY_TEST)
+	$(VRM_PROJECTION_TEST)
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json

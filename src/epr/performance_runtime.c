@@ -1,11 +1,10 @@
 #include "epr/performance_runtime.h"
 
+#include "epr/modality_realizers.h"
 #include "ik.h"
 
 #include <math.h>
 #include <string.h>
-
-#define EIDOLON_EPR_PI 3.14159265358979323846F
 
 static bool finite_vector(const float *values, size_t count) {
     for (size_t index = 0; index < count; ++index) {
@@ -16,42 +15,19 @@ static bool finite_vector(const float *values, size_t count) {
     return true;
 }
 
-static float clamp01(float value) {
-    if (value < 0.0F) {
-        return 0.0F;
-    }
-    if (value > 1.0F) {
-        return 1.0F;
-    }
-    return value;
-}
-
-static float smooth01(float value) {
-    const float t = clamp01(value);
-    return t * t * (3.0F - 2.0F * t);
-}
-
-static float mixf(float from, float to, float weight) {
-    return from + (to - from) * weight;
-}
-
-static void mix3(const float from[3], const float to[3], float weight, float result[3]) {
-    for (size_t index = 0; index < 3U; ++index) {
-        result[index] = mixf(from[index], to[index], weight);
-    }
-}
-
 static EidolonEprTraceRecord trace_record(const EidolonPerformanceRuntime *runtime,
-                                          EidolonEprTick tick,
-                                          EidolonEprTraceEvent event,
+                                          EidolonEprTick tick, EidolonEprTraceEvent event,
                                           EidolonEprTraceReason reason) {
-    const EidolonEprTraceRecord record = {
+    EidolonEprTraceRecord record = {
         .tick = tick,
         .intent_revision = runtime->has_intent ? runtime->intent.revision : 0U,
         .plan_generation = runtime->has_plan ? runtime->plan.generation : 0U,
         .event = event,
         .reason = reason,
     };
+    if (runtime->has_intent) {
+        record.provenance = runtime->intent.provenance;
+    }
     return record;
 }
 
@@ -64,6 +40,10 @@ EidolonEprBodyProfile eidolon_epr_default_body_profile(void) {
         .version = EIDOLON_EPR_BODY_PROFILE_VERSION,
         .fingerprint = UINT64_C(0x4550522d56495254),
         .shoulder = {0.22F, 1.42F, 0.0F},
+        .head = {0.0F, 1.70F, 0.0F},
+        .right = {1.0F, 0.0F, 0.0F},
+        .up = {0.0F, 1.0F, 0.0F},
+        .forward = {0.0F, 0.0F, 1.0F},
         .right_upper_arm_length = 0.30F,
         .right_lower_arm_length = 0.28F,
         .maximum_reach_ratio = 0.98F,
@@ -83,7 +63,9 @@ static bool body_profile_valid(const EidolonEprBodyProfile *body) {
            isfinite(body->right_upper_arm_length) && body->right_upper_arm_length > 0.0F &&
            isfinite(body->right_lower_arm_length) && body->right_lower_arm_length > 0.0F &&
            isfinite(body->maximum_reach_ratio) && body->maximum_reach_ratio > 0.0F &&
-           body->maximum_reach_ratio <= 1.0F && finite_vector(body->shoulder, 3U);
+           body->maximum_reach_ratio <= 1.0F && finite_vector(body->shoulder, 3U) &&
+           finite_vector(body->head, 3U) && finite_vector(body->right, 3U) &&
+           finite_vector(body->up, 3U) && finite_vector(body->forward, 3U);
 }
 
 bool eidolon_epr_runtime_init(EidolonPerformanceRuntime *runtime, uint64_t seed,
@@ -119,13 +101,25 @@ static void trace_new_realizers(EidolonPerformanceRuntime *runtime,
                                 const EidolonBehaviorPlan *previous) {
     for (size_t index = 0; index < runtime->plan.behavior_count; ++index) {
         const EidolonEprBehaviorUnit *behavior = &runtime->plan.behaviors[index];
-        const bool existed =
-            previous != NULL && eidolon_epr_plan_find(previous, behavior->id) != NULL;
+        const EidolonEprBehaviorUnit *previous_behavior =
+            previous != NULL ? eidolon_epr_plan_find(previous, behavior->id) : NULL;
+        const bool existed = previous_behavior != NULL && !previous_behavior->retired;
         if (!existed && !behavior->retired) {
+            if (previous_behavior != NULL && previous_behavior->retired) {
+                for (size_t state_index = 0; state_index < runtime->behavior_state_count;
+                     ++state_index) {
+                    EidolonEprBehaviorRuntimeState *state = &runtime->behavior_states[state_index];
+                    if (state->behavior == behavior->id) {
+                        state->state = EIDOLON_EPR_BEHAVIOR_PROPOSED;
+                        state->highest_observed_phase = -1;
+                        state->terminal_reason = EIDOLON_EPR_TERMINAL_NONE;
+                        break;
+                    }
+                }
+            }
             EidolonEprTraceRecord record =
                 trace_record(runtime, runtime->intent.observed_tick,
-                             EIDOLON_EPR_TRACE_REALIZER_SELECTED,
-                             EIDOLON_EPR_REASON_SELECTED);
+                             EIDOLON_EPR_TRACE_REALIZER_SELECTED, EIDOLON_EPR_REASON_SELECTED);
             record.behavior = behavior->id;
             record.cause = behavior->cause;
             record.value = (uint64_t)behavior->kind;
@@ -137,6 +131,7 @@ static void trace_new_realizers(EidolonPerformanceRuntime *runtime,
 bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
                                 const EidolonPerformanceIntent *intent) {
     EidolonBehaviorPlan candidate;
+    EidolonRealizationProgramSet candidate_programs;
     EidolonBehaviorPlan previous;
     const bool had_previous = runtime != NULL && runtime->has_plan;
     if (runtime == NULL || intent == NULL) {
@@ -146,6 +141,7 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
         EidolonEprTraceRecord record =
             trace_record(runtime, intent->observed_tick, EIDOLON_EPR_TRACE_INTENT_REJECTED,
                          EIDOLON_EPR_REASON_INVALID_INTENT);
+        record.provenance = intent->provenance;
         emit(runtime, record);
         return false;
     }
@@ -153,6 +149,7 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
         EidolonEprTraceRecord record =
             trace_record(runtime, intent->observed_tick, EIDOLON_EPR_TRACE_INTENT_REJECTED,
                          EIDOLON_EPR_REASON_STALE_REVISION);
+        record.provenance = intent->provenance;
         record.value = intent->revision;
         emit(runtime, record);
         return false;
@@ -166,7 +163,17 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
         EidolonEprTraceRecord record =
             trace_record(runtime, intent->observed_tick, EIDOLON_EPR_TRACE_PLAN_REJECTED,
                          EIDOLON_EPR_REASON_TEMPORAL_CONFLICT);
+        record.provenance = intent->provenance;
         record.value = intent->revision;
+        emit(runtime, record);
+        return false;
+    }
+    if (!eidolon_epr_program_set_compile(&candidate, &candidate_programs)) {
+        EidolonEprTraceRecord record =
+            trace_record(runtime, intent->observed_tick, EIDOLON_EPR_TRACE_REALIZER_FAILED,
+                         EIDOLON_EPR_REASON_INVALID_CANDIDATE);
+        record.provenance = intent->provenance;
+        record.value = candidate.generation;
         emit(runtime, record);
         return false;
     }
@@ -176,6 +183,7 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
     runtime->intent = *intent;
     runtime->has_intent = true;
     runtime->plan = candidate;
+    runtime->programs = candidate_programs;
     runtime->has_plan = true;
 
     {
@@ -197,8 +205,8 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
     return true;
 }
 
-static EidolonEprBehaviorRuntimeState *
-runtime_state(EidolonPerformanceRuntime *runtime, EidolonEprOpaqueId behavior) {
+static EidolonEprBehaviorRuntimeState *runtime_state(EidolonPerformanceRuntime *runtime,
+                                                     EidolonEprOpaqueId behavior) {
     for (size_t index = 0; index < runtime->behavior_state_count; ++index) {
         if (runtime->behavior_states[index].behavior == behavior) {
             return &runtime->behavior_states[index];
@@ -237,8 +245,7 @@ static EidolonEprBehaviorState desired_state(const EidolonEprBehaviorUnit *behav
         return EIDOLON_EPR_BEHAVIOR_RETIRED;
     }
     if (behavior->has_phase[EIDOLON_EPR_PHASE_PREPARATION]) {
-        const EidolonEprTick preparation =
-            behavior->phase_ticks[EIDOLON_EPR_PHASE_PREPARATION];
+        const EidolonEprTick preparation = behavior->phase_ticks[EIDOLON_EPR_PHASE_PREPARATION];
         if (tick < preparation - 200) {
             return EIDOLON_EPR_BEHAVIOR_SCHEDULED;
         }
@@ -258,6 +265,24 @@ static EidolonEprBehaviorState desired_state(const EidolonEprBehaviorUnit *behav
     return EIDOLON_EPR_BEHAVIOR_SCHEDULED;
 }
 
+static EidolonEprTraceReason terminal_trace_reason(EidolonEprTerminalReason terminal) {
+    switch (terminal) {
+    case EIDOLON_EPR_TERMINAL_COMPLETED:
+        return EIDOLON_EPR_REASON_COMPLETED;
+    case EIDOLON_EPR_TERMINAL_INTERRUPTED:
+        return EIDOLON_EPR_REASON_INTERRUPTED;
+    case EIDOLON_EPR_TERMINAL_REVISED:
+        return EIDOLON_EPR_REASON_REVISED;
+    case EIDOLON_EPR_TERMINAL_DENIED:
+        return EIDOLON_EPR_REASON_PREEMPTED;
+    case EIDOLON_EPR_TERMINAL_FAILED:
+        return EIDOLON_EPR_REASON_INVALID_CANDIDATE;
+    case EIDOLON_EPR_TERMINAL_NONE:
+        return EIDOLON_EPR_REASON_NONE;
+    }
+    return EIDOLON_EPR_REASON_INVALID_CANDIDATE;
+}
+
 static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonEprTick tick) {
     for (size_t index = 0; index < runtime->plan.behavior_count; ++index) {
         const EidolonEprBehaviorUnit *behavior = &runtime->plan.behaviors[index];
@@ -271,17 +296,17 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
             state->state = desired;
             state->terminal_reason = terminal;
             {
-                EidolonEprTraceRecord record =
-                    trace_record(runtime, tick, EIDOLON_EPR_TRACE_BEHAVIOR_TRANSITION,
-                                 desired == EIDOLON_EPR_BEHAVIOR_RETIRED
-                                     ? (terminal == EIDOLON_EPR_TERMINAL_INTERRUPTED
-                                            ? EIDOLON_EPR_REASON_INTERRUPTED
-                                            : EIDOLON_EPR_REASON_COMPLETED)
-                                     : EIDOLON_EPR_REASON_NONE);
+                EidolonEprTraceRecord record = trace_record(
+                    runtime, tick, EIDOLON_EPR_TRACE_BEHAVIOR_TRANSITION,
+                    desired == EIDOLON_EPR_BEHAVIOR_RETIRED ? terminal_trace_reason(terminal)
+                                                            : EIDOLON_EPR_REASON_NONE);
                 record.behavior = behavior->id;
                 record.value = (uint64_t)desired;
                 emit(runtime, record);
             }
+        }
+        if (desired == EIDOLON_EPR_BEHAVIOR_RETIRED && terminal != EIDOLON_EPR_TERMINAL_COMPLETED) {
+            continue;
         }
         for (int phase = state->highest_observed_phase + 1;
              phase < (int)EIDOLON_EPR_BEHAVIOR_PHASE_COUNT; ++phase) {
@@ -291,9 +316,8 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
             }
             state->highest_observed_phase = phase;
             {
-                EidolonEprTraceRecord record =
-                    trace_record(runtime, tick, EIDOLON_EPR_TRACE_ANCHOR_OBSERVED,
-                                 EIDOLON_EPR_REASON_NONE);
+                EidolonEprTraceRecord record = trace_record(
+                    runtime, tick, EIDOLON_EPR_TRACE_ANCHOR_OBSERVED, EIDOLON_EPR_REASON_NONE);
                 record.behavior = behavior->id;
                 record.cause = behavior->cause;
                 record.value = (uint64_t)phase;
@@ -303,8 +327,7 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
     }
 }
 
-static bool grant_equal(const EidolonEprResourceGrant *left,
-                        const EidolonEprResourceGrant *right) {
+static bool grant_equal(const EidolonEprResourceGrant *left, const EidolonEprResourceGrant *right) {
     return left->behavior == right->behavior && left->resource == right->resource &&
            left->mode == right->mode && left->composition_rule == right->composition_rule;
 }
@@ -319,9 +342,20 @@ static bool resolution_has(const EidolonEprResourceResolution *resolution,
     return false;
 }
 
+static bool resolution_denied_has(const EidolonEprResourceResolution *resolution,
+                                  const EidolonEprResourceDenial *denial) {
+    for (size_t index = 0; index < resolution->denied_count; ++index) {
+        const EidolonEprResourceDenial *existing = &resolution->denied[index];
+        if (existing->behavior == denial->behavior && existing->resource == denial->resource &&
+            existing->mode == denial->mode) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void trace_resource_changes(EidolonPerformanceRuntime *runtime,
-                                   const EidolonEprResourceResolution *next,
-                                   EidolonEprTick tick) {
+                                   const EidolonEprResourceResolution *next, EidolonEprTick tick) {
     if (runtime->has_resources) {
         const EidolonEprOpaqueId old_right = eidolon_epr_resource_override_owner(
             &runtime->resources, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
@@ -339,9 +373,8 @@ static void trace_resource_changes(EidolonPerformanceRuntime *runtime,
         for (size_t index = 0; index < runtime->resources.grant_count; ++index) {
             const EidolonEprResourceGrant *old = &runtime->resources.grants[index];
             if (!resolution_has(next, old)) {
-                EidolonEprTraceRecord released =
-                    trace_record(runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_RELEASED,
-                                 EIDOLON_EPR_REASON_NONE);
+                EidolonEprTraceRecord released = trace_record(
+                    runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_RELEASED, EIDOLON_EPR_REASON_NONE);
                 released.behavior = old->behavior;
                 released.resource = (uint32_t)old->resource;
                 emit(runtime, released);
@@ -351,9 +384,8 @@ static void trace_resource_changes(EidolonPerformanceRuntime *runtime,
     for (size_t index = 0; index < next->grant_count; ++index) {
         const EidolonEprResourceGrant *grant = &next->grants[index];
         if (!runtime->has_resources || !resolution_has(&runtime->resources, grant)) {
-            EidolonEprTraceRecord granted =
-                trace_record(runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_GRANTED,
-                             EIDOLON_EPR_REASON_SELECTED);
+            EidolonEprTraceRecord granted = trace_record(
+                runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_GRANTED, EIDOLON_EPR_REASON_SELECTED);
             granted.behavior = grant->behavior;
             granted.resource = (uint32_t)grant->resource;
             granted.value = (uint64_t)grant->mode;
@@ -361,203 +393,25 @@ static void trace_resource_changes(EidolonPerformanceRuntime *runtime,
         }
     }
     for (size_t index = 0; index < next->denied_count; ++index) {
-        EidolonEprTraceRecord denied =
-            trace_record(runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_DENIED,
-                         EIDOLON_EPR_REASON_PREEMPTED);
-        denied.behavior = next->denied[index];
+        const EidolonEprResourceDenial *denial = &next->denied[index];
+        if (runtime->has_resources && resolution_denied_has(&runtime->resources, denial)) {
+            continue;
+        }
+        EidolonEprTraceRecord denied = trace_record(
+            runtime, tick, EIDOLON_EPR_TRACE_RESOURCE_DENIED, EIDOLON_EPR_REASON_PREEMPTED);
+        denied.behavior = denial->behavior;
+        denied.resource = (uint32_t)denial->resource;
+        denied.value = (uint64_t)denial->mode;
         emit(runtime, denied);
     }
 }
 
-static const EidolonEprBehaviorUnit *
-behavior_for_owner(const EidolonPerformanceRuntime *runtime, EidolonEprOpaqueId owner) {
-    return eidolon_epr_plan_find(&runtime->plan, owner);
+static const EidolonRealizationProgram *program_for_owner(const EidolonPerformanceRuntime *runtime,
+                                                          EidolonEprOpaqueId owner) {
+    return eidolon_epr_program_find(&runtime->programs, owner);
 }
 
-static void base_posture(const EidolonEprBehaviorUnit *posture, EidolonEprTick tick,
-                         EidolonCanonicalControl *candidate, float arm_target[3]) {
-    static const float neutral_arm[3] = {0.36F, 1.03F, 0.03F};
-    float target_pitch = 0.0F;
-    float target_head_pitch = 0.0F;
-    float target_arm[3] = {neutral_arm[0], neutral_arm[1], neutral_arm[2]};
-    float weight = 1.0F;
-    if (posture != NULL) {
-        const EidolonEprTick onset = posture->has_phase[EIDOLON_EPR_PHASE_ONSET]
-                                         ? posture->phase_ticks[EIDOLON_EPR_PHASE_ONSET]
-                                         : tick;
-        weight = smooth01((float)(tick - onset) / 240.0F);
-        switch (posture->kind) {
-        case EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE:
-            target_pitch = 0.035F;
-            target_head_pitch = -0.025F;
-            target_arm[0] = 0.34F;
-            target_arm[1] = 1.05F;
-            target_arm[2] = 0.02F;
-            break;
-        case EIDOLON_EPR_BEHAVIOR_POSTURE_THINKING:
-            target_pitch = 0.075F;
-            target_head_pitch = 0.11F;
-            target_arm[0] = 0.31F;
-            target_arm[1] = 1.10F;
-            target_arm[2] = 0.10F;
-            break;
-        case EIDOLON_EPR_BEHAVIOR_POSTURE_RESPONDING:
-            target_pitch = -0.025F;
-            target_head_pitch = -0.015F;
-            target_arm[0] = 0.39F;
-            target_arm[1] = 1.08F;
-            target_arm[2] = 0.04F;
-            break;
-        case EIDOLON_EPR_BEHAVIOR_POSTURE_GUARDED:
-            target_pitch = 0.055F;
-            target_head_pitch = 0.015F;
-            target_arm[0] = 0.30F;
-            target_arm[1] = 1.14F;
-            target_arm[2] = 0.12F;
-            break;
-        default:
-            break;
-        }
-    }
-    candidate->torso_pitch = target_pitch * weight;
-    candidate->head_pitch = target_head_pitch * weight;
-    mix3(neutral_arm, target_arm, weight, arm_target);
-}
-
-static void apply_idle(const EidolonPerformanceRuntime *runtime, EidolonEprTick tick,
-                       EidolonCanonicalControl *candidate) {
-    const float seconds = (float)tick / 1000.0F;
-    const float phase =
-        (float)(runtime->seed % UINT64_C(997)) * (2.0F * EIDOLON_EPR_PI / 997.0F);
-    candidate->torso_pitch += 0.008F * sinf(seconds * 1.17F + phase);
-    candidate->torso_roll += 0.006F * sinf(seconds * 0.43F + phase * 0.73F);
-    candidate->head_roll -= candidate->torso_roll * 0.45F;
-}
-
-static void apply_gaze(EidolonPerformanceRuntime *runtime,
-                       const EidolonEprBehaviorUnit *gaze, EidolonEprTick tick,
-                       EidolonCanonicalControl *candidate) {
-    float target[3] = {0.0F, 1.55F, 1.0F};
-    float yaw = 0.0F;
-    float pitch = 0.0F;
-    float eye_weight;
-    float head_weight;
-    EidolonEprTick onset;
-    if (gaze == NULL) {
-        candidate->gaze_target[0] = target[0];
-        candidate->gaze_target[1] = target[1];
-        candidate->gaze_target[2] = target[2];
-        return;
-    }
-    onset = gaze->has_phase[EIDOLON_EPR_PHASE_ONSET]
-                ? gaze->phase_ticks[EIDOLON_EPR_PHASE_ONSET]
-                : tick;
-    switch (gaze->kind) {
-    case EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION:
-        target[0] = -0.22F;
-        yaw = -0.18F;
-        pitch = -0.03F;
-        break;
-    case EIDOLON_EPR_BEHAVIOR_GAZE_RESPONSE:
-        target[0] = 0.20F;
-        target[1] = 1.65F;
-        yaw = 0.15F;
-        pitch = -0.05F;
-        break;
-    case EIDOLON_EPR_BEHAVIOR_GAZE_INTERRUPTED:
-        target[0] = -0.36F;
-        target[1] = 1.60F;
-        yaw = -0.28F;
-        pitch = -0.02F;
-        break;
-    default:
-        break;
-    }
-    eye_weight = smooth01((float)(tick - onset) / 100.0F);
-    head_weight = smooth01((float)(tick - onset - 80) / 240.0F);
-    if (!runtime->body.has_eyes) {
-        eye_weight = 0.0F;
-        head_weight = smooth01((float)(tick - onset) / 200.0F);
-        candidate->eyes_degraded = true;
-        if (!runtime->eyes_degradation_traced) {
-            EidolonEprTraceRecord degraded =
-                trace_record(runtime, tick, EIDOLON_EPR_TRACE_CAPABILITY_DEGRADED,
-                             EIDOLON_EPR_REASON_OPTIONAL_MISSING);
-            degraded.resource = (uint32_t)EIDOLON_EPR_RESOURCE_EYES;
-            degraded.behavior = gaze->id;
-            emit(runtime, degraded);
-            runtime->eyes_degradation_traced = true;
-        }
-    }
-    memcpy(candidate->gaze_target, target, sizeof(target));
-    candidate->eye_yaw = yaw * eye_weight;
-    candidate->eye_pitch = pitch * eye_weight;
-    candidate->eye_weight = eye_weight;
-    candidate->head_yaw += yaw * head_weight * 0.72F;
-    candidate->head_pitch += pitch * head_weight * 0.50F;
-    candidate->head_gaze_weight = head_weight;
-}
-
-static void gesture_target(const EidolonEprBehaviorUnit *gesture, EidolonEprTick tick,
-                           const float rest[3], float target[3], float wrist[3]) {
-    static const float preparation_target[3] = {0.40F, 1.15F, 0.10F};
-    static const float peak_target[3] = {0.57F, 1.28F, 0.22F};
-    static const float recovery_target[3] = {0.42F, 1.15F, 0.08F};
-    const EidolonEprTick preparation =
-        gesture->phase_ticks[EIDOLON_EPR_PHASE_PREPARATION];
-    const EidolonEprTick onset = gesture->phase_ticks[EIDOLON_EPR_PHASE_ONSET];
-    const EidolonEprTick peak = gesture->phase_ticks[EIDOLON_EPR_PHASE_PEAK];
-    const EidolonEprTick recovery = gesture->phase_ticks[EIDOLON_EPR_PHASE_RECOVERY];
-    const EidolonEprTick completion = gesture->phase_ticks[EIDOLON_EPR_PHASE_COMPLETION];
-    if (tick < preparation) {
-        memcpy(target, rest, sizeof(float) * 3U);
-        return;
-    }
-    if (tick < onset) {
-        mix3(rest, preparation_target,
-             smooth01((float)(tick - preparation) / (float)(onset - preparation)), target);
-    } else if (tick < peak) {
-        mix3(preparation_target, peak_target,
-             smooth01((float)(tick - onset) / (float)(peak - onset)), target);
-    } else if (tick < recovery) {
-        mix3(peak_target, recovery_target,
-             smooth01((float)(tick - peak) / (float)(recovery - peak)), target);
-    } else {
-        mix3(recovery_target, rest,
-             smooth01((float)(tick - recovery) / (float)(completion - recovery)), target);
-    }
-    wrist[0] = -0.12F * smooth01((float)(tick - onset) / (float)(peak - onset));
-    wrist[1] = 0.18F * smooth01((float)(tick - onset) / (float)(peak - onset));
-}
-
-static void right_arm_target(EidolonPerformanceRuntime *runtime,
-                             const EidolonEprBehaviorUnit *owner, EidolonEprTick tick,
-                             const float posture_target[3],
-                             EidolonCanonicalControl *candidate) {
-    static const float pole[3] = {0.48F, 1.38F, -0.24F};
-    memcpy(candidate->right_hand_target, posture_target, sizeof(float) * 3U);
-    memcpy(candidate->right_elbow_pole, pole, sizeof(pole));
-    if (owner == NULL) {
-        return;
-    }
-    if (owner->kind == EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT) {
-        gesture_target(owner, tick, posture_target, candidate->right_hand_target,
-                       candidate->right_wrist_euler);
-    } else if (owner->kind == EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM) {
-        const EidolonEprTick start = owner->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT];
-        const EidolonEprTick end = owner->phase_ticks[EIDOLON_EPR_PHASE_SETTLE];
-        const float weight = smooth01((float)(tick - start) / (float)(end - start));
-        mix3(runtime->settle_start.right_hand_position, posture_target, weight,
-             candidate->right_hand_target);
-        for (size_t index = 0; index < 3U; ++index) {
-            candidate->right_wrist_euler[index] =
-                mixf(runtime->settle_start.right_wrist_euler[index], 0.0F, weight);
-        }
-    }
-}
-
-static bool solve_right_arm(const EidolonEprBodyProfile *body,
-                            EidolonCanonicalControl *candidate) {
+static bool solve_right_arm(const EidolonEprBodyProfile *body, EidolonCanonicalControl *candidate) {
     EidolonIkTwoBoneInput input;
     EidolonIkTwoBoneSolution solution;
     memset(&input, 0, sizeof(input));
@@ -582,9 +436,8 @@ static bool solve_right_arm(const EidolonEprBodyProfile *body,
 static bool canonical_valid(const EidolonPerformanceRuntime *runtime,
                             const EidolonCanonicalControl *candidate) {
     const float angles[] = {
-        candidate->torso_pitch, candidate->torso_yaw, candidate->torso_roll,
-        candidate->head_pitch,  candidate->head_yaw,  candidate->head_roll,
-        candidate->eye_yaw,     candidate->eye_pitch,
+        candidate->torso_pitch, candidate->torso_yaw, candidate->torso_roll, candidate->head_pitch,
+        candidate->head_yaw,    candidate->head_roll, candidate->eye_yaw,    candidate->eye_pitch,
     };
     return finite_vector(angles, sizeof(angles) / sizeof(angles[0])) &&
            finite_vector(candidate->gaze_target, 3U) &&
@@ -607,9 +460,7 @@ static uint64_t hash_u64(uint64_t hash, uint64_t value) {
     return hash;
 }
 
-static int64_t quantize(float value) {
-    return (int64_t)llroundf(value * 1000000.0F);
-}
+static int64_t quantize(float value) { return (int64_t)llroundf(value * 1000000.0F); }
 
 uint64_t eidolon_epr_control_hash(EidolonCanonicalControl *control) {
     uint64_t hash = UINT64_C(1469598103934665603);
@@ -645,31 +496,40 @@ uint64_t eidolon_epr_control_hash(EidolonCanonicalControl *control) {
 bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick tick) {
     EidolonEprResourceResolution resolution;
     EidolonCanonicalControl candidate;
-    const EidolonEprBehaviorUnit *posture;
-    const EidolonEprBehaviorUnit *gaze;
-    const EidolonEprBehaviorUnit *right_arm;
+    const EidolonRealizationProgram *posture;
+    const EidolonRealizationProgram *gaze;
+    const EidolonRealizationProgram *right_arm;
+    const EidolonRealizationProgram *idle;
+    const EidolonRealizationProgram *expression;
     EidolonEprOpaqueId posture_owner;
     EidolonEprOpaqueId gaze_owner;
     EidolonEprOpaqueId right_arm_owner;
+    EidolonEprOpaqueId expression_owner;
     float posture_arm_target[3];
+    uint64_t decision_sequence;
+    bool publish_checkpoint;
     if (runtime == NULL || !runtime->has_plan || (runtime->has_tick && tick < runtime->last_tick) ||
         !eidolon_epr_resource_resolve(runtime->plan.claims, runtime->plan.claim_count, tick,
-                                     &resolution)) {
+                                      &resolution)) {
         return false;
     }
+    decision_sequence = runtime->trace.next_sequence;
     trace_resource_changes(runtime, &resolution, tick);
     runtime->resources = resolution;
     runtime->has_resources = true;
     advance_behavior_states(runtime, tick);
 
-    posture_owner =
-        eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_TORSO);
+    posture_owner = eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_TORSO);
     gaze_owner = eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_EYES);
     right_arm_owner =
         eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
-    posture = behavior_for_owner(runtime, posture_owner);
-    gaze = behavior_for_owner(runtime, gaze_owner);
-    right_arm = behavior_for_owner(runtime, right_arm_owner);
+    expression_owner =
+        eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_FACE_EXPRESSION);
+    posture = program_for_owner(runtime, posture_owner);
+    gaze = program_for_owner(runtime, gaze_owner);
+    right_arm = program_for_owner(runtime, right_arm_owner);
+    expression = program_for_owner(runtime, expression_owner);
+    idle = program_for_owner(runtime, eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_IDLE, 1U));
 
     memset(&candidate, 0, sizeof(candidate));
     candidate.version = EIDOLON_EPR_CONTROL_VERSION;
@@ -677,25 +537,31 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     candidate.plan_generation = runtime->plan.generation;
     candidate.tick = tick;
     candidate.valid = true;
-    base_posture(posture, tick, &candidate, posture_arm_target);
-    if (eidolon_epr_resource_is_granted(
-            &resolution, eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_IDLE, 1U),
-            EIDOLON_EPR_RESOURCE_TORSO)) {
-        apply_idle(runtime, tick, &candidate);
+    eidolon_epr_realize_posture(&runtime->body, posture, tick, &candidate, posture_arm_target);
+    if (eidolon_epr_resource_is_granted(&resolution,
+                                        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_IDLE, 1U),
+                                        EIDOLON_EPR_RESOURCE_TORSO)) {
+        eidolon_epr_realize_idle(runtime->seed, idle, tick, &candidate);
     }
-    apply_gaze(runtime, gaze, tick, &candidate);
-    right_arm_target(runtime, right_arm, tick, posture_arm_target, &candidate);
-
-    if (runtime->body.has_expression) {
-        candidate.focused_expression_weight =
-            runtime->plan.mode == EIDOLON_EPR_MODE_THINKING ? 0.45F : 0.0F;
-    } else {
-        candidate.expression_degraded = true;
+    if (!eidolon_epr_realize_gaze(&runtime->body, gaze, tick, &candidate) &&
+        !runtime->eyes_degradation_traced) {
+        EidolonEprTraceRecord degraded =
+            trace_record(runtime, tick, EIDOLON_EPR_TRACE_CAPABILITY_DEGRADED,
+                         EIDOLON_EPR_REASON_OPTIONAL_MISSING);
+        degraded.resource = (uint32_t)EIDOLON_EPR_RESOURCE_EYES;
+        degraded.behavior = gaze != NULL ? gaze->behavior : 0U;
+        emit(runtime, degraded);
+        runtime->eyes_degradation_traced = true;
+    }
+    eidolon_epr_realize_right_arm(&runtime->body, right_arm, tick, &runtime->settle_start,
+                                  posture_arm_target, &candidate);
+    if (!eidolon_epr_realize_expression(&runtime->body, expression, &candidate)) {
         if (!runtime->expression_degradation_traced) {
             EidolonEprTraceRecord degraded =
                 trace_record(runtime, tick, EIDOLON_EPR_TRACE_CAPABILITY_DEGRADED,
                              EIDOLON_EPR_REASON_OPTIONAL_MISSING);
             degraded.resource = (uint32_t)EIDOLON_EPR_RESOURCE_FACE_EXPRESSION;
+            degraded.behavior = expression != NULL ? expression->behavior : 0U;
             emit(runtime, degraded);
             runtime->expression_degradation_traced = true;
         }
@@ -712,9 +578,8 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
         !canonical_valid(runtime, &candidate)) {
         EidolonEprTraceRecord rejected =
             trace_record(runtime, tick, EIDOLON_EPR_TRACE_SOLVE_REJECTED,
-                         runtime->inject_next_solve_failure
-                             ? EIDOLON_EPR_REASON_INJECTED_FAILURE
-                             : EIDOLON_EPR_REASON_INVALID_CANDIDATE);
+                         runtime->inject_next_solve_failure ? EIDOLON_EPR_REASON_INJECTED_FAILURE
+                                                            : EIDOLON_EPR_REASON_INVALID_CANDIDATE);
         rejected.control_hash = runtime->control.hash;
         emit(runtime, rejected);
         runtime->inject_next_solve_failure = false;
@@ -724,23 +589,24 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     }
     runtime->inject_next_solve_failure = false;
     (void)eidolon_epr_control_hash(&candidate);
+    publish_checkpoint = candidate.plan_generation != runtime->control.plan_generation ||
+                         runtime->trace.next_sequence != decision_sequence;
     runtime->control = candidate;
     runtime->last_tick = tick;
     runtime->has_tick = true;
-    {
+    if (publish_checkpoint) {
         EidolonEprTraceRecord committed =
-            trace_record(runtime, tick, EIDOLON_EPR_TRACE_SOLVE_COMMITTED,
-                         EIDOLON_EPR_REASON_NONE);
+            trace_record(runtime, tick, EIDOLON_EPR_TRACE_SOLVE_COMMITTED, EIDOLON_EPR_REASON_NONE);
         committed.control_hash = candidate.hash;
         emit(runtime, committed);
     }
-    {
-        EidolonEprTraceRecord published =
-            trace_record(runtime, tick, EIDOLON_EPR_TRACE_CONTROL_PUBLISHED,
-                         EIDOLON_EPR_REASON_NONE);
+    if (publish_checkpoint) {
+        EidolonEprTraceRecord published = trace_record(
+            runtime, tick, EIDOLON_EPR_TRACE_CONTROL_PUBLISHED, EIDOLON_EPR_REASON_NONE);
         published.control_hash = candidate.hash;
         published.value = candidate.revision;
         emit(runtime, published);
+        runtime->projection_pending_after_revision = candidate.revision;
     }
     return true;
 }
@@ -751,6 +617,29 @@ void eidolon_epr_runtime_inject_solve_failure(EidolonPerformanceRuntime *runtime
     }
 }
 
+void eidolon_epr_runtime_note_projection(EidolonPerformanceRuntime *runtime,
+                                         uint64_t control_revision, bool committed,
+                                         EidolonEprTraceReason reason) {
+    EidolonEprTraceRecord record;
+    if (runtime == NULL || !runtime->has_tick) {
+        return;
+    }
+    if (committed && (runtime->projection_pending_after_revision == 0U ||
+                      control_revision < runtime->projection_pending_after_revision)) {
+        return;
+    }
+    record = trace_record(runtime, runtime->last_tick,
+                          committed ? EIDOLON_EPR_TRACE_PROJECTION_COMMITTED
+                                    : EIDOLON_EPR_TRACE_PROJECTION_REJECTED,
+                          reason);
+    record.value = control_revision;
+    record.control_hash = runtime->control.hash;
+    emit(runtime, record);
+    if (committed) {
+        runtime->projection_pending_after_revision = 0U;
+    }
+}
+
 const EidolonCanonicalControl *
 eidolon_epr_runtime_control(const EidolonPerformanceRuntime *runtime) {
     return runtime != NULL ? &runtime->control : NULL;
@@ -758,6 +647,11 @@ eidolon_epr_runtime_control(const EidolonPerformanceRuntime *runtime) {
 
 const EidolonBehaviorPlan *eidolon_epr_runtime_plan(const EidolonPerformanceRuntime *runtime) {
     return runtime != NULL && runtime->has_plan ? &runtime->plan : NULL;
+}
+
+const EidolonRealizationProgramSet *
+eidolon_epr_runtime_programs(const EidolonPerformanceRuntime *runtime) {
+    return runtime != NULL && runtime->has_plan ? &runtime->programs : NULL;
 }
 
 const EidolonEprTrace *eidolon_epr_runtime_trace(const EidolonPerformanceRuntime *runtime) {

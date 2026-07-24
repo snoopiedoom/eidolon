@@ -44,6 +44,16 @@ static bool parse_resolution(const char *text, int *resolution) {
     return true;
 }
 
+static bool parse_performance_tick(const char *text, uint64_t *tick) {
+    char *end = NULL;
+    const unsigned long long parsed = strtoull(text, &end, 10);
+    if (end == text || *end != '\0' || parsed > 5000ULL || parsed % 20ULL != 0ULL) {
+        return false;
+    }
+    *tick = (uint64_t)parsed;
+    return true;
+}
+
 static bool parse_portrait_motion(const char *expression_text, const char *elapsed_text,
                                   size_t expression_count, int *expression,
                                   unsigned int *elapsed_ms) {
@@ -68,6 +78,7 @@ static bool is_snapshot_command(int argc, char **argv) {
     return strcmp(argv[1], "--snapshot") == 0 || strcmp(argv[1], "--snapshot-dialogue") == 0 ||
            strcmp(argv[1], "--snapshot-pose") == 0 ||
            strcmp(argv[1], "--snapshot-resolution") == 0 ||
+           strcmp(argv[1], "--snapshot-performance") == 0 ||
            strcmp(argv[1], "--snapshot-sessions") == 0 || strcmp(argv[1], "--snapshot-face") == 0 ||
            strcmp(argv[1], "--snapshot-settings") == 0 ||
            strcmp(argv[1], "--snapshot-portrait-motion") == 0;
@@ -82,7 +93,8 @@ static void log_usage(void) {
                  "[--snapshot-sessions <output.png>] "
                  "[--snapshot-portrait-motion <expression> <elapsed-ms> <output.png>] "
                  "[--snapshot-pose <index> <output.png>] "
-                 "[--snapshot-resolution <side> <output.png>] [--hook <state>]");
+                 "[--snapshot-resolution <side> <output.png>] "
+                 "[--snapshot-performance <logical-ms> <output.png>] [--hook <state>]");
 }
 
 int main(int argc, char **argv) {
@@ -229,6 +241,32 @@ int main(int argc, char **argv) {
         const bool changed = eidolon_app_set_model_render_resolution(&app, resolution);
         const bool settled =
             changed && (already_selected || wait_for_pose_frame(&app, previous_revision));
+        const bool saved = settled && eidolon_draw_snapshot(&app, argv[3]);
+        eidolon_app_destroy(&app);
+        return saved ? 0 : 1;
+    }
+
+    if (argc == 4 && strcmp(argv[1], "--snapshot-performance") == 0) {
+        uint64_t target_tick = 0U;
+        if (!parse_performance_tick(argv[2], &target_tick)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Performance tick must be a multiple of 20 from 0 through 5000");
+            eidolon_app_destroy(&app);
+            return 2;
+        }
+        if (!eidolon_app_set_render_mode(&app, EIDOLON_RENDER_MODE_MODEL_3D)) {
+            eidolon_app_destroy(&app);
+            return 1;
+        }
+        const uint64_t previous_revision = eidolon_model_presented_transform_revision(app.model);
+        bool advanced = true;
+        for (uint64_t tick = 0U; tick <= target_tick; tick += 20U) {
+            if (!eidolon_app_update_performance_fixture(&app, tick)) {
+                advanced = false;
+                break;
+            }
+        }
+        const bool settled = advanced && wait_for_pose_frame(&app, previous_revision);
         const bool saved = settled && eidolon_draw_snapshot(&app, argv[3]);
         eidolon_app_destroy(&app);
         return saved ? 0 : 1;

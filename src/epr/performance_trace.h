@@ -40,6 +40,7 @@ typedef enum EidolonEprTraceReason {
     EIDOLON_EPR_REASON_SELECTED,
     EIDOLON_EPR_REASON_PREEMPTED,
     EIDOLON_EPR_REASON_INTERRUPTED,
+    EIDOLON_EPR_REASON_REVISED,
     EIDOLON_EPR_REASON_COMPLETED,
     EIDOLON_EPR_REASON_SETTLED,
     EIDOLON_EPR_REASON_OPTIONAL_MISSING,
@@ -55,6 +56,7 @@ typedef struct EidolonEprTraceRecord {
     uint64_t plan_generation;
     EidolonEprTraceEvent event;
     EidolonEprTraceReason reason;
+    EidolonEprProvenance provenance;
     EidolonEprOpaqueId behavior;
     EidolonEprOpaqueId cause;
     uint32_t resource;
@@ -64,6 +66,7 @@ typedef struct EidolonEprTraceRecord {
 
 typedef struct EidolonEprTrace {
     EidolonEprTraceRecord records[EIDOLON_EPR_TRACE_CAPACITY];
+    size_t start;
     size_t count;
     uint64_t next_sequence;
     uint64_t dropped;
@@ -71,6 +74,7 @@ typedef struct EidolonEprTrace {
 
 void eidolon_epr_trace_init(EidolonEprTrace *trace);
 bool eidolon_epr_trace_emit(EidolonEprTrace *trace, EidolonEprTraceRecord record);
+const EidolonEprTraceRecord *eidolon_epr_trace_record(const EidolonEprTrace *trace, size_t index);
 uint64_t eidolon_epr_trace_hash(const EidolonEprTrace *trace);
 const char *eidolon_epr_trace_event_name(EidolonEprTraceEvent event);
 

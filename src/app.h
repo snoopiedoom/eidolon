@@ -29,6 +29,7 @@ void eidolon_app_set_fps_limit(EidolonApp *app, int fps_limit);
 bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField field);
 void eidolon_app_set_model_scale(EidolonApp *app, float scale);
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side);
+bool eidolon_app_update_performance_fixture(EidolonApp *app, uint64_t now_ms);
 void eidolon_app_log_presentation_metrics(const EidolonApp *app);
 void eidolon_app_set_model_rotation(EidolonApp *app, float yaw_degrees, float pitch_degrees,
                                     float roll_degrees);
