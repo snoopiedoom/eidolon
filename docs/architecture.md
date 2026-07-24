@@ -39,9 +39,10 @@ native presentation backend
 platform compositor layer tree
 ```
 
-The presentation backend will own hosts, independent body/bubble layers, input regions, output
-topology, cadence, and compositor commits. The graphics backend will own pixel production. The two
-are independent selections. See the
+The presentation backend owns hosts, independent body/bubble layers, input regions, output topology,
+cadence, and compositor commits. The graphics backend owns pixel production. The two are independent
+selections. Native callbacks perform only latency-critical platform mechanics; product input crosses
+the bounded [presentation event contract](design/presentation-events.md). See the
 [native presentation and graphics stack](design/native-presentation.md) for the contract, strategy
 analysis, platform mappings, and migration gates.
 
@@ -51,8 +52,10 @@ snapshots and prepared expression tracks.
 
 ## Ownership
 
-- `app`: lifecycle, event routing, display scale, timing, renderer selection, and composition-level
-  state;
+- `app`: product lifecycle, portable event routing, timing, renderer selection, and
+  composition-level state;
+- `presentation`: backend selection, host/layer/target ownership, scene commits, capability
+  reporting, and the portable event contract;
 - `conversation_sources`: adapter catalog, configured source state, capability state, and event bus;
 - `providers/*_stream`: one vendor protocol parser per session source, producing only normalized
   events; `providers` is the legacy source-directory name;
@@ -81,9 +84,9 @@ snapshots and prepared expression tracks.
 - `text_renderer`: SDL_ttf faces, fallback selection, and reusable cached text objects;
 - `settings_ui`: a separate SDL/Dear ImGui window; it displays controls but does not own settings;
 - `user_settings`: strict parsing, serialization, sparse override state, and persistence;
-- `platform`: in the current implementation, behavior SDL cannot express uniformly—overlay hit
-  testing, local IPC, and session file discovery. The target presentation backend expands native
-  ownership without moving session semantics into platform code.
+- `platform`: behavior SDL cannot express uniformly—native presentation adapters, overlay hit
+  testing, local IPC, and session file discovery. Platform callbacks may perform immediate native
+  mechanics but never acquire dialogue, session, or persona semantics.
 
 Do not duplicate these collections in `app.c`. In particular, session paths, titles, dialogue
 objects, and activity timestamps belong to `session_registry`.
@@ -178,9 +181,16 @@ are attached to source offsets, not rendered lines.
 
 ## Windows rendering
 
-SDL owns the transparent window, D3D11 device, context, and swapchain. The 3D renderer borrows that
-device and draws into an SDL-owned target texture; SDL samples the same allocation during final
-composition. There is no animated full-frame CPU transfer, staging-map loop, or upload.
+The shipped default remains `sdl_window_legacy`: SDL owns the transparent window, D3D11 device,
+context, and swapchain. The 3D renderer borrows that device and draws into an SDL-owned target
+texture; SDL samples the same allocation during final composition. There is no animated full-frame
+CPU transfer, staging-map loop, or upload.
+
+The opt-in `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
+premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
+commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
+It currently supports the portrait body only. Dialogue activation events, output-local host
+migration, sprite/3D targets, and device-loss recovery remain unfinished.
 
 The D3D11 vertex layout uses `POSITION`, `TEXCOORD0`, `BLENDINDICES0`, and `BLENDWEIGHT0`. The pixel
 shader input must retain both `SV_Position` and `TEXCOORD0`. Removing `SV_Position` can bind UV to the

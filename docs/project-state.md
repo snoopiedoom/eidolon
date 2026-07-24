@@ -1,6 +1,6 @@
 # Project state
 
-Updated 2026-07-21. This file records the current implementation frontier and restart checklist.
+Updated 2026-07-24. This file records the current implementation frontier and restart checklist.
 Stable design and operating knowledge belongs in the other documents; this file may change as
 milestones move.
 
@@ -75,22 +75,23 @@ overrides with reset-to-inheritance semantics.
   active monitor, while VSync-off with a zero ceiling is uncapped;
 - Windows 3D and SDL composition share one D3D11 device and GPU-resident texture;
 - pixel alpha drives click-through while coarse Win32 regions keep DWM region cost bounded;
-- the intended native presentation boundary and graphics-backend migration gates are specified, but
-  the current runtime still presents through one SDL-owned transparent window;
+- `sdl_window_legacy` remains the default, while the opt-in portrait-only `win32_dcomp` backend owns
+  a no-redirection host, independent body/dialogue targets, premultiplied D3D11 submission,
+  DirectComposition transforms/opacity/z-order, cached-alpha hit testing, and native body dragging;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
 
 ## Awaiting interactive confirmation
 
-- A Win32 border/frame could flash for one frame when a model click removed the hit-test region.
-  Zero-motion clicks no longer remove the region, rotation suspends it only after actual movement,
-  and native caption/frame styles plus non-client painting are suppressed. Confirm the flash is gone
-  on the user's desktop.
 - Confirm hard-cut expression art plus merged semantic fragments against another mixed-emotion
   response and retain the new performance log if timing still feels wrong.
 - Switch all three body renderers through settings and confirm scale, framing, rotation, and restart
   persistence.
+
+The owner accepted the opt-in DirectComposition portrait/dialogue output, transparent per-pixel
+click-through, smooth native body dragging, and cross-monitor movement. Native dialogue activation
+and mixed-DPI event delivery remain implementation work rather than unverified claims.
 
 ## Known limitations
 
@@ -103,6 +104,10 @@ overrides with reset-to-inheritance semantics.
   depend on update order;
 - monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
   renderer reports tighter visible geometry;
+- the DirectComposition backend detects opaque dialogue pixels but has no backend-neutral product
+  event path yet, so native bubble clicks do not advance dialogue;
+- the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
+- native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
 - portable Linux font fallback and feature parity remain unfinished;
 - the complete character-sprite download is intentionally not part of Git and has not been run as
@@ -118,21 +123,24 @@ overrides with reset-to-inheritance semantics.
 
 ## Next priorities
 
-1. collect interactive confirmation for the Win32 click-border fix and hard-cut expressions;
-2. interactively verify monitor-aware bubble placement, stable slots, drag-release reflow, and
-   mixed-DPI anchoring across sprite, portrait, and 3D bodies;
-3. extract the presentation-backend contract, preserve the current path as `sdl_window_legacy`, and
-   build the gated Windows DirectComposition portrait proof described in
-   `docs/design/native-presentation.md`;
-4. add source-instance identity and source/adapter status controls without moving ownership into the
+1. implement the backend-neutral presentation event and committed layer-interaction-policy contract
+   described in `docs/design/presentation-events.md`;
+2. route native dialogue activation and drag completion into `EidolonApp`, with one final reflow and
+   no application calls from `WndProc`;
+3. integrate output/DPI changes and presentation readiness with the native event/wait boundary,
+   preserving placement and animation across mixed-DPI monitors;
+4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
+5. expose native presentation as a persisted setting only after the portrait path has event,
+   output, cadence, and recovery parity;
+6. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
-5. add explicit shared-character performance ownership for concurrent bubbles;
-6. replace the hard-coded body-asset selector with character-package discovery;
-7. make session retirement policy configurable;
-8. expand normalized operational state toward the presence contract;
-9. tune affect targets and continuity thresholds from real expression traces;
-10. calibrate the four initial Rio semantic poses before adding transition dynamics;
-11. consider expression annotation/detection only after the downloaded portrait catalog is present.
+7. add explicit shared-character performance ownership for concurrent bubbles;
+8. replace the hard-coded body-asset selector with character-package discovery;
+9. make session retirement policy configurable;
+10. expand normalized operational state toward the presence contract;
+11. tune affect targets and continuity thresholds from real expression traces;
+12. calibrate the four initial Rio semantic poses before adding transition dynamics;
+13. consider expression annotation/detection only after the downloaded portrait catalog is present.
 
 ## Restart checklist
 

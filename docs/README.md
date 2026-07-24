@@ -35,6 +35,7 @@ particular implementation changes.
 - [Presence contract](design/presence-contract.md)
 - [Body capabilities](design/body-capabilities.md)
 - [Native presentation and graphics stack](design/native-presentation.md)
+- [Backend-neutral presentation events](design/presentation-events.md)
 
 ## Active workstreams
 

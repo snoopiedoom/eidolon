@@ -293,7 +293,8 @@ portrait-only DirectComposition path for owner-controlled evaluation; it is not 
 
 ## Restart checklist
 
-1. Read this file and `docs/design/native-presentation.md`.
+1. Read this file, `docs/design/native-presentation.md`, and
+   `docs/design/presentation-events.md`.
 2. Run `git status --short --branch`; do not absorb unrelated changes.
 3. Confirm the current gate and its unchecked acceptance items.
 4. Record dependency commit hashes before editing build rules.
@@ -303,6 +304,19 @@ portrait-only DirectComposition path for owner-controlled evaluation; it is not 
    handoff.
 
 ## Evidence log
+
+### 2026-07-24: native interaction accepted; event contract is next
+
+- the owner accepted opt-in DirectComposition portrait/dialogue output, transparent per-pixel
+  click-through, smooth Win32-owned body dragging, and cross-monitor movement;
+- native callbacks currently infer body dragging from scene-layer kind and do not deliver dialogue
+  activation or drag completion to portable application behavior;
+- `docs/design/presentation-events.md` now owns the next implementation boundary: committed layer
+  interaction policy, fixed-size normalized events, coordinates, ordering, bounded queue pressure,
+  capture cancellation, and the separation between immediate native mechanics and deferred product
+  intent;
+- the next code gate must route activation and final movement into `EidolonApp` without calling
+  application behavior from `WndProc`, then add equivalent SDL legacy meaning.
 
 ### 2026-07-23: opt-in DirectComposition portrait checkpoint
 

@@ -8,6 +8,7 @@ These documents define behavior that should survive implementation rewrites.
 - [Presence contract](presence-contract.md)
 - [Body capabilities](body-capabilities.md)
 - [Native presentation and graphics stack](native-presentation.md)
+- [Backend-neutral presentation events](presentation-events.md)
 
 ## Specification template
 

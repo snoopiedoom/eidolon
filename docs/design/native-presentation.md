@@ -150,6 +150,10 @@ visible bounds, face/head bounds, and click regions. It does not contain `HWND`,
 
 No backend may acquire session ownership. No body renderer may move a native window.
 
+Native callback normalization, queueing, coordinate semantics, capture, and the division between
+immediate platform mechanics and deferred product behavior are owned by the
+[backend-neutral presentation event contract](presentation-events.md).
+
 ## Presentation contract
 
 The first interface should remain deliberately smaller than a general scene API. Conceptually it
@@ -176,6 +180,7 @@ void presentation_set_input_region(EidolonLayer layer,
 
 bool presentation_commit(const EidolonSceneRevision *revision);
 EidolonWaitResult presentation_wait(const EidolonWaitSet *events);
+bool presentation_poll_event(EidolonPresentationEvent *event);
 EidolonPresentationCapabilities presentation_capabilities(void);
 ```
 
@@ -304,6 +309,11 @@ A native top-level move remains a fallback. It is not equivalent:
 The input contract routes pointer id, device kind, global/output position when available, layer id,
 layer-local position, buttons, modifiers, timestamp, and compositor serial where required. It must
 support mouse, touch, and pen without synthesizing mouse-only assumptions into core state.
+
+The [presentation event contract](presentation-events.md) defines that boundary in implementation
+terms. Native callbacks may answer hit testing, capture pointers, and perform accepted movement
+immediately. Dialogue activation, final reflow, body behavior, and session-facing actions cross a
+bounded fixed-size event queue; a native callback never invokes application behavior directly.
 
 ## Output topology and DPI
 
@@ -674,7 +684,9 @@ layers resolve to independently generated presentation targets. Portrait and dia
 be authored without an SDL window renderer, premultiplied, and uploaded directly into
 compositor-owned D3D11 targets without readback. Normal startup and snapshots remain on
 `sdl_window_legacy`; the native override is portrait-only. Its Win32 adapter now owns transformed
-per-pixel hit testing and body dragging, with owner-controlled interaction proof still pending.
+per-pixel hit testing and body dragging. The owner accepted native visual output, transparent
+click-through, smooth dragging, and cross-monitor behavior. Native product-event delivery is the
+next boundary.
 
 ### Phase 2: Windows portrait proof
 
@@ -693,7 +705,10 @@ visual transforms and sampled through the inverse committed matrix. Transparent 
 native hit-test transparency. Body drag capture and top-level movement run in the Win32 window
 procedure, independent of frame rendering. This is a transitional single-host implementation;
 output-local host migration and layer-transform dragging remain the intended multi-output design.
-Dialogue pixels are detected, but native dialogue-click event routing is not implemented yet.
+Dialogue pixels are detected, but native dialogue-click event routing is not implemented yet. The
+next gate implements the fixed-size event and committed interaction-policy contract in
+[`presentation-events.md`](presentation-events.md), replacing layer-kind inference in the Win32
+adapter.
 
 ### Phase 3: independent dialogue layers
 
