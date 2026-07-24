@@ -140,7 +140,8 @@ Complete the current presentation migration for the 2D daily-driver path:
 - complete Windows portrait/dialogue interaction and recovery parity;
 - retain `sdl_window_legacy` as a functional fallback until native parity is accepted, without
   requiring its Windows modal move loop to match compositor-layer drag cadence;
-- close remaining routed-input, graphics-reset, output-removal, DPI, and visual-parity gaps;
+- close remaining routed-input, graphics-reset recovery, output-removal, DPI, and visual-parity
+  gaps;
 - persist presentation selection only after failure recovery and fallback are trustworthy;
 - keep body animation, dragging, bubble reveal, and desktop input independent under load.
 

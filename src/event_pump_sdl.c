@@ -42,8 +42,12 @@ static void pointer_position(EidolonAppPointerEvent *pointer) {
 static void route_event(EidolonEventPump *pump, const SDL_Event *source, EidolonAppEvent *event) {
     SDL_zero(*event);
     event->monotonic_ns = source->common.timestamp;
-    (void)eidolon_sdl_legacy_handle_event(pump->presentation, source);
+    const bool presentation_owned =
+        eidolon_sdl_legacy_handle_event(pump->presentation, source);
     if (eidolon_settings_ui_handle_event(pump->settings_ui, source)) {
+        return;
+    }
+    if (presentation_owned) {
         return;
     }
 
@@ -69,22 +73,10 @@ static void route_event(EidolonEventPump *pump, const SDL_Event *source, Eidolon
             break;
         }
         return;
-    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-        if (belongs_to_presentation(pump, source)) {
-            event->kind = EIDOLON_APP_EVENT_QUIT_REQUESTED;
-        }
-        return;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         if (belongs_to_presentation(pump, source)) {
             event->kind = EIDOLON_APP_EVENT_FOCUS_LOST;
         }
-        return;
-    case SDL_EVENT_RENDER_TARGETS_RESET:
-        event->kind = EIDOLON_APP_EVENT_GRAPHICS_TARGETS_RESET;
-        return;
-    case SDL_EVENT_RENDER_DEVICE_RESET:
-    case SDL_EVENT_RENDER_DEVICE_LOST:
-        event->kind = EIDOLON_APP_EVENT_GRAPHICS_DEVICE_LOST;
         return;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {

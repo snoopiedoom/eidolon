@@ -108,6 +108,44 @@ int main(void) {
     assert(event.sequence == EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY + 5U);
     assert(!eidolon_presentation_event_queue_poll(&queue, &event));
 
+    for (size_t index = 0U; index < EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY; ++index) {
+        EidolonPresentationEvent queued = activation(1100U + index, (uint32_t)(index + 1U));
+        assert(eidolon_presentation_event_queue_push(&queue, &queued));
+    }
+    const EidolonPresentationEvent close = {
+        .kind = EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+        .monotonic_ns = 1200U,
+        .host = {1U},
+    };
+    assert(eidolon_presentation_event_queue_push(&queue, &close));
+    assert(eidolon_presentation_event_queue_poll(&queue, &event));
+    assert(event.kind == EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED);
+    const uint64_t close_resync_sequence = event.sequence;
+    assert(eidolon_presentation_event_queue_poll(&queue, &event));
+    assert(event.kind == EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED);
+    assert(event.sequence == close_resync_sequence + 1U);
+    assert(!eidolon_presentation_event_queue_poll(&queue, &event));
+
+    for (size_t index = 0U; index < EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY; ++index) {
+        EidolonPresentationEvent queued = activation(1300U + index, (uint32_t)(index + 1U));
+        assert(eidolon_presentation_event_queue_push(&queue, &queued));
+    }
+    const EidolonPresentationEvent reset = {
+        .kind = EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+        .monotonic_ns = 1400U,
+        .host = {1U},
+        .data.graphics = {EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE},
+    };
+    assert(eidolon_presentation_event_queue_push(&queue, &reset));
+    assert(eidolon_presentation_event_queue_poll(&queue, &event));
+    assert(event.kind == EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED);
+    const uint64_t reset_resync_sequence = event.sequence;
+    assert(eidolon_presentation_event_queue_poll(&queue, &event));
+    assert(event.kind == EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED);
+    assert(event.sequence == reset_resync_sequence + 1U);
+    assert(event.data.graphics.reset_kind == EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE);
+    assert(!eidolon_presentation_event_queue_poll(&queue, &event));
+
     puts("presentation event queue tests passed");
     return 0;
 }

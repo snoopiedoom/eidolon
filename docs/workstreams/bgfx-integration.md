@@ -299,8 +299,9 @@ The first backend-neutral interaction slice is compiled: committed layer policy 
 layer-kind inference, Win32 translates activation and native move lifecycle into a bounded C17
 queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
 completion. The owner accepted that interaction slice. Both Windows backends now publish
-revisioned active-host environments and caller-owned topology; SDL legacy pointer, close, and
-graphics-reset event meaning remains Gate 6 work under
+revisioned active-host environments and caller-owned topology. Both also publish host-close and
+typed graphics-reset requests through the common queue; routed-pointer meaning and transactional
+graphics recovery remain Gate 6 work under
 [`docs/design/presentation-events.md`](../design/presentation-events.md) and
 [`docs/design/presentation-environment.md`](../design/presentation-environment.md).
 
@@ -308,7 +309,9 @@ Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal nat
 loop and pauses application-driven animation while dragging. That is an established fallback
 limitation, not an unfinished DirectComposition cadence patch. The next Gate 6 goal is to finish
 the native event, output-removal, recovery, and visual-parity work required to make
-`win32_dcomp` the normal Windows selection with explicit legacy fallback.
+`win32_dcomp` ready for normal Windows selection. The remaining SDL click, settings,
+mixed-DPI/output, placement, and post-drag cadence checks are required before that promotion, but
+do not block native implementation.
 
 ## Restart checklist
 
@@ -325,6 +328,18 @@ the native event, output-removal, recovery, and visual-parity work required to m
 
 ## Evidence log
 
+### 2026-07-24: close and graphics-reset ownership compiled
+
+- both Windows backends now publish host-close and typed target/device/backend reset requests
+  through the bounded presentation event queue;
+- SDL close/reset events no longer bypass presentation ownership through `EidolonAppEvent`;
+- DirectComposition converts failed target presentation or compositor commit into one retained
+  reset request, and `EidolonApp` redraws target resets or exits cleanly for device/backend resets;
+- queue pressure preserves close/reset structural edges after an observable resynchronization;
+- contract, queue, and DirectComposition close-smoke coverage pass alongside `make` and
+  `make check`;
+- transactional DirectComposition device recreation or explicit runtime fallback remains open.
+
 ### 2026-07-24: legacy modal drag recorded; DirectComposition made the next goal
 
 - owner evaluation confirmed that `sdl_window_legacy` pauses application-driven animation during
@@ -333,7 +348,9 @@ the native event, output-removal, recovery, and visual-parity work required to m
   `HTCAPTION`, while `win32_dcomp` owns capture and movement without entering that modal loop;
 - documentation now distinguishes equivalent event/environment meaning from compositor cadence;
 - Gate 6 proceeds through DirectComposition event completion, output-removal proof, recovery,
-  visual parity, and explicit fallback before normal/default selection.
+  visual parity, and explicit fallback before normal/default selection;
+- the remaining SDL fallback interaction/environment pass is deferred to pre-default acceptance,
+  not discarded.
 
 ### 2026-07-24: SDL event and environment ownership compiled
 
@@ -352,8 +369,8 @@ the native event, output-removal, recovery, and visual-parity work required to m
   dragging, click-through, dialogue activation, and final reflow behavior;
 - all ordinary regressions, the warning-clean Windows build, formatting, whitespace validation,
   and a hidden staged snapshot pass;
-- owner-controlled legacy drag confirmed the documented modal-loop limitation; it is no longer the
-  current checkpoint or a native cadence gate.
+- owner-controlled legacy drag confirmed the documented modal-loop limitation; remaining fallback
+  behavior still requires owner confirmation before DirectComposition becomes the normal path.
 
 ### 2026-07-24: presentation event slice compiled
 

@@ -71,11 +71,11 @@ $env:EIDOLON_PRESENTATION_BACKEND = "win32_dcomp"
 This override deliberately remains outside the saved user-settings contract while the backend is
 under construction. It currently supports portrait and dialogue layers, generation-bound CPU alpha
 masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
-body dragging, and revisioned output/DPI state. Sprite and 3D targets, graphics-reset/close/routed
-pointer parity, physical output-removal proof, device-loss recovery, output-local host migration,
-and default enablement remain unfinished. An explicit native request fails closed if host or
-graphics initialization fails; normal startup and every snapshot continue to use
-`sdl_window_legacy`.
+body dragging, revisioned output/DPI state, and bounded host-close/graphics-reset requests. Sprite
+and 3D targets, routed-pointer parity, physical output-removal proof, device-loss recovery,
+output-local host migration, and default enablement remain unfinished. An explicit native request
+fails closed if host or graphics initialization fails; normal startup and every snapshot continue
+to use `sdl_window_legacy`.
 
 The Windows legacy fallback delegates character dragging to the native top-level move loop.
 Animation and dialogue presentation may pause until release; this is a documented fallback

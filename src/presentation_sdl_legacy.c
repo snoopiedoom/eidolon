@@ -554,12 +554,54 @@ static EidolonSdlLegacyPresentation *legacy_context(EidolonPresentation *present
     return eidolon_presentation_backend_context(presentation, "sdl_window_legacy");
 }
 
+static bool legacy_enqueue_structural_event(
+    EidolonPresentation *presentation, EidolonSdlLegacyPresentation *legacy,
+    EidolonPresentationEventKind kind, EidolonPresentationGraphicsResetKind reset_kind) {
+    EidolonPresentationEvent event;
+    SDL_zero(event);
+    event.kind = kind;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host = eidolon_presentation_host(presentation);
+    event.data.graphics.reset_kind = reset_kind;
+    if (eidolon_presentation_event_queue_push(&legacy->event_queue, &event)) {
+        return true;
+    }
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not retain SDL presentation event kind=%d",
+                 (int)kind);
+    return false;
+}
+
 bool eidolon_sdl_legacy_handle_event(EidolonPresentation *presentation, const SDL_Event *event) {
     EidolonSdlLegacyPresentation *legacy = legacy_context(presentation);
     if (legacy == NULL || event == NULL) {
         return false;
     }
     switch (event->type) {
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        if (SDL_GetWindowFromEvent(event) != legacy->window) {
+            return false;
+        }
+        (void)legacy_enqueue_structural_event(
+            presentation, legacy, EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+            EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE);
+        return true;
+    case SDL_EVENT_RENDER_TARGETS_RESET:
+        if (SDL_GetWindowFromEvent(event) != legacy->window) {
+            return false;
+        }
+        (void)legacy_enqueue_structural_event(
+            presentation, legacy, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+            EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS);
+        return true;
+    case SDL_EVENT_RENDER_DEVICE_RESET:
+    case SDL_EVENT_RENDER_DEVICE_LOST:
+        if (SDL_GetWindowFromEvent(event) != legacy->window) {
+            return false;
+        }
+        (void)legacy_enqueue_structural_event(
+            presentation, legacy, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+            EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE);
+        return true;
     case SDL_EVENT_WINDOW_MOVED:
     case SDL_EVENT_WINDOW_RESIZED:
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

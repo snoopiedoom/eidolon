@@ -32,14 +32,17 @@ The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
 - `EidolonApp` drains the complete batch before simulation, advances the matching current dialogue
   layer, and applies the newest environment plus final movement as one layout transaction.
 
-This checkpoint does not yet emit graphics-reset, close, or routed-pointer events through the
-presentation queue. `sdl_window_legacy` now publishes environment changes through that queue, while
-an SDL-backed event adapter translates its existing pointer and application-command behavior into
-fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no longer enter `EidolonApp`.
-Presentation-event parity for those remaining edges is still explicit work. The owner confirmed
-native activation, body-context settings, cancel-on-drag, click-through, smooth movement, and one
-stable final reflow. The no-activate native host deliberately does not claim keyboard focus or
-register a system-wide `F1` hotkey; right-click is its reliable settings entry point.
+Close and graphics-reset requests now cross the presentation queue for both Windows backends.
+DirectComposition emits one typed device/backend reset request after a failed present or compositor
+commit; SDL translates its target/device reset events at the presentation boundary. The application
+redraws after target reset and exits cleanly after device/backend reset until transactional recovery
+or fallback exists. `sdl_window_legacy` publishes environment changes through the same queue, while
+an SDL-backed event adapter still translates its pointer and application-command behavior into
+fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no longer enter `EidolonApp`;
+routed-pointer presentation parity remains explicit work. The owner confirmed native activation,
+body-context settings, cancel-on-drag, click-through, smooth movement, and one stable final reflow.
+The no-activate native host deliberately does not claim keyboard focus or register a system-wide
+`F1` hotkey; right-click is its reliable settings entry point.
 The Windows SDL fallback still delegates character movement to the modal native top-level move
 loop, so its animation cadence can pause until release. Equivalent event meaning does not imply
 equivalent compositor cadence.
@@ -359,19 +362,19 @@ must remain bounded and must not call application code while holding a backend l
 1. [x] Add fixed-size presentation event and layer-interaction-policy types to the C17 contract.
 2. [x] Add a bounded queue and polling operation owned by each presentation instance/backend.
 3. [x] Publish interaction policy atomically with committed layer geometry.
-4. [~] Translate DirectComposition `WndProc` input into activation, context, move lifecycle,
-   cancellation, and reset events while retaining immediate native mechanics. Activation, context,
-   and normal move lifecycle are implemented; reset and forced-capture recovery remain.
+4. [x] Translate DirectComposition `WndProc` input into activation, context, move lifecycle,
+   cancellation, close, and reset events while retaining immediate native mechanics.
 5. [x] Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from
    the Win32 adapter.
 6. [~] Implement equivalent SDL legacy translation without changing product behavior. The
-   fixed-size fallback application adapter preserves current pointer and command behavior; moving
-   its remaining close/reset/routed-pointer meaning into the presentation contract remains.
+   fixed-size fallback application adapter preserves current pointer and command behavior; close
+   and reset now cross the presentation contract, while routed-pointer meaning remains.
 7. [~] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests. Queue
    and stale-layer behavior are covered; forced-capture and routed-coordinate cases remain.
 8. [~] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
    checks. The native portrait path is accepted; the legacy modal-drag limitation is confirmed and
-   documented, while physical output-removal behavior remains.
+   documented, while the remaining SDL fallback regression pass and physical output-removal
+   behavior remain pre-default acceptance work.
 
 Environment and topology implementation proceeds through the separate sequence in
 [`presentation-environment.md`](presentation-environment.md).

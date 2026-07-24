@@ -372,6 +372,13 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
         }
         break;
     case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
+        if (next.data.graphics.reset_kind <= EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE ||
+            next.data.graphics.reset_kind > EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND) {
+            SDL_SetError("invalid presentation graphics reset event");
+            return false;
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED:
     case EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED:
     case EIDOLON_PRESENTATION_EVENT_NONE:
         break;

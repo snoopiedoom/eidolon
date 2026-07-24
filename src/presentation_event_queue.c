@@ -15,6 +15,12 @@ static EidolonPresentationEvent *pending_environment_event(EidolonPresentationEv
     return NULL;
 }
 
+static bool retain_after_resync(EidolonPresentationEventKind kind) {
+    return kind == EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED ||
+           kind == EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED ||
+           kind == EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED;
+}
+
 void eidolon_presentation_event_queue_init(EidolonPresentationEventQueue *queue) {
     if (queue == NULL) {
         return;
@@ -39,17 +45,21 @@ bool eidolon_presentation_event_queue_push(EidolonPresentationEventQueue *queue,
         }
     }
 
-    EidolonPresentationEvent accepted = *event;
-    accepted.sequence = queue->next_sequence++;
     if (queue->count >= EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY) {
         queue->head = 0U;
         queue->count = 1U;
-        accepted.kind = EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED;
-        memset(&accepted.data, 0, sizeof(accepted.data));
-        queue->events[0] = accepted;
-        return false;
+        EidolonPresentationEvent resync = *event;
+        resync.kind = EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED;
+        resync.sequence = queue->next_sequence++;
+        memset(&resync.data, 0, sizeof(resync.data));
+        queue->events[0] = resync;
+        if (!retain_after_resync(event->kind)) {
+            return false;
+        }
     }
 
+    EidolonPresentationEvent accepted = *event;
+    accepted.sequence = queue->next_sequence++;
     const size_t slot = (queue->head + queue->count) % EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY;
     queue->events[slot] = accepted;
     ++queue->count;

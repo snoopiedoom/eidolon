@@ -330,7 +330,8 @@ The initial `win32_dcomp` implementation now commits interaction policy with eac
 dialogue activation plus native move lifecycle through that queue. The owner confirmed native
 activation, cancellation, click-through, movement, and final reflow. Presentation-environment
 publication, transactional application, and mixed-DPI behavior are owner-confirmed; reset events
-and SDL-legacy queue parity remain open.
+and host close now cross the common queue. Routed-pointer parity, graphics recovery, and physical
+output removal remain open.
 
 ## Output topology and DPI
 
@@ -705,12 +706,18 @@ per-pixel hit testing, body dragging, and bounded activation/move events. The ow
 visual output, transparent click-through, dialogue activation and cancellation, smooth dragging,
 cross-monitor behavior, body-context settings without focus theft, final reflow, revisioned Win32
 environment/topology delivery, and one transactional mixed-DPI application update.
+Host close and graphics-reset requests now cross the same bounded presentation event contract for
+both Windows backends. Target reset requests invalidate cached hit testing and request a redraw;
+device/backend reset requests stop the runtime cleanly until transactional recovery or fallback is
+implemented.
 
 The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
 observation confirmed that application-driven animation pauses during that native top-level move.
 This does not reopen Phase 1 or redefine native cadence acceptance; the active work now finishes
 DirectComposition event, output-removal, recovery, and visual parity so the native path can become
-the normal selection.
+the normal selection. Before that promotion, the fallback still requires its remaining
+owner-controlled click, settings, mixed-DPI/output, placement, and post-drag cadence regression
+pass.
 
 ### Phase 2: Windows portrait proof
 

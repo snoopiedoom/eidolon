@@ -185,6 +185,7 @@ typedef enum EidolonPresentationEventKind {
     EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED,
     EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED,
     EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED,
+    EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
     EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
     EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED,
 } EidolonPresentationEventKind;
@@ -213,10 +214,22 @@ typedef struct EidolonPresentationEnvironmentChanged {
     EidolonPresentationEnvironment environment;
 } EidolonPresentationEnvironmentChanged;
 
+typedef enum EidolonPresentationGraphicsResetKind {
+    EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE,
+    EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS,
+    EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE,
+    EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND,
+} EidolonPresentationGraphicsResetKind;
+
+typedef struct EidolonPresentationGraphicsEvent {
+    EidolonPresentationGraphicsResetKind reset_kind;
+} EidolonPresentationGraphicsEvent;
+
 typedef union EidolonPresentationEventData {
     EidolonPresentationLayerEvent layer;
     EidolonPresentationMoveEvent move;
     EidolonPresentationEnvironmentChanged environment;
+    EidolonPresentationGraphicsEvent graphics;
 } EidolonPresentationEventData;
 
 typedef struct EidolonPresentationEvent {

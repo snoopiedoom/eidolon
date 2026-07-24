@@ -126,6 +126,22 @@ int main() {
             goto cleanup;
         }
     }
+    {
+        HWND window =
+            FindWindowW(L"EidolonDirectCompositionHost",
+                        L"Eidolon DirectComposition backend smoke");
+        if (window == nullptr) {
+            std::fprintf(stderr, "native host lookup failed\n");
+            goto cleanup;
+        }
+        SendMessageW(window, WM_CLOSE, 0U, 0U);
+        EidolonPresentationEvent event = {};
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED) {
+            std::fprintf(stderr, "native close event failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+    }
     result = 0;
     std::puts("DirectComposition presentation backend smoke passed");
 

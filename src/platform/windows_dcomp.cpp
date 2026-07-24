@@ -101,6 +101,7 @@ struct Win32DcompPresentation {
     bool activation_pending = false;
     bool environment_valid = false;
     bool environment_dirty = true;
+    bool graphics_reset_pending = false;
 };
 
 template <typename Interface> void release(Interface *&object) {
@@ -199,6 +200,38 @@ bool enqueue_event(Win32DcompPresentation *backend, EidolonPresentationEventKind
     return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
+bool enqueue_structural_event(Win32DcompPresentation *backend,
+                              EidolonPresentationEventKind kind,
+                              EidolonPresentationGraphicsResetKind reset_kind) {
+    if (backend == nullptr || kind == EIDOLON_PRESENTATION_EVENT_NONE) {
+        return false;
+    }
+    EidolonPresentationEvent event = {};
+    event.kind = kind;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host = {1U};
+    event.data.graphics.reset_kind = reset_kind;
+    return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
+}
+
+bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
+                         const char *operation) {
+    if (hresult_ok(result, operation)) {
+        return true;
+    }
+    if (backend != nullptr && !backend->graphics_reset_pending) {
+        EidolonPresentationGraphicsResetKind reset_kind =
+            EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND;
+        if (backend->device != nullptr && FAILED(backend->device->GetDeviceRemovedReason())) {
+            reset_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE;
+        }
+        backend->graphics_reset_pending = true;
+        (void)enqueue_structural_event(
+            backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind);
+    }
+    return false;
+}
+
 bool start_drag(Win32DcompPresentation *backend) {
     if (backend == nullptr || backend->input_suspended) {
         return false;
@@ -247,6 +280,13 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
     }
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
+    case WM_CLOSE:
+        if (backend != nullptr) {
+            (void)enqueue_structural_event(
+                backend, EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+                EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE);
+        }
+        return 0;
     case WM_LBUTTONDOWN: {
         const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
         const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
@@ -1013,7 +1053,8 @@ bool submit_target(void *opaque, EidolonPresentationTarget id, uint64_t generati
         return false;
     }
     backend->context->Flush();
-    if (!hresult_ok(target->swap_chain->Present(0U, 0U), "composition swap-chain Present")) {
+    if (!graphics_hresult_ok(backend, target->swap_chain->Present(0U, 0U),
+                             "composition swap-chain Present")) {
         return false;
     }
     release(target->back_buffer);
@@ -1103,7 +1144,8 @@ bool commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
         }
         previous = target->visual;
     }
-    if (!hresult_ok(backend->composition_device->Commit(), "IDCompositionDevice::Commit")) {
+    if (!graphics_hresult_ok(backend, backend->composition_device->Commit(),
+                             "IDCompositionDevice::Commit")) {
         return false;
     }
     backend->input_count = 0U;

@@ -2173,8 +2173,23 @@ static void handle_presentation_event(EidolonApp *app, const EidolonPresentation
     case EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED:
         stage_presentation_environment(app, &event->data.environment.environment);
         break;
-    case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
+    case EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED:
+        app->running = false;
+        break;
     case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
+        if (event->data.graphics.reset_kind == EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS) {
+            app->hit_test_initialized = false;
+            eidolon_model_request_redraw(app->model);
+            eidolon_log_write("renderer",
+                              "presentation targets reset; model redraw requested");
+        } else {
+            eidolon_log_write(
+                "renderer", "presentation graphics reset kind=%d; restart required",
+                (int)event->data.graphics.reset_kind);
+            app->running = false;
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
     case EIDOLON_PRESENTATION_EVENT_NONE:
         break;
     }
@@ -2257,15 +2272,6 @@ static void handle_app_event(EidolonApp *app, const EidolonAppEvent *event) {
         break;
     case EIDOLON_APP_EVENT_RELOAD_CONFIGS:
         eidolon_app_reload_configs(app);
-        break;
-    case EIDOLON_APP_EVENT_GRAPHICS_TARGETS_RESET:
-        app->hit_test_initialized = false;
-        eidolon_model_request_redraw(app->model);
-        eidolon_log_write("renderer", "render targets reset; model redraw requested");
-        break;
-    case EIDOLON_APP_EVENT_GRAPHICS_DEVICE_LOST:
-        eidolon_log_write("renderer", "D3D11 device reset/lost; restart required");
-        app->running = false;
         break;
     case EIDOLON_APP_EVENT_FOCUS_LOST:
         end_primary_interaction(app);
