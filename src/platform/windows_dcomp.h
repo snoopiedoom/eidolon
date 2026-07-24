@@ -30,6 +30,8 @@ ID3D11Texture2D *eidolon_win32_dcomp_target_texture(EidolonPresentation *present
                                                     uint64_t generation);
 bool eidolon_win32_dcomp_test_inject_graphics_reset(
     EidolonPresentation *presentation, EidolonPresentationGraphicsResetKind reset_kind);
+bool eidolon_win32_dcomp_test_inject_active_output_removal(
+    EidolonPresentation *presentation);
 
 #ifdef __cplusplus
 }

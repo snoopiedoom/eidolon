@@ -333,7 +333,9 @@ publication, transactional application, and mixed-DPI behavior are owner-confirm
 and host close now cross the common queue. Middle-button routed input is compiled for both Windows
 backends; SDL 3D rotation outside the host bounds, `Shift`+middle roll, double-middle reset, and
 preserved left dragging are owner-confirmed. Injected native reconstruction and SDL fallback are
-also owner-confirmed; real device loss and physical output removal remain open.
+also owner-confirmed. Deterministic active-output retirement and application-state-preserving
+fallback are proven; real device loss and physical display disconnect remain hardware evidence
+gaps.
 
 ## Output topology and DPI
 
@@ -720,8 +722,8 @@ interaction after both injected branches.
 The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
 observation confirmed that application-driven animation pauses during that native top-level move.
 This does not reopen Phase 1 or redefine native cadence acceptance; the active work now finishes
-DirectComposition event, output-removal, recovery, and visual parity so the native path can become
-the normal selection. Before that promotion, the fallback still requires its remaining
+DirectComposition visual parity so the native path can become the normal selection. Before that
+promotion, the fallback still requires its remaining
 owner-controlled click, settings, mixed-DPI/output, placement, and post-drag cadence regression
 pass.
 
@@ -748,7 +750,10 @@ the owner accepted the resulting interaction. Immutable revisioned environment p
 topology copying, native-message wake integration, and one transactional mixed-DPI application
 update now follow
 [`presentation-environment.md`](presentation-environment.md). The owner confirmed cross-monitor
-environment delivery and bounds behavior; physical output-removal recovery remains unproven.
+environment delivery and bounds behavior. Deterministic active-output retirement now removes the
+old opaque id, selects a stable fallback, migrates and clamps the body inside surviving usable
+bounds, and preserves dialogue, expression, motion, and scene state through the replacement frame.
+A physical display disconnect remains hardware evidence rather than a missing contract path.
 
 ### Phase 3: independent dialogue layers
 

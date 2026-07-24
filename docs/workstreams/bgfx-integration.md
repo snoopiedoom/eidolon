@@ -310,10 +310,10 @@ remains Gate 6 work under
 
 Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal native top-level move
 loop and pauses application-driven animation while dragging. That is an established fallback
-limitation, not an unfinished DirectComposition cadence patch. The immediate checkpoint is
-deterministic output-removal proof; native visual parity follows. The remaining SDL click,
-settings, mixed-DPI/output, placement, and post-drag cadence checks are required before normal
-Windows selection, but do not block native implementation.
+limitation, not an unfinished DirectComposition cadence patch. Deterministic active-output
+retirement and fallback are now proven; native dialogue-raster parity is next. The remaining SDL
+click, settings, mixed-DPI/output, placement, and post-drag cadence checks are required before
+normal Windows selection, but do not block native implementation.
 
 ## Restart checklist
 
@@ -329,6 +329,23 @@ Windows selection, but do not block native implementation.
    before handoff.
 
 ## Evidence log
+
+### 2026-07-24: deterministic active-output fallback compiled
+
+- the DirectComposition adapter can retire the active native monitor and its opaque output id,
+  selecting the geometrically nearest surviving output with deterministic id tie-breaking;
+- a synthetic shifted output makes the probe deterministic on single-monitor hosts, and subsequent
+  reconciliation cannot resurrect the retired monitor under a new id or replace the fallback id;
+- `EidolonApp` detects that its prior active output left the topology, maps the body center through
+  output-local logical coordinates or normalized bounds, then centers conservatively if necessary
+  and clamps inside the surviving usable area;
+- the environment transaction preserves application-owned session, dialogue, expression, motion,
+  and scene state and performs one final reflow;
+- the backend smoke proves topology retirement and stable selection after a later geometry
+  reconciliation; a hidden end-to-end probe preserved active dialogue at 11 revealed bytes and
+  presented scene revision 150 after fallback;
+- real hardware cable or power removal remains useful evidence, but no longer represents an
+  unimplemented contract path.
 
 ### 2026-07-24: routed pointer ownership accepted
 
@@ -357,7 +374,8 @@ Windows selection, but do not block native implementation.
 - queue pressure preserves close/reset structural edges after an observable resynchronization;
 - contract, queue, and DirectComposition close-smoke coverage pass alongside `make` and
   `make check`;
-- transactional DirectComposition device recreation or explicit runtime fallback remains open.
+- transactional DirectComposition device recreation or explicit runtime fallback was still open
+  at this checkpoint.
 
 ### 2026-07-24: bounded DirectComposition recovery compiled
 
@@ -377,7 +395,7 @@ Windows selection, but do not block native implementation.
   unhealthy presentation; hidden end-to-end probes pass for same-process native reconstruction and
   forced SDL fallback;
 - the owner accepted visible placement, continuity, and interaction for both injected recovery
-  branches; physical output-removal behavior remains the next deterministic proof.
+  branches.
 
 ### 2026-07-24: legacy modal drag recorded; DirectComposition made the next goal
 
@@ -386,7 +404,7 @@ Windows selection, but do not block native implementation.
 - source inspection confirmed the fallback deliberately delegates to `WM_NCLBUTTONDOWN` with
   `HTCAPTION`, while `win32_dcomp` owns capture and movement without entering that modal loop;
 - documentation now distinguishes equivalent event/environment meaning from compositor cadence;
-- Gate 6 proceeds through DirectComposition event completion, output-removal proof, recovery,
+- Gate 6 next proceeded through DirectComposition event completion, output-removal proof, recovery,
   visual parity, and explicit fallback before normal/default selection;
 - the remaining SDL fallback interaction/environment pass is deferred to pre-default acceptance,
   not discarded.

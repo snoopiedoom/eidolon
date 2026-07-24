@@ -846,6 +846,104 @@ static bool query_presentation_outputs(EidolonApp *app, EidolonPresentationOutpu
     return false;
 }
 
+static bool presentation_output_was_removed(
+    EidolonApp *app, const EidolonPresentationEnvironment *previous,
+    const EidolonPresentationEnvironment *current) {
+    if (previous == NULL || current == NULL ||
+        (previous->valid_fields & EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT) == 0U ||
+        previous->active_output.value == 0U ||
+        (current->valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY) == 0U ||
+        current->topology_revision == previous->topology_revision) {
+        return false;
+    }
+
+    EidolonPresentationOutputInfo *outputs = NULL;
+    size_t output_count = 0U;
+    uint64_t topology_revision = 0U;
+    if (!query_presentation_outputs(app, &outputs, &output_count, &topology_revision) ||
+        topology_revision != current->topology_revision) {
+        SDL_free(outputs);
+        return false;
+    }
+    bool removed = true;
+    for (size_t index = 0U; index < output_count; ++index) {
+        if (outputs[index].output.value == previous->active_output.value) {
+            removed = false;
+            break;
+        }
+    }
+    SDL_free(outputs);
+    return removed;
+}
+
+static bool map_removed_output_body_center(
+    const EidolonPresentationEnvironment *previous,
+    const EidolonPresentationEnvironment *current, SDL_FPoint *center) {
+    if (previous == NULL || current == NULL || center == NULL ||
+        previous->coordinate_space != current->coordinate_space ||
+        (previous->valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) == 0U ||
+        (current->valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) == 0U ||
+        previous->usable_bounds.width <= 0.0F || previous->usable_bounds.height <= 0.0F ||
+        current->usable_bounds.width <= 0.0F || current->usable_bounds.height <= 0.0F) {
+        return false;
+    }
+
+    const bool logical_scale_valid =
+        (previous->valid_fields & EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) != 0U &&
+        (current->valid_fields & EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) != 0U &&
+        previous->content_scale > 0.0F && current->content_scale > 0.0F;
+    if (logical_scale_valid) {
+        const float local_x =
+            (center->x - previous->usable_bounds.x) / previous->content_scale;
+        const float local_y =
+            (center->y - previous->usable_bounds.y) / previous->content_scale;
+        center->x = current->usable_bounds.x + local_x * current->content_scale;
+        center->y = current->usable_bounds.y + local_y * current->content_scale;
+    } else {
+        const float normalized_x =
+            (center->x - previous->usable_bounds.x) / previous->usable_bounds.width;
+        const float normalized_y =
+            (center->y - previous->usable_bounds.y) / previous->usable_bounds.height;
+        center->x =
+            current->usable_bounds.x + normalized_x * current->usable_bounds.width;
+        center->y =
+            current->usable_bounds.y + normalized_y * current->usable_bounds.height;
+    }
+    return true;
+}
+
+static void clamp_body_center_to_environment(
+    const EidolonApp *app, const EidolonPresentationEnvironment *environment,
+    SDL_FPoint *center) {
+    if (app == NULL || environment == NULL || center == NULL ||
+        (environment->valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) == 0U ||
+        environment->usable_bounds.width <= 0.0F ||
+        environment->usable_bounds.height <= 0.0F) {
+        return;
+    }
+    float body_width = 0.0F;
+    float body_height = 0.0F;
+    body_dimensions(app, app->model_scale, &body_width, &body_height);
+    const float half_width = body_width * app->window_coordinate_scale * 0.5F;
+    const float half_height = body_height * app->window_coordinate_scale * 0.5F;
+    const float center_x = environment->usable_bounds.x +
+                           environment->usable_bounds.width * 0.5F;
+    const float center_y = environment->usable_bounds.y +
+                           environment->usable_bounds.height * 0.5F;
+    const float minimum_x = environment->usable_bounds.x + half_width;
+    const float maximum_x = environment->usable_bounds.x +
+                            environment->usable_bounds.width - half_width;
+    const float minimum_y = environment->usable_bounds.y + half_height;
+    const float maximum_y = environment->usable_bounds.y +
+                            environment->usable_bounds.height - half_height;
+    center->x = minimum_x <= maximum_x
+                    ? SDL_clamp(center->x, minimum_x, maximum_x)
+                    : center_x;
+    center->y = minimum_y <= maximum_y
+                    ? SDL_clamp(center->y, minimum_y, maximum_y)
+                    : center_y;
+}
+
 static bool resolve_presentation_bubble_bounds(EidolonApp *app, SDL_FRect body, SDL_Rect *result) {
     const EidolonPresentationEnvironment *environment = &app->presentation_environment;
     if (!app->presentation_environment_valid ||
@@ -1383,6 +1481,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     EidolonPresentationEnvironment initial_environment;
     if (eidolon_presentation_get_environment(app->presentation, &initial_environment)) {
         app->presentation_environment = initial_environment;
+        app->applied_presentation_environment = initial_environment;
         app->presentation_environment_valid = true;
         app->applied_environment_revision = initial_environment.revision;
     } else if (native_presentation_active) {
@@ -1400,6 +1499,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         native_presentation_active = false;
         if (eidolon_presentation_get_environment(app->presentation, &initial_environment)) {
             app->presentation_environment = initial_environment;
+            app->applied_presentation_environment = initial_environment;
             app->presentation_environment_valid = true;
             app->applied_environment_revision = initial_environment.revision;
         } else {
@@ -2185,13 +2285,43 @@ static void apply_presentation_updates(EidolonApp *app) {
         return;
     }
 
-    const SDL_FPoint body_center = current_body_global_center(app);
+    SDL_FPoint body_center = current_body_global_center(app);
+    const EidolonPresentationEnvironment previous_environment =
+        app->applied_presentation_environment;
+    const bool output_removed =
+        app->presentation_environment_pending &&
+        presentation_output_was_removed(app, &previous_environment,
+                                        &app->presentation_environment);
+    bool body_center_relocated =
+        output_removed &&
+        map_removed_output_body_center(&previous_environment,
+                                       &app->presentation_environment, &body_center);
+    const char *fallback_anchor =
+        body_center_relocated ? "output-local" : "unchanged";
+    if (output_removed && !body_center_relocated &&
+        (app->presentation_environment.valid_fields &
+         EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) != 0U &&
+        app->presentation_environment.usable_bounds.width > 0.0F &&
+        app->presentation_environment.usable_bounds.height > 0.0F) {
+        body_center.x = app->presentation_environment.usable_bounds.x +
+                        app->presentation_environment.usable_bounds.width * 0.5F;
+        body_center.y = app->presentation_environment.usable_bounds.y +
+                        app->presentation_environment.usable_bounds.height * 0.5F;
+        body_center_relocated = true;
+        fallback_anchor = "conservative";
+    }
     if (app->presentation_environment_pending) {
         update_presentation_policy(app);
-        if (update_display_metrics(app)) {
+        const bool coordinate_scale_changed = update_display_metrics(app);
+        if (body_center_relocated) {
+            clamp_body_center_to_environment(
+                app, &app->presentation_environment, &body_center);
+        }
+        if (coordinate_scale_changed || body_center_relocated) {
             restore_body_global_center(app, body_center);
         }
         app->applied_environment_revision = app->presentation_environment.revision;
+        app->applied_presentation_environment = app->presentation_environment;
         app->presentation_environment_pending = false;
         eidolon_log_write("presentation",
                           "environment applied revision=%llu topology=%llu fields=0x%llx output=%u",
@@ -2205,6 +2335,24 @@ static void apply_presentation_updates(EidolonApp *app) {
     reflow_overlay_layout(app, app->model_scale);
     app->hit_test_initialized = false;
     app->native_drag_completed = true;
+    if (output_removed) {
+        const SDL_FPoint applied_center = current_body_global_center(app);
+#if !defined(NDEBUG)
+        app->presentation_output_fallback_applied = true;
+#endif
+        eidolon_log_write(
+            "presentation",
+            "output fallback removed=%u active=%u anchor=%s body=%.1f,%.1f "
+            "usable=%.0f,%.0f %.0fx%.0f",
+            previous_environment.active_output.value,
+            app->presentation_environment.active_output.value,
+            fallback_anchor,
+            applied_center.x, applied_center.y,
+            app->presentation_environment.usable_bounds.x,
+            app->presentation_environment.usable_bounds.y,
+            app->presentation_environment.usable_bounds.width,
+            app->presentation_environment.usable_bounds.height);
+    }
 }
 
 static void end_model_rotation_drag(EidolonApp *app);
@@ -2472,6 +2620,7 @@ static bool activate_recovery_presentation(EidolonApp *app,
     }
 
     app->presentation_environment = environment;
+    app->applied_presentation_environment = environment;
     app->presentation_environment_valid = true;
     app->presentation_environment_pending = false;
     app->presentation_move_completion_pending = false;
@@ -2672,6 +2821,18 @@ static void handle_app_event(EidolonApp *app, const EidolonAppEvent *event) {
     }
 }
 
+#if defined(_WIN32) && !defined(NDEBUG)
+static uint64_t debug_frame_trigger(const char *name) {
+    const char *value = SDL_getenv(name);
+    if (value == NULL) {
+        return 0U;
+    }
+    char *end = NULL;
+    const unsigned long long parsed = strtoull(value, &end, 10);
+    return end != value && *end == '\0' && parsed > 0U ? (uint64_t)parsed : 0U;
+}
+#endif
+
 void eidolon_app_run(EidolonApp *app) {
     EidolonFrameClock frame_clock;
     eidolon_frame_clock_init(&frame_clock, SDL_GetTicksNS(), app->presentation_interval_ns);
@@ -2681,19 +2842,13 @@ void eidolon_app_run(EidolonApp *app) {
     uint64_t pending_hitch_count = 0U;
     double pending_hitch_max_ms = 0.0;
 #if defined(_WIN32) && !defined(NDEBUG)
-    uint64_t dcomp_test_reset_after_frames = 0U;
+    const uint64_t dcomp_test_reset_after_frames =
+        debug_frame_trigger("EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES");
+    const uint64_t dcomp_test_output_removal_after_frames =
+        debug_frame_trigger("EIDOLON_DCOMP_TEST_REMOVE_ACTIVE_OUTPUT_AFTER_FRAMES");
     uint64_t presented_frame_count = 0U;
     bool dcomp_test_reset_injected = false;
-    const char *dcomp_test_reset_value =
-        SDL_getenv("EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES");
-    if (dcomp_test_reset_value != NULL) {
-        char *end = NULL;
-        const unsigned long long parsed =
-            strtoull(dcomp_test_reset_value, &end, 10);
-        if (end != dcomp_test_reset_value && *end == '\0' && parsed > 0U) {
-            dcomp_test_reset_after_frames = (uint64_t)parsed;
-        }
-    }
+    bool dcomp_test_output_removal_injected = false;
 #endif
     while (app->running) {
         EidolonAppEvent event;
@@ -2935,7 +3090,7 @@ void eidolon_app_run(EidolonApp *app) {
             eidolon_app_set_model_scale(app, app->model_scale);
         }
         eidolon_model_update(app->model, now_ms);
-        (void)eidolon_draw_frame(app);
+        const bool frame_drawn = eidolon_draw_frame(app);
 #if defined(_WIN32) && !defined(NDEBUG)
         ++presented_frame_count;
         if (!dcomp_test_reset_injected && dcomp_test_reset_after_frames > 0U &&
@@ -2949,6 +3104,44 @@ void eidolon_app_run(EidolonApp *app) {
             (void)eidolon_win32_dcomp_test_inject_graphics_reset(
                 app->presentation, EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE);
         }
+        if (!dcomp_test_output_removal_injected &&
+            dcomp_test_reset_after_frames == 0U &&
+            dcomp_test_output_removal_after_frames > 0U &&
+            presented_frame_count >= dcomp_test_output_removal_after_frames &&
+            presentation_backend_is(app->presentation, "win32_dcomp")) {
+            dcomp_test_output_removal_injected = true;
+            eidolon_log_write(
+                "renderer",
+                "injecting deterministic active-output removal frame=%llu",
+                (unsigned long long)presented_frame_count);
+            if (!eidolon_win32_dcomp_test_inject_active_output_removal(
+                    app->presentation)) {
+                eidolon_log_write("renderer",
+                                  "active-output removal injection failed: %s",
+                                  SDL_GetError());
+                SDL_ClearError();
+            }
+        }
+        const char *exit_after_output_removal =
+            SDL_getenv("EIDOLON_PRESENTATION_TEST_EXIT_AFTER_OUTPUT_REMOVAL");
+        if (app->presentation_output_fallback_applied) {
+            eidolon_log_write(
+                "presentation",
+                "output fallback frame complete=%s scene_revision=%llu sessions=%zu "
+                "fallback_dialogue=%s revealed=%zu",
+                frame_drawn ? "yes" : "no",
+                (unsigned long long)app->scene_snapshot.revision,
+                eidolon_session_registry_visible_count(&app->session_registry),
+                eidolon_dialogue_is_active(&app->dialogue) ? "active" : "inactive",
+                app->dialogue.revealed);
+            app->presentation_output_fallback_applied = false;
+            if (exit_after_output_removal != NULL &&
+                SDL_strcmp(exit_after_output_removal, "1") == 0) {
+                app->running = false;
+            }
+        }
+#else
+        (void)frame_drawn;
 #endif
         eidolon_settings_ui_draw(app->settings_ui, app);
         flush_user_settings(app, false);

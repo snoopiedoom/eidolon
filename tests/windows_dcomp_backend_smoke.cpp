@@ -17,6 +17,7 @@ int main() {
 
     int result = 1;
     const EidolonSceneLayerId layer = {1U};
+    EidolonPresentationOutput fallback_output = {};
     EidolonPresentationTargetUpdate update = {};
     EidolonPresentationEnvironment initial_environment = {};
     if (!eidolon_presentation_get_environment(presentation, &initial_environment) ||
@@ -46,6 +47,52 @@ int main() {
         }
     }
     {
+        if (!eidolon_win32_dcomp_test_inject_active_output_removal(presentation)) {
+            std::fprintf(stderr, "active-output removal injection failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        EidolonPresentationEvent event = {};
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED ||
+            event.data.environment.environment.revision <= initial_environment.revision ||
+            event.data.environment.environment.topology_revision <=
+                initial_environment.topology_revision ||
+            event.data.environment.environment.active_output.value == 0U ||
+            event.data.environment.environment.active_output.value ==
+                initial_environment.active_output.value ||
+            (event.data.environment.environment.changed_fields &
+             (EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
+              EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY)) !=
+                (EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
+                 EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY)) {
+            std::fprintf(stderr, "active-output fallback publication failed: %s\n",
+                         SDL_GetError());
+            goto cleanup;
+        }
+        fallback_output = event.data.environment.environment.active_output;
+        EidolonPresentationTopologyResult topology =
+            eidolon_presentation_copy_outputs(presentation, nullptr, 0U);
+        std::vector<EidolonPresentationOutputInfo> outputs(topology.required_count);
+        topology =
+            eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
+        bool removed_retired = true;
+        bool fallback_present = false;
+        for (const EidolonPresentationOutputInfo &output : outputs) {
+            removed_retired =
+                removed_retired &&
+                output.output.value != initial_environment.active_output.value;
+            fallback_present =
+                fallback_present ||
+                output.output.value ==
+                    event.data.environment.environment.active_output.value;
+        }
+        if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_OK ||
+            !removed_retired || !fallback_present) {
+            std::fprintf(stderr, "active-output fallback topology failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+    }
+    {
         EidolonPresentationGeometry geometry = initial_environment.host_geometry;
         ++geometry.x;
         if (!eidolon_presentation_set_geometry(presentation, &geometry)) {
@@ -56,7 +103,8 @@ int main() {
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED ||
             event.data.environment.environment.revision <= initial_environment.revision ||
-            event.data.environment.environment.host_geometry.x != geometry.x) {
+            event.data.environment.environment.host_geometry.x != geometry.x ||
+            event.data.environment.environment.active_output.value != fallback_output.value) {
             std::fprintf(stderr, "environment publication failed: %s\n", SDL_GetError());
             goto cleanup;
         }

@@ -108,6 +108,9 @@ struct Win32DcompPresentation {
     bool environment_valid = false;
     bool environment_dirty = true;
     bool graphics_reset_pending = false;
+    HMONITOR test_removed_monitor = nullptr;
+    uint32_t test_removed_output_id = 0U;
+    EidolonPresentationOutputInfo test_removed_output_info = {};
 };
 
 template <typename Interface> void release(Interface *&object) {
@@ -832,6 +835,9 @@ BOOL CALLBACK enumerate_output(HMONITOR monitor, HDC, LPRECT, LPARAM opaque) {
         enumeration->failed = true;
         return FALSE;
     }
+    if (monitor == enumeration->backend->test_removed_monitor) {
+        return TRUE;
+    }
 
     uint32_t output_id = existing_output_id(enumeration->backend, monitor);
     if (output_id == 0U) {
@@ -841,7 +847,6 @@ BOOL CALLBACK enumerate_output(HMONITOR monitor, HDC, LPRECT, LPARAM opaque) {
             return FALSE;
         }
     }
-
     Win32OutputRecord record = {};
     record.monitor = monitor;
     record.info.output = {output_id};
@@ -882,6 +887,40 @@ BOOL CALLBACK enumerate_output(HMONITOR monitor, HDC, LPRECT, LPARAM opaque) {
     return TRUE;
 }
 
+bool append_test_fallback_output(OutputEnumeration *enumeration) {
+    if (enumeration == nullptr || enumeration->backend == nullptr ||
+        enumeration->backend->test_removed_output_id == 0U) {
+        return false;
+    }
+    for (const Win32OutputRecord &existing : enumeration->backend->outputs) {
+        if (existing.monitor == nullptr && existing.info.output.value != 0U) {
+            try {
+                enumeration->records.push_back(existing);
+            } catch (...) {
+                return false;
+            }
+            return true;
+        }
+    }
+    Win32OutputRecord record = {};
+    record.info = enumeration->backend->test_removed_output_info;
+    record.info.output = {enumeration->backend->next_output_id++};
+    if (record.info.output.value == 0U) {
+        return false;
+    }
+    const float offset =
+        record.info.bounds.width > 0.0F ? record.info.bounds.width : 1920.0F;
+    record.info.bounds.x += offset;
+    record.info.usable_bounds.x += offset;
+    record.info.flags |= EIDOLON_PRESENTATION_OUTPUT_PRIMARY;
+    try {
+        enumeration->records.push_back(record);
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
 bool same_rect(const EidolonPresentationRect &left, const EidolonPresentationRect &right) {
     return left.x == right.x && left.y == right.y && left.width == right.width &&
            left.height == right.height;
@@ -915,6 +954,42 @@ bool same_topology(const std::vector<Win32OutputRecord> &left,
         }
     }
     return true;
+}
+
+const Win32OutputRecord *
+nearest_output(const std::vector<Win32OutputRecord> &outputs, HMONITOR preferred,
+               const RECT &host_rect) {
+    for (const Win32OutputRecord &record : outputs) {
+        if (record.monitor == preferred) {
+            return &record;
+        }
+    }
+
+    const double center_x =
+        (static_cast<double>(host_rect.left) + static_cast<double>(host_rect.right)) * 0.5;
+    const double center_y =
+        (static_cast<double>(host_rect.top) + static_cast<double>(host_rect.bottom)) * 0.5;
+    const Win32OutputRecord *nearest = nullptr;
+    double nearest_distance = 0.0;
+    for (const Win32OutputRecord &record : outputs) {
+        const EidolonPresentationRect &bounds = record.info.bounds;
+        const double left = static_cast<double>(bounds.x);
+        const double top = static_cast<double>(bounds.y);
+        const double right = left + static_cast<double>(bounds.width);
+        const double bottom = top + static_cast<double>(bounds.height);
+        const double delta_x =
+            center_x < left ? left - center_x : (center_x > right ? center_x - right : 0.0);
+        const double delta_y =
+            center_y < top ? top - center_y : (center_y > bottom ? center_y - bottom : 0.0);
+        const double distance = delta_x * delta_x + delta_y * delta_y;
+        if (nearest == nullptr || distance < nearest_distance ||
+            (distance == nearest_distance &&
+             record.info.output.value < nearest->info.output.value)) {
+            nearest = &record;
+            nearest_distance = distance;
+        }
+    }
+    return nearest;
 }
 
 bool field_presence_changed(const EidolonPresentationEnvironment &previous,
@@ -1006,6 +1081,11 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
     }
     const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, enumerate_output,
                                                 reinterpret_cast<LPARAM>(&enumeration));
+    if (enumerated && !enumeration.failed && enumeration.records.empty() &&
+        backend->test_removed_output_id != 0U &&
+        !append_test_fallback_output(&enumeration)) {
+        enumeration.failed = true;
+    }
     if (!enumerated || enumeration.failed || enumeration.records.empty()) {
         SDL_SetError("could not enumerate DirectComposition outputs");
         return false;
@@ -1047,10 +1127,10 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
         EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY | EIDOLON_PRESENTATION_ENV_CAPABILITIES;
 
     const HMONITOR active_monitor = MonitorFromWindow(backend->window, MONITOR_DEFAULTTONEAREST);
-    for (const Win32OutputRecord &record : backend->outputs) {
-        if (record.monitor != active_monitor) {
-            continue;
-        }
+    const Win32OutputRecord *active_output =
+        nearest_output(backend->outputs, active_monitor, host_rect);
+    if (active_output != nullptr) {
+        const Win32OutputRecord &record = *active_output;
         candidate.active_output = record.info.output;
         candidate.output_bounds = record.info.bounds;
         candidate.usable_bounds = record.info.usable_bounds;
@@ -1065,7 +1145,6 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
         if ((record.info.valid_fields & EIDOLON_PRESENTATION_ENV_ORIENTATION) != 0U) {
             candidate.valid_fields |= EIDOLON_PRESENTATION_ENV_ORIENTATION;
         }
-        break;
     }
 
     const UINT dpi = GetDpiForWindow(backend->window);
@@ -1528,4 +1607,29 @@ extern "C" bool eidolon_win32_dcomp_test_inject_graphics_reset(
     auto *backend = static_cast<Win32DcompPresentation *>(
         eidolon_presentation_backend_context(presentation, "win32_dcomp"));
     return inject_graphics_reset(backend, reset_kind);
+}
+
+extern "C" bool
+eidolon_win32_dcomp_test_inject_active_output_removal(EidolonPresentation *presentation) {
+    auto *backend = static_cast<Win32DcompPresentation *>(
+        eidolon_presentation_backend_context(presentation, "win32_dcomp"));
+    if (backend == nullptr || !reconcile_environment(backend, false) ||
+        (backend->environment.valid_fields & EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT) == 0U) {
+        SDL_SetError("DirectComposition active output is unavailable for removal injection");
+        return false;
+    }
+    if (backend->test_removed_output_id != 0U) {
+        return true;
+    }
+    for (const Win32OutputRecord &record : backend->outputs) {
+        if (record.info.output.value == backend->environment.active_output.value) {
+            backend->test_removed_monitor = record.monitor;
+            backend->test_removed_output_id = record.info.output.value;
+            backend->test_removed_output_info = record.info;
+            backend->environment_dirty = true;
+            return true;
+        }
+    }
+    SDL_SetError("DirectComposition active output is absent from its topology");
+    return false;
 }

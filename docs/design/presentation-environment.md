@@ -287,8 +287,11 @@ body anchor and application-owned session, dialogue, expression, motion, and sce
 the replacement backend's authoritative environment; reflows once; and must present the newest
 complete scene before the replacement is accepted. One native reconstruction is attempted before
 an explicit SDL fallback. Hidden deterministic probes cover both branches; visible recovery and
-the resulting interaction are owner-accepted. Real device loss and physical output-removal proof
-remain open.
+the resulting interaction are owner-accepted. Deterministic active-output retirement also proves
+that the old opaque id disappears, fallback selection remains stable after another reconciliation,
+the body maps output-locally and clamps inside surviving usable bounds, and active dialogue,
+expression, motion, and scene state reach the replacement frame unchanged. Real device loss and a
+physical display disconnect remain hardware evidence gaps.
 The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
 application consumption until release; native cadence acceptance belongs to `win32_dcomp`. Its
 mixed-DPI/output/placement and post-drag resumption still require owner confirmation before native
@@ -342,6 +345,12 @@ the newest available revision as one transaction:
 
 If several environment notifications are already queued, the application may skip directly to the
 newest revision. It must not replay obsolete intermediate layouts.
+
+When the prior active output is absent from the new topology, the application maps the body center
+through output-local logical coordinates when both environments expose compatible scale and
+bounds, otherwise through normalized usable bounds. If neither mapping is valid, it selects the
+new usable-bounds center. The result is clamped so the body cannot remain stranded outside the
+surviving placement area.
 
 Anchor strength degrades explicitly:
 
@@ -540,9 +549,10 @@ No backend may rely on unrelated SDL traffic to make its private native queue ob
 8. [x] Translate SDL display/window invalidations into equivalent legacy environment
    publications.
 9. [~] Owner-confirm mixed-DPI, refresh, usable-bounds, cross-monitor, and wake behavior on the
-   native path; the ordinary cross-monitor path is accepted, while physical output removal remains
-   unproven. The SDL fallback's modal drag is documented rather than treated as native cadence
-   parity; its remaining environment and post-drag resumption checks remain a pre-default gate.
+   native path; the ordinary cross-monitor path is accepted and deterministic active-output
+   retirement/fallback is proven. A real hardware display disconnect remains optional evidence.
+   The SDL fallback's modal drag is documented rather than treated as native cadence parity; its
+   remaining environment and post-drag resumption checks remain a pre-default gate.
 10. Implement the same contract for later Wayland/X11, macOS, Android, and iOS backends without
     changing portable product ownership.
 
