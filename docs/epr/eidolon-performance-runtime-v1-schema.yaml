@@ -1,0 +1,1016 @@
+# Eidolon Performance Runtime V1
+# Illustrative architecture schema and executable-data sketch.
+#
+# This is not a frozen parser contract. It demonstrates how the thesis's
+# boundaries can be represented in versioned, human-readable data without
+# collapsing intent, planning, realization, physical solving, and VRM package
+# calibration into one file.
+
+schema: eidolon.performance_runtime.example/1
+schema_version: 1
+
+runtime:
+  system: Eidolon Performance Runtime
+  short_name: EPR
+  deterministic_seed: 114729
+  simulation:
+    monotonic_clock: true
+    fixed_solver_step_seconds: 0.0083333333
+    max_solver_substeps: 8
+    max_plan_updates_per_frame: 32
+    max_behavior_units: 256
+    max_temporal_points: 2048
+    max_resource_claims: 1024
+    max_constraints: 2048
+  failure_policy:
+    retain_last_valid_body_state: true
+    never_delay_dialogue_indefinitely: true
+    unknown_operational_state: neutral_working
+    unsupported_capability: local_degradation
+
+# -----------------------------------------------------------------------------
+# 1. Renderer-neutral upstream evidence
+# -----------------------------------------------------------------------------
+
+performance_intent_example:
+  id: intent.session-alpha.message-42.beat-3
+  revision: 7
+  source:
+    source_id: codex-local
+    session_id: alpha
+    response_id: message-42
+    semantic_beat_id: beat-3
+    source_span_utf8: [186, 244]
+    stable_prefix: true
+    evidence_revision: 91
+
+  operational_truth:
+    state: response.streaming
+    activity: explaining
+    attention_requirement: session_output
+    approval_requested: false
+    interrupted: false
+
+  communicative_function:
+    primary: contrast
+    secondary: [correct, emphasize]
+    confidence: 0.92
+
+  affect:
+    valence: -0.10
+    arousal: 0.62
+    dominance: 0.71
+    certainty: 0.88
+    warmth: 0.18
+    surprise: 0.43
+
+  engagement:
+    intensity: 0.74
+    approach_recoil: 0.18
+    user_directedness: 0.36
+    session_directedness: 0.91
+
+  movement_quality:
+    amplitude: 0.55
+    speed: 0.68
+    sharpness: 0.72
+    fluidity: 0.48
+    tension: 0.60
+    directness: 0.83
+    asymmetry: 0.32
+    settling: 0.56
+
+  attention:
+    target:
+      kind: session_bubble
+      stable_id: bubble.session-alpha
+    urgency: 0.55
+    dwell_preference_seconds: [0.8, 3.2]
+
+  delivery:
+    source_marks:
+      - id: contrast-pivot
+        source_offset_utf8: 202
+        kind: contrast
+        strength: 0.82
+      - id: landing
+        source_offset_utf8: 239
+        kind: landing
+        strength: 0.66
+
+  constraints:
+    may_not_contradict_operational_truth: true
+    no_user_gaze_claim: false
+    maximum_visible_intensity: 0.82
+
+# -----------------------------------------------------------------------------
+# 2. Character style. Style transforms realization; it does not change truth.
+# -----------------------------------------------------------------------------
+
+character_style_example:
+  id: eidolon.default_alive
+  revision: 3
+
+  baseline:
+    posture_openness: 0.56
+    default_asymmetry: 0.28
+    gesture_frequency: 0.38
+    gesture_extent: 0.52
+    directness: 0.62
+    head_mover_bias: 0.48
+    gaze_dwell: 0.62
+    blink_rate_per_minute: 15.0
+    idle_activity: 0.34
+    tension: 0.22
+
+  expressive_response:
+    affect_gain:
+      valence: 0.75
+      arousal: 0.82
+      dominance: 0.68
+      certainty: 0.70
+      warmth: 0.90
+      surprise: 0.88
+    delivery_gain: 0.66
+    operational_gain: 1.0
+
+  bounds:
+    max_torso_lean_degrees: 10.0
+    max_head_tilt_degrees: 14.0
+    max_gesture_velocity_mps: 1.25
+    max_gesture_acceleration_mps2: 5.0
+    max_pose_tension: 0.82
+
+# -----------------------------------------------------------------------------
+# 3. Behavior schema. Generative physical vocabulary, not an animation name.
+# -----------------------------------------------------------------------------
+
+behavior_schema_example:
+  schema: eidolon.behavior_schema/1
+  id: gesture.contrast_present
+  version: 4
+  modality: gesture
+  generator_kind: procedural_motor_program
+
+  semantic_role:
+    communicates: [contrast, correction, distinction]
+    does_not_intrinsically_mean: [anger, surprise]
+
+  eligibility:
+    communicative_functions_any: [contrast, correct, distinguish]
+    operational_states_any:
+      - response.streaming
+      - response.completed
+    minimum_evidence_confidence: 0.55
+    forbidden_if:
+      - approval_requested
+      - user_dragging_body
+
+  parameters:
+    side:
+      type: enum
+      values: [left, right, auto]
+      default: auto
+    extent:
+      type: scalar
+      range: [0.15, 1.0]
+      default: 0.55
+    firmness:
+      type: scalar
+      range: [0.0, 1.0]
+      default: 0.48
+    direction_bias:
+      type: scalar
+      range: [-1.0, 1.0]
+      default: 0.0
+
+  phase_model:
+    phases:
+      - prepare
+      - optional_pre_nucleus_hold
+      - nucleus
+      - optional_post_nucleus_hold
+      - connect_or_recover
+      - settle
+    semantic_nucleus: nucleus
+    connective_phases_generated_from_current_state: true
+
+  sync_points:
+    - start
+    - ready
+    - nucleus_start
+    - nucleus_peak
+    - nucleus_end
+    - relax
+    - end
+
+  default_timing_seconds:
+    prepare: [0.18, 0.72]
+    pre_nucleus_hold: [0.0, 0.40]
+    nucleus: [0.16, 0.58]
+    post_nucleus_hold: [0.0, 0.75]
+    recover: [0.20, 0.90]
+    settle: [0.12, 0.60]
+
+  temporal_rules:
+    - lhs: nucleus_peak
+      relation: align_source_mark
+      rhs: delivery.contrast-pivot
+      tolerance_seconds: [-0.08, 0.12]
+    - lhs: gaze.acquire
+      relation: before
+      rhs: nucleus_start
+      bounds_seconds: [0.05, 0.42]
+
+  resource_claim_templates:
+    - resource: arm.${side}
+      mode: exclusive
+      phases: [prepare, nucleus, connect_or_recover]
+      priority_class: semantic_gesture
+    - resource: hand.${side}
+      mode: exclusive
+      phases: [prepare, nucleus, connect_or_recover]
+      priority_class: semantic_gesture
+    - resource: torso.upper
+      mode: additive
+      phases: [nucleus]
+      maximum_weight: 0.28
+    - resource: gaze
+      mode: cooperative
+      phases: [prepare, nucleus]
+      relationship: gesture_attention
+
+  form:
+    dominant_hand:
+      target_space: chest_frame
+      path:
+        primitive: quintic_hermite
+        start: current
+        nucleus_peak:
+          position_normalized: [0.54, 0.12, 0.34]
+          orientation:
+            palm_normal: [0.20, 0.65, 0.73]
+            finger_forward: [0.10, 0.03, 0.99]
+      elbow_preference:
+        space: shoulder_frame
+        pole_direction: [0.18, -0.68, 0.71]
+    torso:
+      additive_rotation_degrees: [0.0, 2.5, 1.5]
+
+  quality_mapping:
+    extent: movement_quality.amplitude
+    velocity: movement_quality.speed
+    acceleration_shape: movement_quality.sharpness
+    curvature: movement_quality.directness
+    stiffness: movement_quality.tension
+    lateral_asymmetry: movement_quality.asymmetry
+
+  alternatives:
+    - schema: gesture.contrast_head_only
+      when:
+        missing_capabilities_any: [arm_pose]
+    - schema: delivery.contrast_accent
+      when:
+        resource_conflict_any: [arm.left, arm.right]
+
+  interruption:
+    before_nucleus: replaceable
+    during_nucleus: finish_or_compress
+    after_nucleus: successor_takeover
+    contact_release_required: false
+
+  validation:
+    must_read_front: true
+    must_read_side: true
+    no_self_intersection: true
+    required_capabilities: [upper_body_pose]
+
+# -----------------------------------------------------------------------------
+# 4. Planned behavior unit. One concrete instance with provenance and revisions.
+# -----------------------------------------------------------------------------
+
+behavior_unit_example:
+  id: behavior.8841
+  schema_id: gesture.contrast_present
+  schema_version: 4
+  plan_revision: 115
+  lifecycle: scheduled
+
+  provenance:
+    performance_intent_id: intent.session-alpha.message-42.beat-3
+    source_revision: 91
+    planner_rule: contrast.present.v2
+    candidate_score: 0.847
+    selection_rank: 1
+
+  resolved_parameters:
+    side: right
+    extent: 0.61
+    firmness: 0.58
+    direction_bias: 0.12
+
+  commitments:
+    semantic: provisional
+    temporal: flexible
+    motor: not_compiled
+    contact: none
+    attention: flexible
+
+  repeat_memory:
+    schema_last_used_seconds_ago: 71.4
+    same_side_streak: 1
+    recent_form_similarity: 0.21
+
+  interruption_policy:
+    before_nucleus: replaceable
+    during_nucleus: finish_or_compress
+    after_nucleus: successor_takeover
+
+  fallback_chain:
+    - gesture.contrast_head_only
+    - delivery.contrast_accent
+    - no_visible_behavior
+
+# -----------------------------------------------------------------------------
+# 5. Behavior Plan Graph temporal representation.
+# -----------------------------------------------------------------------------
+
+temporal_plan_example:
+  schema: eidolon.behavior_plan/1
+  plan_id: body.shared
+  revision: 115
+  previous_revision: 114
+  dispatch_epoch: 39
+
+  time_origin:
+    monotonic_ns: 3721184488112
+
+  points:
+    - id: b8841.start
+      kind: controllable
+      state: pending
+    - id: b8841.ready
+      kind: controllable
+      state: pending
+    - id: b8841.nucleus_start
+      kind: controllable
+      state: pending
+    - id: b8841.nucleus_peak
+      kind: controllable
+      state: pending
+    - id: b8841.nucleus_end
+      kind: controllable
+      state: pending
+    - id: b8841.end
+      kind: controllable
+      state: pending
+    - id: source.message42.offset202
+      kind: contingent_observation
+      state: predicted
+      prediction_seconds_from_origin: [0.88, 1.24]
+
+  difference_constraints:
+    # min <= target - source <= max
+    - source: b8841.start
+      target: b8841.ready
+      seconds: [0.18, 0.72]
+      hardness: hard
+    - source: b8841.ready
+      target: b8841.nucleus_start
+      seconds: [0.0, 0.40]
+      hardness: soft
+      relaxation_rank: 3
+    - source: b8841.nucleus_start
+      target: b8841.nucleus_peak
+      seconds: [0.08, 0.30]
+      hardness: hard
+    - source: source.message42.offset202
+      target: b8841.nucleus_peak
+      seconds: [-0.08, 0.12]
+      hardness: soft
+      relaxation_rank: 1
+    - source: b8841.nucleus_peak
+      target: b8841.nucleus_end
+      seconds: [0.08, 0.28]
+      hardness: hard
+    - source: b8841.nucleus_end
+      target: b8841.end
+      seconds: [0.20, 0.90]
+      hardness: soft
+      relaxation_rank: 2
+
+  dispatch_windows:
+    b8841.start: [0.22, 0.48]
+    b8841.nucleus_peak: [0.91, 1.30]
+
+  commitment_horizons:
+    semantic_seconds: 0.18
+    temporal_seconds: 0.10
+    motor_seconds: 0.06
+    attention_seconds: 0.08
+    contact_seconds: 0.04
+
+  revision_reason:
+    kind: source_prediction_updated
+    affected_points: [source.message42.offset202, b8841.nucleus_peak]
+    already_executed_points_immutable: true
+
+# -----------------------------------------------------------------------------
+# 6. Body resource graph and grants.
+# -----------------------------------------------------------------------------
+
+resource_model:
+  schema: eidolon.body_resources/1
+
+  hierarchy:
+    body:
+      children:
+        - root
+        - balance
+        - pelvis
+        - torso
+        - arm.left
+        - arm.right
+        - head
+        - gaze
+        - face
+        - leg.left
+        - leg.right
+        - secondary
+    torso:
+      children: [torso.spine, torso.chest, shoulder.left, shoulder.right]
+    arm.left:
+      children: [upper_arm.left, lower_arm.left, hand.left, fingers.left]
+    arm.right:
+      children: [upper_arm.right, lower_arm.right, hand.right, fingers.right]
+    leg.left:
+      children: [upper_leg.left, lower_leg.left, foot.left, toes.left]
+    leg.right:
+      children: [upper_leg.right, lower_leg.right, foot.right, toes.right]
+    face:
+      children: [expression, mouth, blink]
+
+  claim_modes:
+    - baseline
+    - exclusive
+    - additive
+    - masked_override
+    - cooperative
+    - constraint
+    - observational
+    - passive
+
+resource_claims_example:
+  - id: claim.b8841.right-arm
+    behavior: behavior.8841
+    resource: arm.right
+    mode: exclusive
+    phase_window: [prepare, connect_or_recover]
+    priority:
+      class: semantic_gesture
+      numeric_bias: 0.0
+    preemptible:
+      before_nucleus: true
+      during_nucleus: false
+      after_nucleus: true
+
+  - id: claim.b8841.torso
+    behavior: behavior.8841
+    resource: torso.upper
+    mode: additive
+    maximum_weight: 0.28
+    phase_window: [nucleus]
+
+  - id: claim.b8841.gaze
+    behavior: behavior.8841
+    resource: gaze
+    mode: cooperative
+    relationship: gesture_attention
+    maximum_weight: 0.55
+
+resource_grants_example:
+  plan_revision: 115
+  grants:
+    - claim: claim.b8841.right-arm
+      status: granted
+      grant_generation: 4
+    - claim: claim.b8841.torso
+      status: granted_limited
+      granted_weight: 0.20
+      reason: posture_baseline_already_active
+    - claim: claim.b8841.gaze
+      status: granted_cooperative
+      coordinator: gaze.shared-target-mixer
+
+  rejected_or_transformed:
+    - behavior: behavior.8827
+      original_claim: arm.right
+      decision: successor_takeover
+      transfer_to: behavior.8841
+      preserve_current_effector_state: true
+      suppress_obsolete_retraction: true
+
+  active_relationships:
+    - id: relation.gaze-gesture.8841
+      kind: attention_alignment
+      participants: [behavior.8841, gaze.current]
+      hardness: soft
+
+# -----------------------------------------------------------------------------
+# 7. Realization Program IR.
+# -----------------------------------------------------------------------------
+
+realization_program_example:
+  schema: eidolon.realization_program/1
+  id: program.behavior.8841
+  behavior_id: behavior.8841
+  plan_revision: 115
+  generator:
+    implementation: procedural.contrast_present.v3
+    deterministic_seed: 901184
+
+  validity:
+    compiled_against_body_generation: 12
+    compiled_against_resource_grant_generation: 4
+    expires_on_plan_revision_change: true
+
+  phase_state:
+    current: prepare
+    progress: 0.24
+    semantic_nucleus_delivered: false
+
+  programs:
+    - channel: hand.right.position
+      operator: target_trajectory
+      space: chest_frame
+      trajectory:
+        kind: quintic_hermite
+        start: current
+        end: [0.54, 0.12, 0.34]
+        duration_from_temporal_points: [b8841.start, b8841.nucleus_peak]
+        endpoint_velocity: [0.0, 0.0, 0.0]
+      weight_envelope:
+        kind: smoothstep
+        points:
+          - [b8841.start, 0.0]
+          - [b8841.ready, 1.0]
+          - [b8841.nucleus_end, 1.0]
+          - [b8841.end, 0.0]
+
+    - channel: hand.right.orientation
+      operator: orientation_target
+      space: chest_frame
+      target:
+        palm_normal: [0.20, 0.65, 0.73]
+        finger_forward: [0.10, 0.03, 0.99]
+      interpolation: swing_twist_slerp
+
+    - channel: elbow.right.preferred_direction
+      operator: pole_target
+      space: shoulder.right.frame
+      direction: [0.18, -0.68, 0.71]
+
+    - channel: torso.upper.rotation
+      operator: additive_rotation
+      space: anatomical_local
+      degrees: [0.0, 2.5, 1.5]
+      maximum_weight: 0.20
+
+    - channel: gaze.target
+      operator: cooperative_target
+      target_ref: bubble.session-alpha
+      ownership_weight: 0.55
+
+  quality_envelope:
+    amplitude: 0.61
+    speed: 0.68
+    sharpness: 0.72
+    fluidity: 0.48
+    tension: 0.60
+    directness: 0.83
+    asymmetry: 0.32
+    settle_damping: 0.56
+
+  physical_constraints:
+    - id: limit.right-arm
+      kind: joint_limits
+      hardness: hard
+    - id: reach.right-hand
+      kind: reachability
+      hardness: hard
+    - id: avoid.torso
+      kind: self_collision_envelope
+      hardness: soft
+      relaxation_rank: 2
+    - id: preserve.balance
+      kind: center_of_support
+      hardness: soft
+      relaxation_rank: 3
+
+  prediction:
+    earliest_end_seconds: 1.34
+    latest_end_seconds: 2.02
+    confidence: 0.88
+    feasible: true
+
+  interruption_hooks:
+    before_nucleus:
+      action: inertialized_replace
+    during_nucleus:
+      action: complete_or_compress
+      minimum_remaining_seconds: 0.10
+    after_nucleus:
+      action: transfer_effector_to_successor
+
+  fallback_branches:
+    - condition: right_arm_unavailable
+      compile_schema: gesture.contrast_head_only
+    - condition: physical_solve_failed
+      compile_schema: delivery.contrast_accent
+
+# -----------------------------------------------------------------------------
+# 8. Controller compositor snapshot.
+# -----------------------------------------------------------------------------
+
+controller_compositor_example:
+  schema: eidolon.controller_compositor.snapshot/1
+  body_generation: 12
+  frame_index: 48192
+
+  stages:
+    - ground_state
+    - posture_and_balance
+    - authored_or_generated_primary_motion
+    - additive_semantic_motion
+    - contact_and_ik_constraints
+    - head_and_gaze
+    - face_and_delivery
+    - node_constraints
+    - secondary_motion
+
+  active_layers:
+    - id: ground.relaxed-working
+      mode: baseline
+      resources: [body]
+      weight: 1.0
+    - id: posture.attentive
+      mode: masked_override
+      resources: [pelvis, torso]
+      weight: 0.66
+    - id: program.behavior.8841
+      mode: constraint_plus_additive
+      resources: [arm.right, hand.right, torso.upper, gaze]
+      weight: 1.0
+    - id: delivery.mark.contrast-pivot
+      mode: additive
+      resources: [torso.upper, head]
+      weight: 0.31
+
+  transfers:
+    - resource: arm.right
+      from: behavior.8827
+      to: behavior.8841
+      method: preserve_state_and_retarget
+
+  transactional_output:
+    candidate_valid: true
+    previous_valid_generation: 48191
+    publish_generation: 48192
+
+# -----------------------------------------------------------------------------
+# 9. Canonical physical state and solve request.
+# -----------------------------------------------------------------------------
+
+physical_solve_example:
+  schema: eidolon.physical_solve.request/1
+  body_generation: 12
+  frame_index: 48192
+
+  canonical_pose:
+    root_transform: body.root
+    local_rotations: canonical_humanoid_buffer
+    velocities: canonical_velocity_buffer
+
+  effectors:
+    - id: effector.right-hand
+      role: rightHand
+      target_position:
+        space: chest_frame
+        value: [0.51, 0.13, 0.32]
+      target_orientation:
+        palm_normal: [0.20, 0.65, 0.73]
+        finger_forward: [0.10, 0.03, 0.99]
+      position_weight: 1.0
+      orientation_weight: 0.78
+      preferred_bend:
+        space: shoulder.right.frame
+        direction: [0.18, -0.68, 0.71]
+
+  contacts: []
+
+  support:
+    planted_feet: [left, right]
+    balance_weight: 0.62
+
+  solver_stages:
+    - solver: direct_fk_and_additives
+    - solver: analytic_two_bone
+      chains: [right_arm]
+    - solver: coupled_constraint_refinement
+      iterations: 6
+      compliance_profile: conversational_stance
+    - solver: joint_limit_projection
+    - solver: twist_distribution
+
+  progressive_relaxation:
+    - preserve_semantic_nucleus
+    - reduce_orientation_weight
+    - reduce_torso_additive
+    - relax_self_collision_envelope
+    - choose_schema_fallback
+
+  output_status:
+    reached: true
+    relaxed_constraints: []
+    max_joint_limit_error_degrees: 0.0
+    max_contact_error_meters: 0.0
+
+# -----------------------------------------------------------------------------
+# 10. VRM character package extension.
+# -----------------------------------------------------------------------------
+
+vrm_character_package_example:
+  schema: eidolon.character_package/1
+  id: example.legal-vrm-character
+  version: 1.2.0
+
+  body:
+    renderer: model_3d
+    format: VRM-1.0
+    asset: character.vrm
+    default: true
+
+  vrm:
+    specification: VRMC_vrm-1.0
+    required_extensions:
+      - VRMC_vrm
+    optional_extensions:
+      - VRMC_springBone
+      - VRMC_node_constraint
+    expected_update_order:
+      - humanoid
+      - lookAt
+      - expression_weights
+      - expressions_apply
+      - node_constraints
+      - spring_bones
+
+  capabilities:
+    humanoid_pose: full_body
+    upper_body_pose: true
+    fingers: full
+    gaze:
+      mode: bone
+      eyes_independent: false
+    expressions:
+      presets: [happy, angry, sad, relaxed, surprised, blink]
+      custom: [embarrassed, focused, affectionate]
+    visemes: [aa, ih, ou, ee, oh]
+    node_constraints: [roll, aim, rotation]
+    spring_bones: true
+    contact_surfaces: true
+    planted_feet: true
+
+  anatomical_frames:
+    model:
+      up: positive_y
+      forward: positive_z
+      unit: meter
+    pelvis_frame:
+      origin_role: hips
+      right_axis: hip_line
+      up_axis: torso_direction
+    chest_frame:
+      origin_role: chest
+      right_axis: shoulder_line
+      up_axis: spine_direction
+    shoulder_frames:
+      left:
+        origin_role: leftUpperArm
+        outward_axis: calibrated
+      right:
+        origin_role: rightUpperArm
+        outward_axis: calibrated
+    hand_frames:
+      palm_normal: calibrated
+      finger_forward: calibrated
+
+  measurements:
+    height_m: 1.61
+    shoulder_width_m: 0.355
+    hip_width_m: 0.278
+    arm_span_m: 1.57
+    upper_arm_length_m:
+      left: 0.274
+      right: 0.274
+    lower_arm_length_m:
+      left: 0.248
+      right: 0.248
+
+  preferred_bends:
+    elbow.left: [0.18, -0.70, 0.69]
+    elbow.right: [-0.18, -0.70, 0.69]
+    knee.left: [0.0, 0.0, 1.0]
+    knee.right: [0.0, 0.0, 1.0]
+
+  joint_limits_file: calibration/joint-limits.yaml
+  contact_surfaces_file: calibration/contact-surfaces.yaml
+  expression_calibration_file: calibration/expression-targets.yaml
+  hand_shapes_file: calibration/hand-shapes.yaml
+  deformation_notes_file: calibration/deformation-notes.md
+
+  expression_projection:
+    affect_targets:
+      happy: { valence: 0.82, arousal: 0.56, warmth: 0.72 }
+      angry: { valence: -0.72, arousal: 0.78, dominance: 0.74 }
+      sad: { valence: -0.78, arousal: 0.28, dominance: 0.20 }
+      relaxed: { valence: 0.34, arousal: 0.16, warmth: 0.40 }
+      surprised: { surprise: 0.94, arousal: 0.78 }
+      focused: { certainty: 0.70, arousal: 0.38 }
+    procedural_overrides:
+      embarrassed:
+        blink: blend
+        lookAt: blend
+        mouth: none
+
+  gaze_calibration:
+    eye_first_delay_seconds: [0.0, 0.04]
+    head_follow_delay_seconds: [0.06, 0.18]
+    torso_follow_threshold_degrees: 38.0
+    eye_head_distribution: 0.58
+
+  secondary_motion:
+    ownership: vrm_spring_bone
+    epr_may_inject_root_acceleration: true
+    excluded_nodes_owned_by_epr: []
+
+  fallback_mapping:
+    missing_eye_bones: head_attention
+    missing_expression: nearest_calibrated_affect
+    missing_fingers: relaxed_hand_pose
+    contact_infeasible: schema_declared_no_contact_variant
+    lower_body_unavailable: upper_body_stance_projection
+
+  rights:
+    vrm_meta_verified: true
+    authors: [Example Artist]
+    copyright_information: Example Artist
+    license_url: https://vrm.dev/licenses/1.0/
+    other_license_url: https://example.invalid/model-license
+    avatar_permission: everyone
+    commercial_usage: corporation
+    credit_notation: required
+    allow_redistribution: true
+    modification: allowModificationRedistribution
+    third_party_licenses: none
+    verification:
+      checked_at: 2026-07-24
+      source_hash_sha256: REPLACE_WITH_REAL_HASH
+      reviewer: REPLACE_WITH_REVIEWER
+
+# -----------------------------------------------------------------------------
+# 11. Generator interchange contract.
+# -----------------------------------------------------------------------------
+
+generator_contract_example:
+  schema: eidolon.motion_generator/1
+  id: learned.gesture-residual.experimental
+  implementation_kind: learned_residual
+  version: 1
+
+  accepts:
+    - behavior_unit
+    - realization_program_seed
+    - canonical_pose
+    - canonical_velocity
+    - temporal_windows
+    - resource_grants
+    - character_style
+
+  emits:
+    - canonical_target_residuals
+    - timing_adjustment_proposals
+    - prediction
+    - confidence
+
+  may_not_emit:
+    - final_vrm_local_rotations
+    - resource_grants
+    - operational_state
+    - behavior_identity
+    - unchecked_contacts
+
+  bounds:
+    max_position_residual_m: 0.035
+    max_rotation_residual_degrees: 5.0
+    max_timing_adjustment_seconds: 0.08
+
+  determinism:
+    seeded: true
+    model_hash_required: true
+    fallback_generator: procedural.default
+
+  rights:
+    model_weights_license: REPLACE
+    training_datasets:
+      - id: REPLACE
+        training_permission_verified: false
+        redistribution_of_weights_verified: false
+
+# -----------------------------------------------------------------------------
+# 12. Feedback and deterministic trace.
+# -----------------------------------------------------------------------------
+
+feedback_event_examples:
+  - schema: eidolon.performance_feedback/1
+    kind: prediction.updated
+    plan_revision: 115
+    behavior: behavior.8841
+    earliest_end_seconds: 1.34
+    latest_end_seconds: 2.02
+    reason: source_prediction_updated
+
+  - schema: eidolon.performance_feedback/1
+    kind: sync.reached
+    plan_revision: 115
+    behavior: behavior.8841
+    sync_point: nucleus_peak
+    monotonic_ns: 3721185519921
+    source_offset_utf8: 202
+
+  - schema: eidolon.performance_feedback/1
+    kind: resource.transferred
+    resource: arm.right
+    from_behavior: behavior.8827
+    to_behavior: behavior.8841
+    method: preserve_state_and_retarget
+
+  - schema: eidolon.performance_feedback/1
+    kind: behavior.degraded
+    behavior: behavior.8841
+    from_schema: gesture.contrast_present
+    to_schema: gesture.contrast_head_only
+    reason: physical_target_infeasible
+
+trace_record_example:
+  schema: eidolon.performance_trace/1
+  trace_id: trace.frame-48192
+  release_safe: true
+  private_text_included: false
+
+  input:
+    source_id: codex-local
+    session_id: alpha
+    evidence_revision: 91
+    semantic_beat_id: beat-3
+
+  planning:
+    candidate_schemas:
+      - { id: gesture.contrast_present, score: 0.847 }
+      - { id: gesture.contrast_head_only, score: 0.691 }
+    selected: gesture.contrast_present
+
+  temporal:
+    plan_revision: 115
+    dispatch_epoch: 39
+    relaxed_constraints: []
+
+  resources:
+    grant_generation: 4
+    transfers: [arm.right]
+    rejected_claims: []
+
+  realization:
+    program_id: program.behavior.8841
+    generator: procedural.contrast_present.v3
+    prediction_confidence: 0.88
+
+  physical:
+    solver_sequence:
+      - direct_fk_and_additives
+      - analytic_two_bone
+      - coupled_constraint_refinement
+      - joint_limit_projection
+      - twist_distribution
+    valid: true
+    relaxed_constraints: []
+
+  projection:
+    body_package: example.legal-vrm-character
+    body_generation: 12
+    missing_capabilities: []
+
+  output:
+    published_frame_generation: 48192
+    deterministic_hash: REPLACE_WITH_RUNTIME_HASH
+
