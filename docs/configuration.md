@@ -72,10 +72,11 @@ This override deliberately remains outside the saved user-settings contract whil
 under construction. It currently supports portrait and dialogue layers, generation-bound CPU alpha
 masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
 body dragging, revisioned output/DPI state, and bounded host-close/graphics-reset requests. Sprite
-and 3D targets, routed-pointer parity, physical output-removal proof, device-loss recovery,
-output-local host migration, and default enablement remain unfinished. An explicit native request
-fails closed if host or graphics initialization fails; normal startup and every snapshot continue
-to use `sdl_window_legacy`.
+and 3D targets, product-level native 3D pointer use, physical output-removal proof, device-loss
+recovery, output-local host migration, and default enablement remain unfinished. The backend-level
+routed-pointer contract is covered deterministically. An explicit native request fails closed if
+host or graphics initialization fails; normal startup and every snapshot continue to use
+`sdl_window_legacy`.
 
 The Windows legacy fallback delegates character dragging to the native top-level move loop.
 Animation and dialogue presentation may pause until release; this is a documented fallback

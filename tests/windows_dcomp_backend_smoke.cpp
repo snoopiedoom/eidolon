@@ -106,7 +106,8 @@ int main() {
                 layer,
                 1U,
                 EIDOLON_SCENE_LAYER_BODY,
-                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR,
+                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR |
+                    EIDOLON_SCENE_INTERACTION_ROUTE_POINTER,
                 1U,
                 1U,
                 128U,
@@ -127,15 +128,49 @@ int main() {
         }
     }
     {
-        HWND window =
-            FindWindowW(L"EidolonDirectCompositionHost",
-                        L"Eidolon DirectComposition backend smoke");
+        HWND window = FindWindowW(L"EidolonDirectCompositionHost",
+                                  L"Eidolon DirectComposition backend smoke");
         if (window == nullptr) {
             std::fprintf(stderr, "native host lookup failed\n");
             goto cleanup;
         }
-        SendMessageW(window, WM_CLOSE, 0U, 0U);
+        SendMessageW(window, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(10, 10));
         EidolonPresentationEvent event = {};
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_DOWN ||
+            event.data.pointer.layer.value != layer.value ||
+            event.data.pointer.click_count != 1U) {
+            std::fprintf(stderr, "native routed pointer down failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(15, 12));
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_MOTION ||
+            event.data.pointer.layer_x_relative != 5.0F ||
+            event.data.pointer.layer_y_relative != 2.0F) {
+            std::fprintf(stderr, "native routed pointer motion failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_MBUTTONUP, 0U, MAKELPARAM(15, 12));
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_UP) {
+            std::fprintf(stderr, "native routed pointer up failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 10));
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_MOVE_STARTED) {
+            std::fprintf(stderr, "native move start failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_CAPTURECHANGED, 0U,
+                     reinterpret_cast<LPARAM>(GetDesktopWindow()));
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED) {
+            std::fprintf(stderr, "native capture cancellation failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_CLOSE, 0U, 0U);
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED) {
             std::fprintf(stderr, "native close event failed: %s\n", SDL_GetError());

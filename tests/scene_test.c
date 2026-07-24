@@ -91,6 +91,13 @@ int main(void) {
     layers[1].stable_key = 1U;
     assert(!eidolon_scene_publish(&scene, layers, 2U, &snapshot));
     assert(!eidolon_scene_publish(&scene, layers, EIDOLON_SCENE_LAYER_CAPACITY + 1U, &snapshot));
+    EidolonSceneLayerInput combined = body(30U);
+    combined.interaction =
+        EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR | EIDOLON_SCENE_INTERACTION_ROUTE_POINTER;
+    assert(eidolon_scene_publish(&scene, &combined, 1U, &snapshot));
+    combined.interaction =
+        EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR | EIDOLON_SCENE_INTERACTION_ACTIVATE;
+    assert(!eidolon_scene_publish(&scene, &combined, 1U, &snapshot));
 
     EidolonScene churn;
     eidolon_scene_init(&churn);

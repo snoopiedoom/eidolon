@@ -18,12 +18,24 @@ typedef struct EidolonSdlLegacyPresentation {
     EidolonPresentationEventQueue event_queue;
     EidolonPresentationEnvironment environment;
     EidolonPresentationOutputInfo *outputs;
+    EidolonSceneLayerSnapshot input_layers[EIDOLON_SCENE_LAYER_CAPACITY];
     size_t output_count;
+    size_t input_layer_count;
     uint64_t topology_revision;
+    uint64_t input_scene_revision;
+    uint64_t pointer_scene_revision;
     uint64_t capabilities;
+    EidolonSceneLayerSnapshot pointer_layer;
+    float pointer_host_x;
+    float pointer_host_y;
+    float pointer_layer_x;
+    float pointer_layer_y;
     bool environment_valid;
     bool environment_dirty;
+    bool pointer_routing;
 } EidolonSdlLegacyPresentation;
+
+static void legacy_poll_routed_pointer(EidolonSdlLegacyPresentation *legacy);
 
 static EidolonPresentationRect legacy_rect(SDL_Rect rect) {
     return (EidolonPresentationRect){
@@ -373,6 +385,7 @@ static bool legacy_poll_event(void *opaque, EidolonPresentationEvent *event) {
     if (!reconcile_environment(legacy, true)) {
         return false;
     }
+    legacy_poll_routed_pointer(legacy);
     return eidolon_presentation_event_queue_poll(&legacy->event_queue, event);
 }
 
@@ -472,8 +485,12 @@ static void legacy_destroy_target(void *opaque, EidolonPresentationTarget target
 }
 
 static bool legacy_commit_scene(void *opaque, const EidolonPresentationSceneCommit *commit) {
-    (void)opaque;
-    (void)commit;
+    EidolonSdlLegacyPresentation *legacy = opaque;
+    legacy->input_scene_revision = commit->revision;
+    legacy->input_layer_count = commit->layer_count;
+    for (size_t index = 0U; index < commit->layer_count; ++index) {
+        legacy->input_layers[index] = commit->layers[index].scene;
+    }
     return true;
 }
 
@@ -571,12 +588,293 @@ static bool legacy_enqueue_structural_event(
     return false;
 }
 
+static float legacy_coordinate_scale(const EidolonSdlLegacyPresentation *legacy) {
+    if (!legacy->environment_valid ||
+        (legacy->environment.valid_fields & EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) == 0U ||
+        (legacy->environment.valid_fields & EIDOLON_PRESENTATION_ENV_PIXEL_SCALE) == 0U ||
+        legacy->environment.pixel_scale <= 0.0F) {
+        return 1.0F;
+    }
+    return legacy->environment.content_scale / legacy->environment.pixel_scale;
+}
+
+static bool legacy_map_layer(const EidolonSceneLayerSnapshot *layer, float global_x, float global_y,
+                             float *layer_x, float *layer_y) {
+    if (layer == NULL || layer_x == NULL || layer_y == NULL || layer->content_width == 0U ||
+        layer->content_height == 0U || layer->bounds.width <= 0.0F ||
+        layer->bounds.height <= 0.0F) {
+        return false;
+    }
+    const float source_pivot_x = (float)layer->content_width * layer->pivot_x;
+    const float source_pivot_y = (float)layer->content_height * layer->pivot_y;
+    const float destination_pivot_x = layer->bounds.width * layer->pivot_x;
+    const float destination_pivot_y = layer->bounds.height * layer->pivot_y;
+    const float scale_x = layer->bounds.width / (float)layer->content_width;
+    const float scale_y = layer->bounds.height / (float)layer->content_height;
+    const float radians = layer->rotation_degrees * SDL_PI_F / 180.0F;
+    const float cosine = SDL_cosf(radians);
+    const float sine = SDL_sinf(radians);
+    const float matrix_11 = scale_x * cosine;
+    const float matrix_12 = scale_x * sine;
+    const float matrix_21 = -scale_y * sine;
+    const float matrix_22 = scale_y * cosine;
+    const float matrix_31 =
+        destination_pivot_x - (source_pivot_x * scale_x * cosine - source_pivot_y * scale_y * sine);
+    const float matrix_32 =
+        destination_pivot_y - (source_pivot_x * scale_x * sine + source_pivot_y * scale_y * cosine);
+    const float determinant = matrix_11 * matrix_22 - matrix_12 * matrix_21;
+    if (SDL_fabsf(determinant) < 0.000001F) {
+        return false;
+    }
+    const float translated_x = global_x - layer->bounds.x - matrix_31;
+    const float translated_y = global_y - layer->bounds.y - matrix_32;
+    *layer_x = (translated_x * matrix_22 - translated_y * matrix_21) / determinant;
+    *layer_y = (translated_y * matrix_11 - translated_x * matrix_12) / determinant;
+    return true;
+}
+
+static const EidolonSceneLayerSnapshot *
+legacy_routed_layer(EidolonSdlLegacyPresentation *legacy, float global_x, float global_y,
+                    float *layer_x, float *layer_y) {
+    const EidolonSceneLayerSnapshot *result = NULL;
+    int32_t result_z = INT32_MIN;
+    for (size_t index = 0U; index < legacy->input_layer_count; ++index) {
+        const EidolonSceneLayerSnapshot *candidate = &legacy->input_layers[index];
+        if (!candidate->visible ||
+            (candidate->interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) == 0U ||
+            candidate->z_order < result_z) {
+            continue;
+        }
+        float candidate_x = 0.0F;
+        float candidate_y = 0.0F;
+        if (!legacy_map_layer(candidate, global_x, global_y, &candidate_x, &candidate_y) ||
+            candidate_x < 0.0F || candidate_y < 0.0F ||
+            candidate_x >= (float)candidate->content_width ||
+            candidate_y >= (float)candidate->content_height) {
+            continue;
+        }
+        result = candidate;
+        result_z = candidate->z_order;
+        *layer_x = candidate_x;
+        *layer_y = candidate_y;
+    }
+    return result;
+}
+
+static uint64_t legacy_pointer_buttons(SDL_MouseButtonFlags state) {
+    uint64_t buttons = 0U;
+    if ((state & SDL_BUTTON_LMASK) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY;
+    }
+    if ((state & SDL_BUTTON_MMASK) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE;
+    }
+    if ((state & SDL_BUTTON_RMASK) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY;
+    }
+    return buttons;
+}
+
+static uint64_t legacy_pointer_modifiers(void) {
+    return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0U
+               ? EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT
+               : 0U;
+}
+
+static bool legacy_enqueue_pointer_event(EidolonSdlLegacyPresentation *legacy,
+                                         EidolonPresentationEventKind kind, float host_x,
+                                         float host_y, float layer_x, float layer_y,
+                                         uint64_t buttons, uint32_t click_count) {
+    EidolonPresentationEvent event;
+    SDL_zero(event);
+    event.kind = kind;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host.value = 1U;
+    event.data.pointer = (EidolonPresentationPointerEvent){
+        .scene_revision = legacy->pointer_scene_revision,
+        .pointer_id = 1U,
+        .buttons = buttons,
+        .modifiers = legacy_pointer_modifiers(),
+        .valid_coordinates =
+            EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+            EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER |
+            EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL,
+        .layer = legacy->pointer_layer.id,
+        .device_kind = EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE,
+        .click_count = click_count,
+        .host_x = host_x,
+        .host_y = host_y,
+        .layer_x = layer_x,
+        .layer_y = layer_y,
+        .layer_x_relative = layer_x - legacy->pointer_layer_x,
+        .layer_y_relative = layer_y - legacy->pointer_layer_y,
+        .global_x =
+            (float)legacy->environment.host_geometry.x + host_x * legacy_coordinate_scale(legacy),
+        .global_y =
+            (float)legacy->environment.host_geometry.y + host_y * legacy_coordinate_scale(legacy),
+    };
+    const bool accepted = eidolon_presentation_event_queue_push(&legacy->event_queue, &event);
+    legacy->pointer_host_x = host_x;
+    legacy->pointer_host_y = host_y;
+    legacy->pointer_layer_x = layer_x;
+    legacy->pointer_layer_y = layer_y;
+    return accepted;
+}
+
+static void legacy_stop_pointer_routing(EidolonSdlLegacyPresentation *legacy,
+                                        bool release_capture) {
+    legacy->pointer_routing = false;
+    legacy->pointer_scene_revision = 0U;
+    SDL_zero(legacy->pointer_layer);
+    if (release_capture) {
+        (void)SDL_CaptureMouse(false);
+    }
+}
+
+static void legacy_poll_routed_pointer(EidolonSdlLegacyPresentation *legacy) {
+    if (legacy == NULL || !legacy->pointer_routing) {
+        return;
+    }
+    float global_x = 0.0F;
+    float global_y = 0.0F;
+    const SDL_MouseButtonFlags state = SDL_GetGlobalMouseState(&global_x, &global_y);
+    const float scale = legacy_coordinate_scale(legacy);
+    const float host_x =
+        (global_x - (float)legacy->environment.host_geometry.x) / scale;
+    const float host_y =
+        (global_y - (float)legacy->environment.host_geometry.y) / scale;
+    float layer_x = 0.0F;
+    float layer_y = 0.0F;
+    if (!legacy_map_layer(&legacy->pointer_layer, global_x, global_y, &layer_x, &layer_y)) {
+        legacy_stop_pointer_routing(legacy, true);
+        return;
+    }
+    if ((state & SDL_BUTTON_MMASK) == 0U) {
+        (void)legacy_enqueue_pointer_event(
+            legacy, EIDOLON_PRESENTATION_EVENT_POINTER_UP, host_x, host_y, layer_x, layer_y,
+            legacy_pointer_buttons(state), 0U);
+        legacy_stop_pointer_routing(legacy, true);
+        return;
+    }
+    if (host_x == legacy->pointer_host_x && host_y == legacy->pointer_host_y) {
+        return;
+    }
+    if (!legacy_enqueue_pointer_event(
+            legacy, EIDOLON_PRESENTATION_EVENT_POINTER_MOTION, host_x, host_y, layer_x, layer_y,
+            legacy_pointer_buttons(state), 0U)) {
+        legacy_stop_pointer_routing(legacy, true);
+    }
+}
+
 bool eidolon_sdl_legacy_handle_event(EidolonPresentation *presentation, const SDL_Event *event) {
     EidolonSdlLegacyPresentation *legacy = legacy_context(presentation);
     if (legacy == NULL || event == NULL) {
         return false;
     }
     switch (event->type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (SDL_GetWindowFromEvent(event) != legacy->window ||
+            event->button.button != SDL_BUTTON_MIDDLE || legacy->pointer_routing) {
+            return false;
+        } else {
+            SDL_Event converted = *event;
+            if (!SDL_ConvertEventToRenderCoordinates(legacy->renderer, &converted)) {
+                return false;
+            }
+            const float scale = legacy_coordinate_scale(legacy);
+            const float global_x =
+                (float)legacy->environment.host_geometry.x + converted.button.x * scale;
+            const float global_y =
+                (float)legacy->environment.host_geometry.y + converted.button.y * scale;
+            float layer_x = 0.0F;
+            float layer_y = 0.0F;
+            const EidolonSceneLayerSnapshot *layer =
+                legacy_routed_layer(legacy, global_x, global_y, &layer_x, &layer_y);
+            if (layer == NULL) {
+                return false;
+            }
+            legacy->pointer_layer = *layer;
+            legacy->pointer_scene_revision = legacy->input_scene_revision;
+            legacy->pointer_routing = true;
+            legacy->pointer_host_x = converted.button.x;
+            legacy->pointer_host_y = converted.button.y;
+            legacy->pointer_layer_x = layer_x;
+            legacy->pointer_layer_y = layer_y;
+            if (!SDL_CaptureMouse(true)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Could not capture routed SDL pointer: %s", SDL_GetError());
+                legacy_stop_pointer_routing(legacy, false);
+                return true;
+            }
+            if (!legacy_enqueue_pointer_event(
+                    legacy, EIDOLON_PRESENTATION_EVENT_POINTER_DOWN, converted.button.x,
+                    converted.button.y, layer_x, layer_y,
+                    legacy_pointer_buttons(SDL_GetMouseState(NULL, NULL)) |
+                        EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                    converted.button.clicks)) {
+                legacy_stop_pointer_routing(legacy, true);
+            }
+            return true;
+        }
+    case SDL_EVENT_MOUSE_MOTION:
+        if (!legacy->pointer_routing) {
+            return false;
+        } else {
+            SDL_Event converted = *event;
+            if (!SDL_ConvertEventToRenderCoordinates(legacy->renderer, &converted)) {
+                legacy_stop_pointer_routing(legacy, true);
+                return true;
+            }
+            const float scale = legacy_coordinate_scale(legacy);
+            const float global_x =
+                (float)legacy->environment.host_geometry.x + converted.motion.x * scale;
+            const float global_y =
+                (float)legacy->environment.host_geometry.y + converted.motion.y * scale;
+            float layer_x = 0.0F;
+            float layer_y = 0.0F;
+            if (!legacy_map_layer(&legacy->pointer_layer, global_x, global_y, &layer_x, &layer_y) ||
+                !legacy_enqueue_pointer_event(
+                    legacy, EIDOLON_PRESENTATION_EVENT_POINTER_MOTION, converted.motion.x,
+                    converted.motion.y, layer_x, layer_y,
+                    legacy_pointer_buttons(converted.motion.state), 0U)) {
+                legacy_stop_pointer_routing(legacy, true);
+            }
+            return true;
+        }
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (event->button.button != SDL_BUTTON_MIDDLE || !legacy->pointer_routing) {
+            return false;
+        } else {
+            SDL_Event converted = *event;
+            if (SDL_ConvertEventToRenderCoordinates(legacy->renderer, &converted)) {
+                const float scale = legacy_coordinate_scale(legacy);
+                const float global_x =
+                    (float)legacy->environment.host_geometry.x + converted.button.x * scale;
+                const float global_y =
+                    (float)legacy->environment.host_geometry.y + converted.button.y * scale;
+                float layer_x = 0.0F;
+                float layer_y = 0.0F;
+                if (legacy_map_layer(&legacy->pointer_layer, global_x, global_y, &layer_x,
+                                     &layer_y)) {
+                    (void)legacy_enqueue_pointer_event(
+                        legacy, EIDOLON_PRESENTATION_EVENT_POINTER_UP, converted.button.x,
+                        converted.button.y, layer_x, layer_y,
+                        legacy_pointer_buttons(SDL_GetMouseState(NULL, NULL)) &
+                            ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                        0U);
+                }
+            }
+            legacy_stop_pointer_routing(legacy, true);
+            return true;
+        }
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        if (SDL_GetWindowFromEvent(event) == legacy->window && legacy->pointer_routing) {
+            (void)legacy_enqueue_pointer_event(
+                legacy, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED, legacy->pointer_host_x,
+                legacy->pointer_host_y, legacy->pointer_layer_x, legacy->pointer_layer_y, 0U, 0U);
+            legacy_stop_pointer_routing(legacy, true);
+        }
+        return false;
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
         if (SDL_GetWindowFromEvent(event) != legacy->window) {
             return false;

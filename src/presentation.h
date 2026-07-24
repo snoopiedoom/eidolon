@@ -181,6 +181,10 @@ typedef enum EidolonPresentationEventKind {
     EIDOLON_PRESENTATION_EVENT_NONE,
     EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED,
     EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED,
+    EIDOLON_PRESENTATION_EVENT_POINTER_DOWN,
+    EIDOLON_PRESENTATION_EVENT_POINTER_MOTION,
+    EIDOLON_PRESENTATION_EVENT_POINTER_UP,
+    EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
     EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
     EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED,
     EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED,
@@ -198,6 +202,56 @@ typedef struct EidolonPresentationLayerEvent {
     float layer_x;
     float layer_y;
 } EidolonPresentationLayerEvent;
+
+typedef enum EidolonPresentationPointerDeviceKind {
+    EIDOLON_PRESENTATION_POINTER_DEVICE_UNKNOWN,
+    EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE,
+    EIDOLON_PRESENTATION_POINTER_DEVICE_TOUCH,
+    EIDOLON_PRESENTATION_POINTER_DEVICE_PEN,
+} EidolonPresentationPointerDeviceKind;
+
+typedef enum EidolonPresentationPointerButton {
+    EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY = UINT64_C(1) << 0,
+    EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE = UINT64_C(1) << 1,
+    EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY = UINT64_C(1) << 2,
+    EIDOLON_PRESENTATION_POINTER_BUTTON_ALL =
+        EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY |
+        EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE |
+        EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY,
+} EidolonPresentationPointerButton;
+
+typedef enum EidolonPresentationPointerModifier {
+    EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT = UINT64_C(1) << 0,
+} EidolonPresentationPointerModifier;
+
+typedef enum EidolonPresentationPointerCoordinate {
+    EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST = UINT64_C(1) << 0,
+    EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER = UINT64_C(1) << 1,
+    EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL = UINT64_C(1) << 2,
+    EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL =
+        EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+        EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER |
+        EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL,
+} EidolonPresentationPointerCoordinate;
+
+typedef struct EidolonPresentationPointerEvent {
+    uint64_t scene_revision;
+    uint64_t pointer_id;
+    uint64_t buttons;
+    uint64_t modifiers;
+    uint64_t valid_coordinates;
+    EidolonSceneLayerId layer;
+    EidolonPresentationPointerDeviceKind device_kind;
+    uint32_t click_count;
+    float host_x;
+    float host_y;
+    float layer_x;
+    float layer_y;
+    float layer_x_relative;
+    float layer_y_relative;
+    float global_x;
+    float global_y;
+} EidolonPresentationPointerEvent;
 
 typedef struct EidolonPresentationMoveEvent {
     uint64_t scene_revision;
@@ -227,6 +281,7 @@ typedef struct EidolonPresentationGraphicsEvent {
 
 typedef union EidolonPresentationEventData {
     EidolonPresentationLayerEvent layer;
+    EidolonPresentationPointerEvent pointer;
     EidolonPresentationMoveEvent move;
     EidolonPresentationEnvironmentChanged environment;
     EidolonPresentationGraphicsEvent graphics;

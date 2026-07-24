@@ -300,8 +300,9 @@ layer-kind inference, Win32 translates activation and native move lifecycle into
 queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
 completion. The owner accepted that interaction slice. Both Windows backends now publish
 revisioned active-host environments and caller-owned topology. Both also publish host-close and
-typed graphics-reset requests through the common queue; routed-pointer meaning and transactional
-graphics recovery remain Gate 6 work under
+typed graphics-reset requests through the common queue. Both route middle-button authoring through
+the common pointer contract; SDL 3D routed rotation is owner-confirmed, while transactional
+graphics recovery remains Gate 6 work under
 [`docs/design/presentation-events.md`](../design/presentation-events.md) and
 [`docs/design/presentation-environment.md`](../design/presentation-environment.md).
 
@@ -327,6 +328,23 @@ do not block native implementation.
    before handoff.
 
 ## Evidence log
+
+### 2026-07-24: routed pointer ownership accepted
+
+- interaction policy is now a capability mask with one exclusive primary action and optional
+  routed input, preserving immediate native dragging while allowing renderer-neutral authoring;
+- the 3D body publishes `move_anchor | route_pointer`; SDL middle-drag rotation no longer enters
+  `EidolonApp` through the fallback event adapter;
+- both Windows backends emit fixed-size mouse down/motion/up/cancel events with stable layer,
+  pointer, scene, coordinate, button, modifier, and click-count meaning;
+- consecutive routed motion coalesces while accumulating layer-local deltas; queue resync clears
+  application interaction state;
+- contract and queue tests plus the DirectComposition smoke cover transformed coordinates and
+  forced capture cancellation; `make` and `make check` pass;
+- SDL capture owns the routed gesture until release and reconciles global pointer state when the
+  pointer leaves the host bounds;
+- the owner confirmed SDL 3D middle-drag outside the host bounds, `Shift`+middle roll,
+  double-middle reset, and preserved left dragging.
 
 ### 2026-07-24: close and graphics-reset ownership compiled
 

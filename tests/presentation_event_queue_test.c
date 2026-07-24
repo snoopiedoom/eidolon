@@ -65,6 +65,42 @@ int main(void) {
     assert(event.sequence == 1U && event.data.layer.layer.value == 7U);
     assert(!eidolon_presentation_event_queue_poll(&queue, &event));
 
+    EidolonPresentationEvent pointer_motion = {
+        .kind = EIDOLON_PRESENTATION_EVENT_POINTER_MOTION,
+        .monotonic_ns = 110U,
+        .host = {1U},
+        .data.pointer =
+            {
+                .scene_revision = 1U,
+                .pointer_id = 1U,
+                .buttons = EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                .valid_coordinates = EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+                                     EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER,
+                .layer = {7U},
+                .device_kind = EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE,
+                .host_x = 12.0F,
+                .host_y = 18.0F,
+                .layer_x = 4.0F,
+                .layer_y = 6.0F,
+                .layer_x_relative = 1.0F,
+                .layer_y_relative = 2.0F,
+            },
+    };
+    assert(eidolon_presentation_event_queue_push(&queue, &pointer_motion));
+    pointer_motion.monotonic_ns = 120U;
+    pointer_motion.data.pointer.host_x = 15.0F;
+    pointer_motion.data.pointer.layer_x = 7.0F;
+    pointer_motion.data.pointer.layer_x_relative = 3.0F;
+    pointer_motion.data.pointer.layer_y_relative = 4.0F;
+    assert(eidolon_presentation_event_queue_push(&queue, &pointer_motion));
+    assert(eidolon_presentation_event_queue_poll(&queue, &event));
+    assert(event.kind == EIDOLON_PRESENTATION_EVENT_POINTER_MOTION);
+    assert(event.sequence == 2U && event.monotonic_ns == 120U);
+    assert(event.data.pointer.layer_x == 7.0F);
+    assert(event.data.pointer.layer_x_relative == 4.0F);
+    assert(event.data.pointer.layer_y_relative == 6.0F);
+    assert(!eidolon_presentation_event_queue_poll(&queue, &event));
+
     EidolonPresentationEvent first_environment = environment(1U);
     assert(eidolon_presentation_event_queue_push(&queue, &first_environment));
     EidolonPresentationEvent edge = activation(150U, 8U);
@@ -73,10 +109,10 @@ int main(void) {
     assert(eidolon_presentation_event_queue_push(&queue, &latest_environment));
     assert(eidolon_presentation_event_queue_poll(&queue, &event));
     assert(event.kind == EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED);
-    assert(event.sequence == 2U && event.data.environment.environment.revision == 3U);
+    assert(event.sequence == 3U && event.data.environment.environment.revision == 3U);
     assert(eidolon_presentation_event_queue_poll(&queue, &event));
     assert(event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED);
-    assert(event.sequence == 3U && event.data.layer.layer.value == 8U);
+    assert(event.sequence == 4U && event.data.layer.layer.value == 8U);
     assert(!eidolon_presentation_event_queue_poll(&queue, &event));
 
     for (size_t index = 0U; index < EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY; ++index) {
@@ -101,11 +137,11 @@ int main(void) {
 
     assert(eidolon_presentation_event_queue_poll(&queue, &event));
     assert(event.kind == EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED);
-    assert(event.sequence == EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY + 4U);
+    assert(event.sequence == EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY + 5U);
     assert(event.data.layer.layer.value == 0U && event.data.layer.scene_revision == 0U);
     assert(eidolon_presentation_event_queue_poll(&queue, &event));
     assert(event.kind == EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED);
-    assert(event.sequence == EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY + 5U);
+    assert(event.sequence == EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY + 6U);
     assert(!eidolon_presentation_event_queue_poll(&queue, &event));
 
     for (size_t index = 0U; index < EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY; ++index) {

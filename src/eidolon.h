@@ -120,6 +120,7 @@ typedef struct EidolonApp {
     bool model_rotation_dragging;
     bool model_rotation_roll_dragging;
     bool model_rotation_hit_test_suspended;
+    bool model_rotation_presentation_routed;
     float model_scale;
     float model_yaw_degrees;
     float model_pitch_degrees;

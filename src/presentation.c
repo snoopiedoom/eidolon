@@ -357,6 +357,35 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
             return false;
         }
         break;
+    case EIDOLON_PRESENTATION_EVENT_POINTER_DOWN:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_MOTION:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_UP:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED:
+        if (next.data.pointer.scene_revision == 0U || next.data.pointer.pointer_id == 0U ||
+            next.data.pointer.layer.value == 0U ||
+            next.data.pointer.device_kind <= EIDOLON_PRESENTATION_POINTER_DEVICE_UNKNOWN ||
+            next.data.pointer.device_kind > EIDOLON_PRESENTATION_POINTER_DEVICE_PEN ||
+            (next.data.pointer.buttons &
+             ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_ALL) != 0U ||
+            (next.data.pointer.modifiers &
+             ~(uint64_t)EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT) != 0U ||
+            (next.data.pointer.valid_coordinates &
+             ~(uint64_t)EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL) != 0U ||
+            ((next.data.pointer.valid_coordinates &
+              EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST) != 0U &&
+             (!isfinite(next.data.pointer.host_x) || !isfinite(next.data.pointer.host_y))) ||
+            ((next.data.pointer.valid_coordinates &
+              EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER) != 0U &&
+             (!isfinite(next.data.pointer.layer_x) || !isfinite(next.data.pointer.layer_y) ||
+              !isfinite(next.data.pointer.layer_x_relative) ||
+              !isfinite(next.data.pointer.layer_y_relative))) ||
+            ((next.data.pointer.valid_coordinates &
+              EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL) != 0U &&
+             (!isfinite(next.data.pointer.global_x) || !isfinite(next.data.pointer.global_y)))) {
+            SDL_SetError("invalid presentation pointer event");
+            return false;
+        }
+        break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
     case EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED:
     case EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED:

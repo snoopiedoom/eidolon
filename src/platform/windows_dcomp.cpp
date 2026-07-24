@@ -92,6 +92,11 @@ struct Win32DcompPresentation {
     POINT drag_cursor_origin = {};
     POINT drag_window_origin = {};
     POINT activation_cursor_origin = {};
+    DcompTarget *pointer_target = nullptr;
+    float pointer_host_x = 0.0F;
+    float pointer_host_y = 0.0F;
+    float pointer_layer_x = 0.0F;
+    float pointer_layer_y = 0.0F;
     EidolonSceneLayerId interaction_layer = {};
     uint64_t interaction_scene_revision = 0U;
     bool visible = false;
@@ -99,6 +104,7 @@ struct Win32DcompPresentation {
     bool input_suspended = false;
     bool dragging = false;
     bool activation_pending = false;
+    bool pointer_routing = false;
     bool environment_valid = false;
     bool environment_dirty = true;
     bool graphics_reset_pending = false;
@@ -123,6 +129,23 @@ Win32DcompPresentation *window_backend(HWND window) {
     return reinterpret_cast<Win32DcompPresentation *>(GetWindowLongPtrW(window, GWLP_USERDATA));
 }
 
+bool map_target(const DcompTarget *target, float client_x, float client_y, float *layer_x,
+                float *layer_y) {
+    if (target == nullptr || layer_x == nullptr || layer_y == nullptr) {
+        return false;
+    }
+    const D2D_MATRIX_3X2_F &matrix = target->committed_matrix;
+    const float determinant = matrix._11 * matrix._22 - matrix._12 * matrix._21;
+    if (std::fabs(determinant) < 0.000001F) {
+        return false;
+    }
+    const float translated_x = client_x - target->committed_offset_x - matrix._31;
+    const float translated_y = client_y - target->committed_offset_y - matrix._32;
+    *layer_x = (translated_x * matrix._22 - translated_y * matrix._21) / determinant;
+    *layer_y = (translated_y * matrix._11 - translated_x * matrix._12) / determinant;
+    return true;
+}
+
 HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float client_y) {
     HitTestResult result;
     if (backend == nullptr || backend->input_suspended) {
@@ -134,17 +157,11 @@ HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float cl
             target->committed_interaction == EIDOLON_SCENE_INTERACTION_PASS_THROUGH) {
             continue;
         }
-        const D2D_MATRIX_3X2_F &matrix = target->committed_matrix;
-        const float determinant = matrix._11 * matrix._22 - matrix._12 * matrix._21;
-        if (std::fabs(determinant) < 0.000001F) {
+        float source_x = 0.0F;
+        float source_y = 0.0F;
+        if (!map_target(target, client_x, client_y, &source_x, &source_y)) {
             continue;
         }
-        const float translated_x = client_x - target->committed_offset_x - matrix._31;
-        const float translated_y = client_y - target->committed_offset_y - matrix._32;
-        const float source_x =
-            (translated_x * matrix._22 - translated_y * matrix._21) / determinant;
-        const float source_y =
-            (translated_y * matrix._11 - translated_x * matrix._12) / determinant;
         if (source_x < 0.0F || source_y < 0.0F || source_x >= static_cast<float>(target->width) ||
             source_y >= static_cast<float>(target->height)) {
             continue;
@@ -214,6 +231,101 @@ bool enqueue_structural_event(Win32DcompPresentation *backend,
     return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
+uint64_t pointer_buttons(WPARAM state) {
+    uint64_t buttons = 0U;
+    if ((state & MK_LBUTTON) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY;
+    }
+    if ((state & MK_MBUTTON) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE;
+    }
+    if ((state & MK_RBUTTON) != 0U) {
+        buttons |= EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY;
+    }
+    return buttons;
+}
+
+uint64_t pointer_modifiers() {
+    return (GetKeyState(VK_SHIFT) & 0x8000) != 0
+               ? EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT
+               : 0U;
+}
+
+bool enqueue_pointer_event(Win32DcompPresentation *backend, EidolonPresentationEventKind kind,
+                           float host_x, float host_y, float layer_x, float layer_y,
+                           uint64_t buttons, uint32_t click_count) {
+    if (backend == nullptr || backend->pointer_target == nullptr) {
+        return false;
+    }
+    const EidolonPresentationGeometry geometry = current_geometry(backend);
+    EidolonPresentationEvent event = {};
+    event.kind = kind;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host = {1U};
+    event.data.pointer = {
+        backend->pointer_target->committed_scene_revision,
+        1U,
+        buttons,
+        pointer_modifiers(),
+        EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+            EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER |
+            EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL,
+        backend->pointer_target->layer,
+        EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE,
+        click_count,
+        host_x,
+        host_y,
+        layer_x,
+        layer_y,
+        layer_x - backend->pointer_layer_x,
+        layer_y - backend->pointer_layer_y,
+        static_cast<float>(geometry.x) + host_x,
+        static_cast<float>(geometry.y) + host_y,
+    };
+    const bool accepted = eidolon_presentation_event_queue_push(&backend->event_queue, &event);
+    backend->pointer_host_x = host_x;
+    backend->pointer_host_y = host_y;
+    backend->pointer_layer_x = layer_x;
+    backend->pointer_layer_y = layer_y;
+    return accepted;
+}
+
+void stop_pointer_routing(Win32DcompPresentation *backend, bool release_capture) {
+    if (backend == nullptr) {
+        return;
+    }
+    backend->pointer_routing = false;
+    backend->pointer_target = nullptr;
+    if (release_capture && GetCapture() == backend->window) {
+        ReleaseCapture();
+    }
+}
+
+bool start_pointer_routing(Win32DcompPresentation *backend, const HitTestResult &hit, float host_x,
+                           float host_y, uint64_t buttons, uint32_t click_count) {
+    if (backend == nullptr || hit.target == nullptr ||
+        (hit.target->committed_interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) == 0U) {
+        return false;
+    }
+    backend->pointer_target = hit.target;
+    backend->pointer_routing = true;
+    backend->pointer_host_x = host_x;
+    backend->pointer_host_y = host_y;
+    backend->pointer_layer_x = hit.layer_x;
+    backend->pointer_layer_y = hit.layer_y;
+    SetCapture(backend->window);
+    if (GetCapture() != backend->window) {
+        stop_pointer_routing(backend, false);
+        return false;
+    }
+    if (enqueue_pointer_event(backend, EIDOLON_PRESENTATION_EVENT_POINTER_DOWN, host_x, host_y,
+                              hit.layer_x, hit.layer_y, buttons, click_count)) {
+        return true;
+    }
+    stop_pointer_routing(backend, true);
+    return false;
+}
+
 bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
                          const char *operation) {
     if (hresult_ok(result, operation)) {
@@ -249,7 +361,11 @@ bool start_drag(Win32DcompPresentation *backend) {
     backend->drag_window_origin = {bounds.left, bounds.top};
     backend->dragging = true;
     SetCapture(backend->window);
-    return true;
+    if (GetCapture() == backend->window) {
+        return true;
+    }
+    backend->dragging = false;
+    return false;
 }
 
 void stop_drag(Win32DcompPresentation *backend, bool release_capture) {
@@ -296,7 +412,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         backend->interaction_layer = hit.target->layer;
         backend->interaction_scene_revision = hit.target->committed_scene_revision;
-        if (hit.target->committed_interaction == EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR) {
+        if ((hit.target->committed_interaction & EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR) != 0U) {
             if (start_drag(backend)) {
                 (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
                                     backend->interaction_layer, backend->interaction_scene_revision,
@@ -305,7 +421,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
                 backend->interaction_layer = {};
                 backend->interaction_scene_revision = 0U;
             }
-        } else if (hit.target->committed_interaction == EIDOLON_SCENE_INTERACTION_ACTIVATE) {
+        } else if ((hit.target->committed_interaction & EIDOLON_SCENE_INTERACTION_ACTIVATE) != 0U) {
             backend->activation_pending = GetCursorPos(&backend->activation_cursor_origin) != FALSE;
             if (backend->activation_pending) {
                 SetCapture(window);
@@ -313,8 +429,30 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         return 0;
     }
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONDBLCLK: {
+        const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+        const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+        const HitTestResult hit = hit_test(backend, host_x, host_y);
+        (void)start_pointer_routing(
+            backend, hit, host_x, host_y,
+            pointer_buttons(wparam) | EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+            message == WM_MBUTTONDBLCLK ? 2U : 1U);
+        return 0;
+    }
     case WM_MOUSEMOVE:
-        if (backend != nullptr && backend->dragging) {
+        if (backend != nullptr && backend->pointer_routing &&
+            backend->pointer_target != nullptr) {
+            const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+            const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+            float layer_x = 0.0F;
+            float layer_y = 0.0F;
+            if (!map_target(backend->pointer_target, host_x, host_y, &layer_x, &layer_y) ||
+                !enqueue_pointer_event(backend, EIDOLON_PRESENTATION_EVENT_POINTER_MOTION, host_x,
+                                       host_y, layer_x, layer_y, pointer_buttons(wparam), 0U)) {
+                stop_pointer_routing(backend, true);
+            }
+        } else if (backend != nullptr && backend->dragging) {
             POINT cursor = {};
             if (GetCursorPos(&cursor)) {
                 const int x =
@@ -324,6 +462,24 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
                 (void)SetWindowPos(window, HWND_TOPMOST, x, y, 0, 0,
                                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
+        }
+        return 0;
+    case WM_MBUTTONUP:
+        if (backend != nullptr && backend->pointer_routing &&
+            backend->pointer_target != nullptr) {
+            const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+            const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+            float layer_x = 0.0F;
+            float layer_y = 0.0F;
+            if (map_target(backend->pointer_target, host_x, host_y, &layer_x, &layer_y)) {
+                (void)enqueue_pointer_event(
+                    backend, EIDOLON_PRESENTATION_EVENT_POINTER_UP, host_x, host_y, layer_x,
+                    layer_y,
+                    pointer_buttons(wparam) &
+                        ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                    0U);
+            }
+            stop_pointer_routing(backend, true);
         }
         return 0;
     case WM_LBUTTONUP: {
@@ -405,6 +561,14 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         return DefWindowProcW(window, message, wparam, lparam);
     case WM_CAPTURECHANGED:
+        if (backend != nullptr && backend->pointer_routing &&
+            backend->pointer_target != nullptr) {
+            (void)enqueue_pointer_event(
+                backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
+                backend->pointer_host_x, backend->pointer_host_y, backend->pointer_layer_x,
+                backend->pointer_layer_y, 0U, 0U);
+            stop_pointer_routing(backend, false);
+        }
         if (backend != nullptr && backend->dragging) {
             const EidolonSceneLayerId layer = backend->interaction_layer;
             const uint64_t scene_revision = backend->interaction_scene_revision;
@@ -427,6 +591,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
 
 bool register_window_class(HINSTANCE instance) {
     WNDCLASSW window_class = {};
+    window_class.style = CS_DBLCLKS;
     window_class.lpfnWndProc = host_window_proc;
     window_class.hInstance = instance;
     window_class.lpszClassName = kWindowClass;
@@ -569,6 +734,13 @@ bool begin_interactive_move(void *opaque) {
 void suspend_input_region(void *opaque) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     backend->input_suspended = true;
+    if (backend->pointer_routing && backend->pointer_target != nullptr) {
+        (void)enqueue_pointer_event(
+            backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
+            backend->pointer_host_x, backend->pointer_host_y, backend->pointer_layer_x,
+            backend->pointer_layer_y, 0U, 0U);
+        stop_pointer_routing(backend, true);
+    }
     if (backend->dragging) {
         const EidolonSceneLayerId layer = backend->interaction_layer;
         const uint64_t scene_revision = backend->interaction_scene_revision;

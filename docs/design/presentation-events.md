@@ -19,7 +19,7 @@ Eidolon needs a bounded C17 event contract between presentation backends and app
 
 The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
 
-- scene layers commit `pass_through`, `activate`, `move_anchor`, or `route_pointer` policy with
+- scene layers commit an exclusive primary action plus optional `route_pointer` capability with
   their visual/input state;
 - a fixed-capacity common queue assigns monotonic sequence ids and converts overflow into one
   observable resync event;
@@ -36,13 +36,13 @@ Close and graphics-reset requests now cross the presentation queue for both Wind
 DirectComposition emits one typed device/backend reset request after a failed present or compositor
 commit; SDL translates its target/device reset events at the presentation boundary. The application
 redraws after target reset and exits cleanly after device/backend reset until transactional recovery
-or fallback exists. `sdl_window_legacy` publishes environment changes through the same queue, while
-an SDL-backed event adapter still translates its pointer and application-command behavior into
-fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no longer enter `EidolonApp`;
-routed-pointer presentation parity remains explicit work. The owner confirmed native activation,
-body-context settings, cancel-on-drag, click-through, smooth movement, and one stable final reflow.
-The no-activate native host deliberately does not claim keyboard focus or register a system-wide
-`F1` hotkey; right-click is its reliable settings entry point.
+or fallback exists. Both Windows backends now emit routed middle-button mouse events through the
+presentation queue; the SDL-backed event adapter still translates primary pointer and
+application-command behavior into fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no
+longer enter `EidolonApp`. The owner confirmed native activation, body-context settings,
+cancel-on-drag, click-through, smooth movement, one stable final reflow, and SDL 3D routed rotation
+beyond the host bounds. The no-activate native host deliberately does not claim keyboard focus or
+register a system-wide `F1` hotkey; right-click is its reliable settings entry point.
 The Windows SDL fallback still delegates character movement to the modal native top-level move
 loop, so its animation cadence can pause until release. Equivalent event meaning does not imply
 equivalent compositor cadence.
@@ -142,13 +142,15 @@ geometry through the queue.
 
 ## Layer interaction policy
 
-Every committed interactive layer declares one deterministic policy:
+Every committed interactive layer declares one exclusive primary policy plus optional routed
+input:
 
 ```text
 pass_through
 activate
 move_anchor
-route_pointer
+activate | route_pointer
+move_anchor | route_pointer
 ```
 
 - `pass_through` never consumes pointer input.
@@ -156,7 +158,11 @@ route_pointer
   below the backend-independent drag threshold.
 - `move_anchor` permits immediate backend-owned capture and movement and emits move lifecycle
   events.
-- `route_pointer` emits bounded pointer events for body-authoring interactions such as 3D rotation.
+- `route_pointer` additionally emits bounded events for otherwise-unclaimed input, initially the
+  middle-button body-authoring gesture used by 3D rotation.
+
+`activate` and `move_anchor` are mutually exclusive. `route_pointer` is a capability bit rather
+than a competing primary action, so native movement never has to wait for application routing.
 
 Alpha or geometric hit regions decide whether a pointer is over the layer. Policy decides what that
 hit means. Changing policy is a presentation revision and becomes active atomically with the scene
@@ -285,8 +291,8 @@ is coalesced.
 
 - queue capacity is fixed when the presentation instance is created;
 - native callbacks do not allocate, wait for the render thread, or invoke user code;
-- the backend coalesces consecutive motion for the same pointer/interaction and the latest geometry
-  for the same host;
+- the backend coalesces consecutive motion for the same pointer/interaction, accumulating relative
+  layer-local movement, and the latest geometry for the same host;
 - a pending environment publication may be replaced by the newest revision for the same host;
 - down, up, cancel, activation, move completion/cancellation, close, reset, and resync events are
   not ordinary coalescible state;
@@ -367,10 +373,9 @@ must remain bounded and must not call application code while holding a backend l
 5. [x] Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from
    the Win32 adapter.
 6. [~] Implement equivalent SDL legacy translation without changing product behavior. The
-   fixed-size fallback application adapter preserves current pointer and command behavior; close
-   and reset now cross the presentation contract, while routed-pointer meaning remains.
-7. [~] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests. Queue
-   and stale-layer behavior are covered; forced-capture and routed-coordinate cases remain.
+   fixed-size fallback application adapter preserves primary pointer and command behavior; close,
+   reset, and middle-button 3D authoring now cross the presentation contract.
+7. [x] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests.
 8. [~] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
    checks. The native portrait path is accepted; the legacy modal-drag limitation is confirmed and
    documented, while the remaining SDL fallback regression pass and physical output-removal
@@ -381,8 +386,6 @@ Environment and topology implementation proceeds through the separate sequence i
 
 ## Open decisions
 
-- whether `route_pointer` is sufficient for 3D rotation and future authoring, or whether a small
-  gesture layer belongs above presentation;
 - exact portable button/modifier bit assignments and interaction-token lifetime;
 - whether future compositor-layer dragging moves a shared character anchor or one body layer;
 - how mobile multi-touch arbitration interacts with dialogue activation and character movement;

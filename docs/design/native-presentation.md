@@ -330,8 +330,10 @@ The initial `win32_dcomp` implementation now commits interaction policy with eac
 dialogue activation plus native move lifecycle through that queue. The owner confirmed native
 activation, cancellation, click-through, movement, and final reflow. Presentation-environment
 publication, transactional application, and mixed-DPI behavior are owner-confirmed; reset events
-and host close now cross the common queue. Routed-pointer parity, graphics recovery, and physical
-output removal remain open.
+and host close now cross the common queue. Middle-button routed input is compiled for both Windows
+backends; SDL 3D rotation outside the host bounds, `Shift`+middle roll, double-middle reset, and
+preserved left dragging are owner-confirmed. Graphics recovery and physical output removal remain
+open.
 
 ## Output topology and DPI
 

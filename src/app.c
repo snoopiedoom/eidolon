@@ -2135,6 +2135,9 @@ static void apply_presentation_updates(EidolonApp *app) {
     app->native_drag_completed = true;
 }
 
+static void end_model_rotation_drag(EidolonApp *app);
+static void handle_routed_pointer(EidolonApp *app, const EidolonPresentationEvent *event);
+
 static void handle_presentation_event(EidolonApp *app, const EidolonPresentationEvent *event) {
     const uint64_t now_ms = SDL_GetTicks();
     switch (event->kind) {
@@ -2159,6 +2162,12 @@ static void handle_presentation_event(EidolonApp *app, const EidolonPresentation
             }
         }
         break;
+    case EIDOLON_PRESENTATION_EVENT_POINTER_DOWN:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_MOTION:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_UP:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED:
+        handle_routed_pointer(app, event);
+        break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED:
         app->presentation_move_completion_pending = true;
         break;
@@ -2166,6 +2175,7 @@ static void handle_presentation_event(EidolonApp *app, const EidolonPresentation
         app->native_drag_completed = true;
         break;
     case EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED:
+        end_model_rotation_drag(app);
         app->presentation_resync_pending = true;
         app->presentation_move_completion_pending = true;
         eidolon_log_write("input", "presentation event queue resynchronized");
@@ -2219,7 +2229,10 @@ static void end_model_rotation_drag(EidolonApp *app) {
         app->model_rotation_dragging = false;
         app->model_rotation_roll_dragging = false;
         app->model_rotation_hit_test_suspended = false;
-        SDL_CaptureMouse(false);
+        if (!app->model_rotation_presentation_routed) {
+            SDL_CaptureMouse(false);
+        }
+        app->model_rotation_presentation_routed = false;
     }
 }
 
@@ -2236,6 +2249,7 @@ static void begin_model_rotation_drag(EidolonApp *app, const EidolonAppPointerEv
     app->model_rotation_dragging = true;
     app->model_rotation_roll_dragging = (pointer->modifiers & EIDOLON_APP_MODIFIER_SHIFT) != 0U;
     app->model_rotation_hit_test_suspended = false;
+    app->model_rotation_presentation_routed = false;
     if (!SDL_CaptureMouse(true)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not capture model rotation drag: %s",
                     SDL_GetError());
@@ -2246,7 +2260,7 @@ static void update_model_rotation_drag(EidolonApp *app, const EidolonAppPointerE
     if (pointer->x_relative == 0.0F && pointer->y_relative == 0.0F) {
         return;
     }
-    if (!app->model_rotation_hit_test_suspended) {
+    if (!app->model_rotation_presentation_routed && !app->model_rotation_hit_test_suspended) {
         eidolon_presentation_suspend_input_region(app->presentation);
         app->model_rotation_hit_test_suspended = true;
     }
@@ -2259,6 +2273,61 @@ static void update_model_rotation_drag(EidolonApp *app, const EidolonAppPointerE
             app, app->model_yaw_degrees + pointer->x_relative * MODEL_ROTATION_DEGREES_PER_PIXEL,
             app->model_pitch_degrees + pointer->y_relative * MODEL_ROTATION_DEGREES_PER_PIXEL,
             app->model_roll_degrees);
+    }
+}
+
+static bool routed_pointer_targets_current_body(
+    const EidolonApp *app, const EidolonPresentationPointerEvent *pointer) {
+    if (pointer->scene_revision != app->scene_snapshot.revision) {
+        return false;
+    }
+    for (size_t index = 0U; index < app->scene_snapshot.layer_count; ++index) {
+        const EidolonSceneLayerSnapshot *layer = &app->scene_snapshot.layers[index];
+        if (layer->id.value == pointer->layer.value &&
+            layer->kind == EIDOLON_SCENE_LAYER_BODY &&
+            (layer->interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) != 0U) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void handle_routed_pointer(EidolonApp *app, const EidolonPresentationEvent *event) {
+    const EidolonPresentationPointerEvent *pointer = &event->data.pointer;
+    switch (event->kind) {
+    case EIDOLON_PRESENTATION_EVENT_POINTER_DOWN:
+        if (!routed_pointer_targets_current_body(app, pointer) ||
+            (pointer->buttons & EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE) == 0U) {
+            return;
+        }
+        if (pointer->click_count >= 2U) {
+            end_model_rotation_drag(app);
+            eidolon_app_set_model_rotation(app, 0.0F, 0.0F, 0.0F);
+            return;
+        }
+        app->model_rotation_dragging = true;
+        app->model_rotation_roll_dragging =
+            (pointer->modifiers & EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT) != 0U;
+        app->model_rotation_hit_test_suspended = false;
+        app->model_rotation_presentation_routed = true;
+        return;
+    case EIDOLON_PRESENTATION_EVENT_POINTER_MOTION:
+        if (app->model_rotation_dragging && app->model_rotation_presentation_routed) {
+            const EidolonAppPointerEvent translated = {
+                .x_relative = pointer->layer_x_relative,
+                .y_relative = pointer->layer_y_relative,
+            };
+            update_model_rotation_drag(app, &translated);
+        }
+        return;
+    case EIDOLON_PRESENTATION_EVENT_POINTER_UP:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED:
+        if (app->model_rotation_presentation_routed) {
+            end_model_rotation_drag(app);
+        }
+        return;
+    default:
+        return;
     }
 }
 
@@ -2321,6 +2390,9 @@ void eidolon_app_run(EidolonApp *app) {
     eidolon_frame_clock_init(&frame_clock, SDL_GetTicksNS(), app->presentation_interval_ns);
     bool frame_clock_software_paced = app->presentation_software_paced;
     uint64_t next_event_pressure_log_ms = 0U;
+    uint64_t next_hitch_log_ms = 0U;
+    uint64_t pending_hitch_count = 0U;
+    double pending_hitch_max_ms = 0.0;
     while (app->running) {
         EidolonAppEvent event;
         size_t event_count = 0U;
@@ -2370,9 +2442,18 @@ void eidolon_app_run(EidolonApp *app) {
         now_ns = SDL_GetTicksNS();
         if (frame_clock.previous_frame_ns != 0U &&
             now_ns - frame_clock.previous_frame_ns > frame_clock.interval_ns * 2U) {
-            eidolon_log_write("renderer", "presentation hitch gap_ms=%.2f",
-                              (double)(now_ns - frame_clock.previous_frame_ns) /
-                                  (double)SDL_NS_PER_MS);
+            const double gap_ms = (double)(now_ns - frame_clock.previous_frame_ns) /
+                                  (double)SDL_NS_PER_MS;
+            ++pending_hitch_count;
+            pending_hitch_max_ms = SDL_max(pending_hitch_max_ms, gap_ms);
+            if (event_now_ms >= next_hitch_log_ms) {
+                eidolon_log_write("renderer", "presentation hitches count=%llu max_gap_ms=%.2f",
+                                  (unsigned long long)pending_hitch_count,
+                                  pending_hitch_max_ms);
+                pending_hitch_count = 0U;
+                pending_hitch_max_ms = 0.0;
+                next_hitch_log_ms = event_now_ms + 1000U;
+            }
         }
         const float delta_seconds = eidolon_frame_clock_begin(&frame_clock, now_ns);
 

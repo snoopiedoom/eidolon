@@ -344,9 +344,39 @@ int main(void) {
     assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED);
     assert(presentation_event.data.layer.layer.value == 7U);
     fake.event = (EidolonPresentationEvent){
-        .kind = EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+        .kind = EIDOLON_PRESENTATION_EVENT_POINTER_MOTION,
         .sequence = 3U,
         .monotonic_ns = 102U,
+        .host = {1U},
+        .data.pointer =
+            {
+                .scene_revision = 2U,
+                .pointer_id = 1U,
+                .buttons = EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                .valid_coordinates = EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+                                     EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER,
+                .layer = {7U},
+                .device_kind = EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE,
+                .host_x = 14.0F,
+                .host_y = 20.0F,
+                .layer_x = 6.0F,
+                .layer_y = 8.0F,
+                .layer_x_relative = 2.0F,
+                .layer_y_relative = 2.0F,
+            },
+    };
+    fake.event_pending = true;
+    assert(eidolon_presentation_poll_event(presentation, &presentation_event));
+    assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_POINTER_MOTION);
+    assert(presentation_event.data.pointer.layer.value == 7U);
+    fake.event.data.pointer.pointer_id = 0U;
+    fake.event.sequence = 4U;
+    fake.event_pending = true;
+    assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
+    fake.event = (EidolonPresentationEvent){
+        .kind = EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+        .sequence = 5U,
+        .monotonic_ns = 103U,
         .host = {1U},
     };
     fake.event_pending = true;
@@ -354,8 +384,8 @@ int main(void) {
     assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED);
     fake.event = (EidolonPresentationEvent){
         .kind = EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
-        .sequence = 4U,
-        .monotonic_ns = 103U,
+        .sequence = 6U,
+        .monotonic_ns = 104U,
         .host = {1U},
         .data.graphics = {EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS},
     };
@@ -365,7 +395,7 @@ int main(void) {
     assert(presentation_event.data.graphics.reset_kind ==
            EIDOLON_PRESENTATION_GRAPHICS_RESET_TARGETS);
     fake.event.data.graphics.reset_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE;
-    fake.event.sequence = 5U;
+    fake.event.sequence = 7U;
     fake.event_pending = true;
     assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
     const EidolonSceneSnapshot scene = {

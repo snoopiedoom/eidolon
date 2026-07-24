@@ -72,7 +72,10 @@ bool eidolon_scene_publish(EidolonScene *scene, const EidolonSceneLayerInput *la
             layers[index].opacity > 1.0F || layers[index].pivot_x < 0.0F ||
             layers[index].pivot_x > 1.0F || layers[index].pivot_y < 0.0F ||
             layers[index].pivot_y > 1.0F ||
-            layers[index].interaction > EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) {
+            (layers[index].interaction &
+             ~(EidolonSceneInteractionPolicy)EIDOLON_SCENE_INTERACTION_ALL) != 0U ||
+            (layers[index].interaction & EIDOLON_SCENE_INTERACTION_PRIMARY_MASK) ==
+                EIDOLON_SCENE_INTERACTION_PRIMARY_MASK) {
             SDL_SetError("invalid scene layer");
             return false;
         }

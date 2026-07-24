@@ -15,6 +15,23 @@ static EidolonPresentationEvent *pending_environment_event(EidolonPresentationEv
     return NULL;
 }
 
+static EidolonPresentationEvent *pending_pointer_motion(EidolonPresentationEventQueue *queue,
+                                                        const EidolonPresentationEvent *event) {
+    for (size_t offset = queue->count; offset > 0U; --offset) {
+        const size_t slot = (queue->head + offset - 1U) % EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY;
+        EidolonPresentationEvent *candidate = &queue->events[slot];
+        if (candidate->kind != EIDOLON_PRESENTATION_EVENT_POINTER_MOTION) {
+            break;
+        }
+        if (candidate->host.value == event->host.value &&
+            candidate->data.pointer.pointer_id == event->data.pointer.pointer_id &&
+            candidate->data.pointer.layer.value == event->data.pointer.layer.value) {
+            return candidate;
+        }
+    }
+    return NULL;
+}
+
 static bool retain_after_resync(EidolonPresentationEventKind kind) {
     return kind == EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED ||
            kind == EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED ||
@@ -41,6 +58,19 @@ bool eidolon_presentation_event_queue_push(EidolonPresentationEventQueue *queue,
             const uint64_t sequence = pending->sequence;
             *pending = *event;
             pending->sequence = sequence;
+            return true;
+        }
+    }
+    if (event->kind == EIDOLON_PRESENTATION_EVENT_POINTER_MOTION) {
+        EidolonPresentationEvent *pending = pending_pointer_motion(queue, event);
+        if (pending != NULL) {
+            const uint64_t sequence = pending->sequence;
+            EidolonPresentationPointerEvent merged = event->data.pointer;
+            merged.layer_x_relative += pending->data.pointer.layer_x_relative;
+            merged.layer_y_relative += pending->data.pointer.layer_y_relative;
+            *pending = *event;
+            pending->sequence = sequence;
+            pending->data.pointer = merged;
             return true;
         }
     }

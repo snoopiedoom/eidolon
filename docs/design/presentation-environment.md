@@ -280,8 +280,9 @@ producer/consumer path:
 
 The owner confirmed the Win32 cross-monitor environment transaction and bubble-bound behavior.
 Close and typed graphics-reset notification now cross the presentation event contract.
-Routed-pointer parity, transactional graphics recovery, and physical output-removal proof remain
-open.
+Middle-button routed-pointer parity, including SDL capture beyond the host bounds, is
+owner-confirmed.
+Transactional graphics recovery and physical output-removal proof remain open.
 The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
 application consumption until release; native cadence acceptance belongs to `win32_dcomp`. Its
 mixed-DPI/output/placement and post-drag resumption still require owner confirmation before native

@@ -158,7 +158,11 @@ static void publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
         layers[layer_count++] = (EidolonSceneLayerInput){
             .stable_key = SCENE_BODY_KEY,
             .kind = EIDOLON_SCENE_LAYER_BODY,
-            .interaction = EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR,
+            .interaction =
+                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR |
+                (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D
+                     ? EIDOLON_SCENE_INTERACTION_ROUTE_POINTER
+                     : EIDOLON_SCENE_INTERACTION_PASS_THROUGH),
             .content_token = body_content_token(app),
             .content_width = content_width,
             .content_height = content_height,

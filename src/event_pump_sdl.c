@@ -89,6 +89,9 @@ static void route_event(EidolonEventPump *pump, const SDL_Event *source, Eidolon
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not convert input coordinates: %s",
                         SDL_GetError());
         }
+        if (converted.button.button == SDL_BUTTON_MIDDLE) {
+            return;
+        }
         event->kind = source->type == SDL_EVENT_MOUSE_BUTTON_DOWN ? EIDOLON_APP_EVENT_POINTER_DOWN
                                                                   : EIDOLON_APP_EVENT_POINTER_UP;
         event->data.pointer.x = converted.button.x;

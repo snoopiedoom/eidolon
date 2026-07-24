@@ -80,7 +80,7 @@ overrides with reset-to-inheritance semantics.
   a no-redirection host, independent body/dialogue targets, premultiplied D3D11 submission,
   DirectComposition transforms/opacity/z-order, cached-alpha hit testing, native body dragging,
   bounded presentation events for dialogue activation, body context requests, host close,
-  graphics-reset requests, and final-move reflow, revisioned
+  routed pointer input, graphics-reset requests, and final-move reflow, revisioned
   active-host environment publication, stable opaque monitor ids, caller-owned topology copying,
   and transactional cadence/layout application;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
@@ -97,7 +97,9 @@ overrides with reset-to-inheritance semantics.
 The owner accepted the opt-in DirectComposition portrait/dialogue output, transparent per-pixel
 click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
 native body-context settings, cancel-on-drag, one stable final reflow, cross-monitor environment
-delivery, and native bubble-bound selection. Physical output-removal recovery remains unproven.
+delivery, and native bubble-bound selection. The owner also accepted routed SDL 3D middle-drag
+rotation outside the host bounds, `Shift`+middle roll, double-middle reset, and preserved left
+dragging. Physical output-removal recovery remains unproven.
 
 ## Known limitations
 
@@ -110,9 +112,9 @@ delivery, and native bubble-bound selection. Physical output-removal recovery re
   depend on update order;
 - monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
   renderer reports tighter visible geometry;
-- close and graphics-reset meaning now cross the presentation event contract for both Windows
-  backends; routed-pointer events and native device/backend recreation remain unimplemented, while
-  SDL legacy input still uses a normalized fallback adapter;
+- close, graphics-reset, and middle-button routed-pointer meaning now cross the presentation event
+  contract for both Windows backends; SDL primary input still uses a normalized fallback adapter,
+  while touch/pen routing and native device/backend recreation remain unimplemented;
 - Windows `sdl_window_legacy` dragging enters the native top-level modal move loop, so animation and
   dialogue presentation may pause until release; this is a documented fallback limitation, not the
   cadence target for DirectComposition;
@@ -143,27 +145,25 @@ The immediate goal is to finish the DirectComposition portrait/dialogue path and
 replace `sdl_window_legacy` as the normal Windows presentation selection. The legacy backend remains
 a functional fallback; its confirmed modal-drag cadence limitation does not block native progress.
 
-1. move routed-pointer meaning into presentation events and add deterministic forced-capture and
-   graphics-reset coverage;
-2. implement trustworthy DirectComposition device/backend recovery or explicit fallback;
-3. add a deterministic DirectComposition output-removal/fallback probe where practical;
-4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
-5. expose native presentation as a persisted setting only after the portrait path has event,
+1. implement trustworthy DirectComposition device/backend recovery or explicit fallback;
+2. add a deterministic DirectComposition output-removal/fallback probe where practical;
+3. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
+4. expose native presentation as a persisted setting only after the portrait path has event,
    output, cadence, and recovery parity;
-6. owner-confirm the SDL fallback still launches, routes clicks and `F1`/right-click settings,
+5. owner-confirm the SDL fallback still launches, routes clicks and `F1`/right-click settings,
    publishes correct mixed-DPI/output/placement state, and resumes cadence cleanly after its known
    modal drag;
-7. make DirectComposition the normal Windows selection only with an explicit, trustworthy fallback
+6. make DirectComposition the normal Windows selection only with an explicit, trustworthy fallback
    to `sdl_window_legacy`;
-8. add source-instance identity and source/adapter status controls without moving ownership into the
+7. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
-9. expand the truthful minimum operational vocabulary required by alpha;
-10. tune Expression Director targets and continuity thresholds from real performance traces;
-11. add explicit shared-character performance ownership for concurrent bubbles;
-12. make session retirement policy configurable;
-13. restore versioned presentation and session continuity across restart;
-14. define and measure the idle resource budget, then complete an owner-controlled workday soak;
-15. begin public-V1 character-package discovery only after the daily-driver alpha gate closes.
+8. expand the truthful minimum operational vocabulary required by alpha;
+9. tune Expression Director targets and continuity thresholds from real performance traces;
+10. add explicit shared-character performance ownership for concurrent bubbles;
+11. make session retirement policy configurable;
+12. restore versioned presentation and session continuity across restart;
+13. define and measure the idle resource budget, then complete an owner-controlled workday soak;
+14. begin public-V1 character-package discovery only after the daily-driver alpha gate closes.
 
 ## Deferred by the active roadmap
 
