@@ -32,6 +32,26 @@ transparent desktop presentation + native hit testing
 
 This is the current implementation. Its presentation boundary is real, but the legacy path still
 retains transitional SDL renderer aliases and the native path currently supports only portraits.
+The approved EPR workstream inserts a renderer-neutral control boundary without changing source,
+session, scene, or presentation ownership:
+
+```text
+accepted operational + semantic evidence
+                    ↓
+EPR Performance Intent
+                    ↓
+versioned behavior plan + temporal dispatch + explicit body-resource grants
+                    ↓
+modality Realization Programs + transactional canonical control
+                    ↓
+body capability projection
+                    ↓
+selected body renderer
+```
+
+See the [EPR overview](design/epr-overview.md). A2 remains the owner of eventual stable
+`(source_id, session_id)` truth; EPR consumes that truth through one ingress adapter.
+
 The completed target separates every body/content renderer from platform-native surface
 presentation:
 
@@ -90,6 +110,12 @@ snapshots and prepared expression tracks.
 - `model`: GLB resources, hierarchy evaluation, D3D11 drawing, and GPU skinning;
 - `motion`, `humanoid`, `pose`, `pose_solver`, `ik`: semantic procedural motion and constrained pose
   solving;
+- `performance_runtime`, `behavior_plan`, `body_resources`, `realization`, `canonical_control`:
+  approved EPR boundaries for immutable intent, plan generations, temporal commitment, explicit
+  grants, modality programs, and whole-state control transactions;
+- `vrm_body`: VRM 1.0 metadata validation, body-profile/capability publication, and model-local
+  projection; it does not render or select behavior;
+- `performance_trace`: bounded typed causal records; it observes decisions without owning them;
 - `draw`: transparent SDL composition, dialogue rendering, snapshots, and hit-mask invalidation;
 - `text_renderer`: SDL_ttf faces, fallback selection, and reusable cached text objects;
 - `settings_ui`: a separate SDL/Dear ImGui window; it displays controls but does not own settings;

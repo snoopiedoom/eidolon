@@ -7,15 +7,15 @@ produce slow, inspectable behavior intent; a character-specific controller turns
 pose goals, constrained movement, and secondary physical response.
 
 ```text
-language/session state
+accepted Performance Intent
         ↓
-behavior intent, 1–5 Hz
+versioned behavior plan + temporal dispatch
         ↓
-procedural pose goals
+explicit body-resource grants + modality Realization Programs
         ↓
-IK + joint limits, 60 Hz target
+canonical composition + transactional IK/joint limits, fixed control ticks
         ↓
-secondary physics, 60 Hz target
+VRM/body capability projection
         ↓
 bone matrices → GPU skinning
         ↓
@@ -39,6 +39,10 @@ one, without imposing that rate on presentation.
 
 **Behavior intent** contains affect, engagement, attention, intensity, and movement quality. It does
 not address joints.
+
+The [EPR contracts](epr-overview.md) now own semantic behavior selection, timing, interruption, and
+resource conflicts. Modality realizers retain bounded motor integration and produce model-neutral
+programs; renderers consume complete projected control rather than selecting motifs themselves.
 
 **Motifs** describe stance, arm posture, spine attitude, gaze, and timing. A motif is not an emotion:
 crossed arms may mean confrontation, concentration, or self-comfort; hands behind the back may mean
@@ -100,7 +104,7 @@ authoring format.
 4. add planted-foot stance and lower-body IK;
 5. add eye-first/head-follow attention and stochastic blinking;
 6. add bounded hair, clothing, accessory, and body secondary springs;
-7. connect language/session intent to motif weights.
+7. connect accepted EPR intent and explicit grants to motif weights.
 
 ## Acceptance criteria
 

@@ -1,13 +1,13 @@
 # Eidolon Performance Runtime architecture-reconciliation blueprint
 
-Status: proposed; owner approval required before production implementation
+Status: approved by the product owner on 2026-07-24; Phase 2 authorized
 Baseline: A1-complete commit `6a5ac9288b342e850a120b3eb179403cf6389292`
-Workstream: `epr/vrm-v1` in `C:\dev\eidolon-epr`
+Workstream: `epr/vrm-v1` in the dedicated local EPR worktree
 Scope: architecture reconciliation and the first SDL 3D / VRM 1.0 vertical slice
 
 This document reconciles the proposed EPR thesis, research corpus, and schema against the
-A1-complete repository. It is an approval artifact, not an implementation specification frozen for
-all future EPR work. No production implementation is authorized by this document alone.
+A1-complete repository. It is an approved decision artifact, not an implementation specification
+frozen for all future EPR work. The canonical contracts linked below own production behavior.
 
 The central conclusion is narrower than the thesis: EPR needs two hard runtime cores in its first
 slice:
@@ -755,6 +755,6 @@ the gesture catalogue. Those remain later gates in the stated trajectory.
 
 ## Approval gate
 
-Production work stops here. Owner approval may accept this blueprint as written or request specific
-changes. Approval authorizes Phase 2 documentation and the first SDL 3D / VRM vertical slice; it
-does not authorize pushing, merging, native DirectComposition 3D, or making 3D the default.
+The owner approved this blueprint on 2026-07-24. That approval authorizes Phase 2 documentation and
+the first SDL 3D / VRM vertical slice. It does not authorize pushing, merging, native
+DirectComposition 3D, or making 3D the default.

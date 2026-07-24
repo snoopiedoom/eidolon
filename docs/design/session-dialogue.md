@@ -99,7 +99,9 @@ frame. Ownership must be explicit and deterministic:
 5. ownership remains until another explicit claim or the owner retires.
 
 Iteration order through registry entries must never decide the visible face. This arbitration is a
-required follow-up to the first multi-session implementation.
+required follow-up to the first multi-session implementation. The EPR boundary represents the
+winner as an explicit performance-subject lease in Performance Intent. A2/session ownership assigns
+or transfers that lease; EPR validates it but does not invent source/session priority.
 
 ## Interaction
 

@@ -98,6 +98,16 @@ make model-mouth-calibrate BLENDER=C:/Blender/blender.exe
 
 Audit output and previews live under `build/model-audit`.
 
+### VRM 1.0 runtime bodies
+
+EPR's first rigged-body ecosystem is VRM 1.0. A VRM body must carry authoritative `VRMC_vrm`
+humanoid metadata and license information. The runtime validates humanoid roles and publishes a
+body-neutral capability profile; it does not infer VRM conformance from exported node names.
+
+Large third-party VRM files remain local and uncommitted. A distributable character package must
+carry compatible rights metadata before it can ship. See the
+[VRM body runtime contract](design/vrm-body-runtime.md).
+
 ## Project-specific: Rio authoring and repair
 
 The canonical body source is `CH0331_Mesh.fbx`: five meshes, 10,842 vertices, and a 127-bone body

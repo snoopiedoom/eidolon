@@ -41,6 +41,18 @@ A separate **delivery track** represents how the same text is spoken. It contain
 source-offset marks for phrases, cadence, contrast, hesitation, punctuation accents, questions,
 exclamations, and landings. Delivery does not create faces and never waits for inference.
 
+## EPR boundary
+
+Expression and delivery tracks remain evidence owners. For EPR they publish body-neutral stable
+beat and reveal anchors through the [Performance Intent contract](epr-performance-intent.md).
+Classifier labels, portrait face indexes, request queues, and reveal ownership do not cross into
+EPR. EPR owns later behavior selection, temporal commitment, body-resource grants, interruption,
+and canonical body control.
+
+The existing portrait director remains supported while this boundary lands. Shared-character
+ownership is an explicit performance-subject lease; registry iteration order may not choose which
+session moves the body.
+
 ## Compilation
 
 The director segments source text at explicit lines, sentence punctuation, contrast pivots, and a
@@ -140,5 +152,5 @@ elapsed time, and actual portrait change. Release logs omit message previews.
 
 - per-model expression annotation and automatic portrait-label assistance;
 - character-specific affect targets without coupling them to the classifier;
-- deterministic shared-character performance arbitration when several session bubbles reveal at
-  once.
+- product policy for assigning the explicit EPR performance-subject lease when several session
+  bubbles reveal at once.

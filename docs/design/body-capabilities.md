@@ -98,6 +98,10 @@ body geometry + visible bounds + click regions
 Body geometry returns to composition and bubble layout. This feedback is geometric only; the body
 cannot acquire session ownership through it.
 
+The first concrete rigged-body projection is the [VRM 1.0 body runtime](vrm-body-runtime.md).
+EPR consumes its normalized profile and optional capabilities; it never branches on VRM fields or
+model node names.
+
 ## Selection and degradation
 
 - a character package selects its intended default body variant;
