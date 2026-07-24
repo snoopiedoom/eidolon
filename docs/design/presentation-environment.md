@@ -134,6 +134,7 @@ The exact C names may change, but the fixed-size active-host value is equivalent
 ```c
 typedef struct EidolonPresentationEnvironment {
     uint64_t revision;
+    uint64_t topology_revision;
     EidolonPresentationHost host;
     EidolonPresentationOutput active_output;
 
@@ -146,6 +147,7 @@ typedef struct EidolonPresentationEnvironment {
     float pixel_scale;
     float nominal_refresh_hz;
     EidolonPresentationOrientation orientation;
+    EidolonPresentationCoordinateSpace coordinate_space;
 
     uint64_t capabilities;
     uint64_t valid_fields;
@@ -153,9 +155,11 @@ typedef struct EidolonPresentationEnvironment {
 } EidolonPresentationEnvironment;
 ```
 
-The value contains copied ids and scalars only. Rectangles and insets are expressed in their
-declared coordinate spaces. Unsupported information is absent through `valid_fields`; zero never
-pretends that an unsupported coordinate or refresh value is real.
+The value contains copied ids and scalars only. `coordinate_space` declares the shared space used by
+host geometry and advertised bounds. `topology_revision` lets an otherwise unchanged active-host
+snapshot announce that the complete output set changed. Unsupported information is absent through
+`valid_fields`; zero never pretends that an unsupported coordinate, topology, or refresh value is
+real.
 
 An environment notification carries the complete value:
 
@@ -184,6 +188,10 @@ presentation_copy_outputs(EidolonPresentation *presentation,
                           size_t capacity);
 ```
 
+Each output record carries its opaque id, declared coordinate space, optional bounds and output
+properties, capabilities, and portable flags such as `primary`. Native output handles never cross
+the boundary.
+
 If capacity is insufficient or topology changes during the copy, the result reports the required
 count and current revision. The caller may retry outside a native callback. No output array is
 borrowed across the boundary.
@@ -209,6 +217,8 @@ The contract distinguishes:
 - **host logical** — logical coordinates within the presentation host;
 - **output logical** — logical coordinates within the active output;
 - **global logical** — desktop-global logical coordinates only when supported;
+- **global pixel** — desktop-global native pixels when a backend such as Win32 exposes host and
+  monitor geometry in that space;
 - **buffer pixel** — physical target pixels;
 - **safe-area logical** — output- or host-local insets unavailable to ordinary content.
 
@@ -216,10 +226,10 @@ The contract distinguishes:
 `pixel_scale` converts logical target extent into buffer pixels where the backend can report it.
 They may differ on platforms with compositor-side fractional scaling.
 
-Output bounds describe the output's full logical extent. Usable bounds exclude persistent desktop
-reservations such as taskbars, docks, or panels when the platform exposes them. Safe-area insets
-describe transient or device-specific occlusion constraints such as display cutouts and mobile
-system regions.
+Output bounds describe the output's full extent in the declared space. Usable bounds exclude
+persistent desktop reservations such as taskbars, docks, or panels when the platform exposes them.
+Safe-area insets describe transient or device-specific occlusion constraints such as display
+cutouts and mobile system regions.
 
 Orientation is a declared transform, not inferred by swapping width and height. Global coordinates
 are optional. A backend without global placement uses output-local anchors and reports that
@@ -235,7 +245,7 @@ At a backend-defined reconciliation boundary:
 1. collect all currently observable host and output facts;
 2. canonicalize units, optional fields, and opaque ids;
 3. construct one candidate active-host environment;
-4. compare semantic fields with the last published value;
+4. compare semantic fields and the current topology revision with the last published value;
 5. assign a new revision only when observable state changed;
 6. publish the immutable snapshot before exposing its notification;
 7. enqueue or replace the pending `environment.changed` notification;
@@ -244,6 +254,27 @@ At a backend-defined reconciliation boundary:
 The reconciliation boundary may be the end of a native callback batch, a platform configure/done
 boundary, or an explicit backend task. It must not wait for rendering, classification, session
 work, or application acknowledgement.
+
+## Current implementation
+
+The opt-in `win32_dcomp` backend now implements the first complete producer and consumer path:
+
+- Win32 callbacks perform mandatory DPI resizing and otherwise mark environment state dirty;
+- reconciliation enumerates monitors, preserves process-local opaque output ids, and publishes
+  global-pixel host geometry, monitor/work bounds, active output, DPI scale, nominal refresh,
+  orientation, primary-output metadata, capabilities, and topology revision;
+- the common queue replaces an older pending environment publication without reordering lossless
+  activation or movement edges;
+- `EidolonApp` drains the complete presentation batch, applies only the newest environment, then
+  performs one anchor-preserving cadence/layout transaction;
+- native avatar, primary-output, virtual-desktop, and custom bubble bounds no longer query SDL
+  display state piecemeal;
+- Win32 messages wake the owning thread's native message pump; reconciliation occurs when portable
+  presentation work is polled, outside `WndProc`.
+
+The owner confirmed the Win32 cross-monitor environment transaction and bubble-bound behavior.
+Graphics-reset/close/routed-pointer events, SDL-legacy environment parity, and physical
+output-removal proof remain open.
 
 ## Data flow
 
@@ -472,18 +503,19 @@ No backend may rely on unrelated SDL traffic to make its private native queue ob
 
 ## Implementation sequence
 
-1. Add fixed-size environment, validity, change-mask, orientation, and opaque output-id types.
-2. Add latest-environment and caller-owned topology-copy operations to the presentation contract.
-3. Extend the bounded queue with replaceable environment publication while retaining lossless edge
-   ordering.
-4. Add fake-backend tests for revision, publication, coalescing, stale rejection, resync, and
-   topology-copy retry.
-5. Implement Win32 dirty-state collection and one reconciliation function.
-6. Integrate queue readiness with the application wait boundary.
-7. Apply environment revisions transactionally in `EidolonApp`, preserving anchor and reflowing
-   once.
+1. [x] Add fixed-size environment, validity, change-mask, orientation, coordinate-space,
+   topology-revision, and opaque output-id types.
+2. [x] Add latest-environment and caller-owned topology-copy operations.
+3. [x] Extend the bounded queue with replaceable environment publication while retaining lossless
+   edge ordering.
+4. [x] Add fake-backend coverage for validation, coalescing, ordering, and topology-copy retry.
+5. [x] Implement Win32 dirty-state collection and one reconciliation function.
+6. [x] Integrate Win32 native-message readiness with the application wait boundary.
+7. [x] Apply environment revisions transactionally in `EidolonApp`, preserving anchor and
+   reflowing once.
 8. Translate SDL display/window invalidations into equivalent legacy environment publications.
-9. Perform owner-controlled mixed-DPI, refresh, usable-bounds, cross-monitor, and wake checks.
+9. [~] Owner-confirm mixed-DPI, refresh, usable-bounds, cross-monitor, and wake behavior; the
+   ordinary cross-monitor path is accepted, while physical output removal remains unproven.
 10. Implement the same contract for later Wayland/X11, macOS, Android, and iOS backends without
     changing portable product ownership.
 

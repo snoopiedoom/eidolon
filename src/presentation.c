@@ -4,6 +4,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <math.h>
+
 #define EIDOLON_PRESENTATION_BACKEND_NAME_CAPACITY 48U
 #define EIDOLON_PRESENTATION_TARGET_SLOT_COUNT 2U
 
@@ -117,6 +119,112 @@ static void build_scene_commit(EidolonPresentation *presentation, const EidolonS
         committed->alpha_mode = active->alpha_mode;
         committed->has_target = true;
     }
+}
+
+static bool finite_rect(const EidolonPresentationRect *rect) {
+    return isfinite(rect->x) && isfinite(rect->y) && isfinite(rect->width) &&
+           isfinite(rect->height) && rect->width > 0.0F && rect->height > 0.0F;
+}
+
+static bool finite_insets(const EidolonPresentationInsets *insets) {
+    return isfinite(insets->top) && isfinite(insets->right) && isfinite(insets->bottom) &&
+           isfinite(insets->left) && insets->top >= 0.0F && insets->right >= 0.0F &&
+           insets->bottom >= 0.0F && insets->left >= 0.0F;
+}
+
+static bool valid_orientation(EidolonPresentationOrientation orientation) {
+    return orientation > EIDOLON_PRESENTATION_ORIENTATION_UNKNOWN &&
+           orientation <= EIDOLON_PRESENTATION_ORIENTATION_PORTRAIT_FLIPPED;
+}
+
+static bool valid_optional_environment_fields(uint64_t valid_fields,
+                                              const EidolonPresentationRect *output_bounds,
+                                              const EidolonPresentationRect *usable_bounds,
+                                              const EidolonPresentationInsets *safe_area,
+                                              float content_scale, float pixel_scale,
+                                              float nominal_refresh_hz,
+                                              EidolonPresentationOrientation orientation,
+                                              EidolonPresentationCoordinateSpace coordinate_space) {
+    const uint64_t geometry_fields =
+        EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY | EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+        EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS | EIDOLON_PRESENTATION_ENV_SAFE_AREA;
+    if ((valid_fields & ~EIDOLON_PRESENTATION_ENV_ALL_FIELDS) != 0U) {
+        return false;
+    }
+    if ((valid_fields & geometry_fields) != 0U &&
+        (valid_fields & EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE) == 0U) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE) != 0U &&
+        (coordinate_space <= EIDOLON_PRESENTATION_COORDINATE_SPACE_UNKNOWN ||
+         coordinate_space > EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS) != 0U &&
+        !finite_rect(output_bounds)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) != 0U &&
+        !finite_rect(usable_bounds)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_SAFE_AREA) != 0U && !finite_insets(safe_area)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) != 0U &&
+        (!isfinite(content_scale) || content_scale <= 0.0F)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_PIXEL_SCALE) != 0U &&
+        (!isfinite(pixel_scale) || pixel_scale <= 0.0F)) {
+        return false;
+    }
+    if ((valid_fields & EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) != 0U &&
+        (!isfinite(nominal_refresh_hz) || nominal_refresh_hz <= 0.0F)) {
+        return false;
+    }
+    return (valid_fields & EIDOLON_PRESENTATION_ENV_ORIENTATION) == 0U ||
+           valid_orientation(orientation);
+}
+
+static bool valid_environment(const EidolonPresentation *presentation,
+                              const EidolonPresentationEnvironment *environment) {
+    return environment->revision > 0U && environment->host.value == presentation->host.value &&
+           (environment->valid_fields & EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY) != 0U &&
+           environment->host_geometry.width > 0 && environment->host_geometry.height > 0 &&
+           ((environment->valid_fields & EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT) != 0U) ==
+               (environment->active_output.value != 0U) &&
+           ((environment->valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY) != 0U) ==
+               (environment->topology_revision != 0U) &&
+           (environment->changed_fields & ~EIDOLON_PRESENTATION_ENV_ALL_FIELDS) == 0U &&
+           valid_optional_environment_fields(
+               environment->valid_fields, &environment->output_bounds, &environment->usable_bounds,
+               &environment->safe_area, environment->content_scale, environment->pixel_scale,
+               environment->nominal_refresh_hz, environment->orientation,
+               environment->coordinate_space);
+}
+
+static bool valid_output_info(const EidolonPresentationOutputInfo *output) {
+    const uint64_t allowed_fields =
+        EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS | EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
+        EIDOLON_PRESENTATION_ENV_SAFE_AREA | EIDOLON_PRESENTATION_ENV_CONTENT_SCALE |
+        EIDOLON_PRESENTATION_ENV_PIXEL_SCALE | EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH |
+        EIDOLON_PRESENTATION_ENV_ORIENTATION | EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE;
+    return output->output.value != 0U &&
+           (output->flags & ~(uint64_t)EIDOLON_PRESENTATION_OUTPUT_PRIMARY) == 0U &&
+           (output->valid_fields & ~allowed_fields) == 0U &&
+           valid_optional_environment_fields(output->valid_fields, &output->bounds,
+                                             &output->usable_bounds, &output->safe_area,
+                                             output->content_scale, output->pixel_scale,
+                                             output->nominal_refresh_hz, output->orientation,
+                                             output->coordinate_space);
+}
+
+static EidolonPresentationTopologyResult topology_error(const char *message) {
+    SDL_SetError("%s", message);
+    return (EidolonPresentationTopologyResult){
+        .status = EIDOLON_PRESENTATION_TOPOLOGY_ERROR,
+    };
 }
 
 EidolonPresentation *
@@ -242,8 +350,96 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
         SDL_SetError("invalid presentation event");
         return false;
     }
+    switch (next.kind) {
+    case EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED:
+        if (next.data.layer.layer.value == 0U) {
+            SDL_SetError("invalid presentation layer event");
+            return false;
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
+    case EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED:
+    case EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED:
+        if (next.data.move.layer.value == 0U) {
+            SDL_SetError("invalid presentation move event");
+            return false;
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED:
+        if (!valid_environment(presentation, &next.data.environment.environment)) {
+            SDL_SetError("invalid presentation environment event");
+            return false;
+        }
+        break;
+    case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
+    case EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED:
+    case EIDOLON_PRESENTATION_EVENT_NONE:
+        break;
+    }
     *event = next;
     return true;
+}
+
+bool eidolon_presentation_get_environment(EidolonPresentation *presentation,
+                                          EidolonPresentationEnvironment *environment) {
+    if (presentation == NULL || environment == NULL ||
+        presentation->operations.get_environment == NULL) {
+        return false;
+    }
+    EidolonPresentationEnvironment current;
+    SDL_zero(current);
+    if (!presentation->operations.get_environment(presentation->context, &current)) {
+        return false;
+    }
+    if (!valid_environment(presentation, &current)) {
+        SDL_SetError("invalid presentation environment");
+        return false;
+    }
+    *environment = current;
+    return true;
+}
+
+EidolonPresentationTopologyResult
+eidolon_presentation_copy_outputs(EidolonPresentation *presentation,
+                                  EidolonPresentationOutputInfo *outputs, size_t capacity) {
+    if (presentation == NULL || (capacity > 0U && outputs == NULL)) {
+        return topology_error("invalid presentation topology destination");
+    }
+    if (presentation->operations.copy_outputs == NULL) {
+        return (EidolonPresentationTopologyResult){
+            .status = EIDOLON_PRESENTATION_TOPOLOGY_UNAVAILABLE,
+        };
+    }
+    EidolonPresentationTopologyResult result =
+        presentation->operations.copy_outputs(presentation->context, outputs, capacity);
+    if (result.status < EIDOLON_PRESENTATION_TOPOLOGY_OK ||
+        result.status > EIDOLON_PRESENTATION_TOPOLOGY_ERROR || result.copied_count > capacity ||
+        result.required_count < result.copied_count) {
+        return topology_error("invalid presentation topology result");
+    }
+    if (result.status == EIDOLON_PRESENTATION_TOPOLOGY_UNAVAILABLE ||
+        result.status == EIDOLON_PRESENTATION_TOPOLOGY_ERROR) {
+        return result;
+    }
+    if (result.revision == 0U ||
+        (result.status == EIDOLON_PRESENTATION_TOPOLOGY_OK &&
+         result.required_count != result.copied_count) ||
+        (result.status == EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY &&
+         result.required_count <= capacity) ||
+        (result.status == EIDOLON_PRESENTATION_TOPOLOGY_CHANGED && result.copied_count != 0U)) {
+        return topology_error("incoherent presentation topology result");
+    }
+    for (size_t index = 0U; index < result.copied_count; ++index) {
+        if (!valid_output_info(&outputs[index])) {
+            return topology_error("invalid presentation output");
+        }
+        for (size_t previous = 0U; previous < index; ++previous) {
+            if (outputs[previous].output.value == outputs[index].output.value) {
+                return topology_error("duplicate presentation output");
+            }
+        }
+    }
+    return result;
 }
 
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,

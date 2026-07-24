@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 
 #include "platform/windows_dcomp.h"
 #include "presentation_event_queue.h"
@@ -11,11 +12,14 @@
 #include <dxgi1_2.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -23,6 +27,13 @@ constexpr wchar_t kWindowClass[] = L"EidolonDirectCompositionHost";
 constexpr size_t kTargetCapacity = EIDOLON_SCENE_LAYER_CAPACITY * 2U;
 constexpr float kPi = 3.14159265358979323846F;
 constexpr LONG kActivationDragThreshold = 4L;
+constexpr uint64_t kCapabilities =
+    EIDOLON_PRESENTATION_CAP_PERSISTENT_OVER_OTHER_APPS |
+    EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT | EIDOLON_PRESENTATION_CAP_MULTIPLE_OUTPUTS |
+    EIDOLON_PRESENTATION_CAP_COMPOSITOR_TRANSFORM |
+    EIDOLON_PRESENTATION_CAP_COMPOSITOR_OPACITY | EIDOLON_PRESENTATION_CAP_GPU_ZERO_COPY |
+    EIDOLON_PRESENTATION_CAP_BACKGROUND_VISIBILITY | EIDOLON_PRESENTATION_CAP_PER_PIXEL_INPUT |
+    EIDOLON_PRESENTATION_CAP_NATIVE_INTERACTIVE_MOVE;
 
 struct DcompTarget {
     EidolonSceneLayerId layer = {};
@@ -55,6 +66,11 @@ struct HitTestResult {
     float layer_y = 0.0F;
 };
 
+struct Win32OutputRecord {
+    HMONITOR monitor = nullptr;
+    EidolonPresentationOutputInfo info = {};
+};
+
 struct Win32DcompPresentation {
     HWND window = nullptr;
     HINSTANCE instance = nullptr;
@@ -69,6 +85,10 @@ struct Win32DcompPresentation {
     DcompTarget targets[kTargetCapacity] = {};
     DcompTarget *input_order[kTargetCapacity] = {};
     EidolonPresentationEventQueue event_queue = {};
+    std::vector<Win32OutputRecord> outputs;
+    EidolonPresentationEnvironment environment = {};
+    uint64_t topology_revision = 0U;
+    uint32_t next_output_id = 1U;
     size_t input_count = 0U;
     POINT drag_cursor_origin = {};
     POINT drag_window_origin = {};
@@ -80,6 +100,8 @@ struct Win32DcompPresentation {
     bool input_suspended = false;
     bool dragging = false;
     bool activation_pending = false;
+    bool environment_valid = false;
+    bool environment_dirty = true;
 };
 
 template <typename Interface> void release(Interface *&object) {
@@ -158,10 +180,26 @@ bool enqueue_event(Win32DcompPresentation *backend, EidolonPresentationEventKind
     if (backend == nullptr || kind == EIDOLON_PRESENTATION_EVENT_NONE) {
         return false;
     }
-    const EidolonPresentationEvent event = {
-        kind,   0U,     SDL_GetTicksNS(), scene_revision, {1U}, layer, current_geometry(backend),
-        host_x, host_y, layer_x,          layer_y,
-    };
+    EidolonPresentationEvent event = {};
+    event.kind = kind;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host = {1U};
+    if (kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED) {
+        event.data.layer = {
+            scene_revision, layer, host_x, host_y, layer_x, layer_y,
+        };
+    } else {
+        event.data.move = {
+            scene_revision,
+            backend->environment_valid ? backend->environment.revision : 0U,
+            layer,
+            current_geometry(backend),
+            host_x,
+            host_y,
+            layer_x,
+            layer_y,
+        };
+    }
     return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
@@ -259,6 +297,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
             const EidolonSceneLayerId layer = backend->interaction_layer;
             const uint64_t scene_revision = backend->interaction_scene_revision;
             stop_drag(backend, true);
+            backend->environment_dirty = true;
             (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED, layer,
                                 scene_revision, host_x, host_y, 0.0F, 0.0F);
             backend->interaction_layer = {};
@@ -292,6 +331,30 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         return 0;
     }
+    case WM_DPICHANGED:
+        if (backend != nullptr) {
+            const auto *suggested = reinterpret_cast<const RECT *>(lparam);
+            if (suggested != nullptr) {
+                (void)SetWindowPos(window, HWND_TOPMOST, suggested->left, suggested->top,
+                                   suggested->right - suggested->left,
+                                   suggested->bottom - suggested->top,
+                                   SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            }
+            backend->environment_dirty = true;
+        }
+        return 0;
+    case WM_DISPLAYCHANGE:
+    case WM_SETTINGCHANGE:
+    case WM_DEVICECHANGE:
+        if (backend != nullptr) {
+            backend->environment_dirty = true;
+        }
+        return DefWindowProcW(window, message, wparam, lparam);
+    case WM_WINDOWPOSCHANGED:
+        if (backend != nullptr && !backend->dragging) {
+            backend->environment_dirty = true;
+        }
+        return DefWindowProcW(window, message, wparam, lparam);
     case WM_CAPTURECHANGED:
         if (backend != nullptr && backend->dragging) {
             const EidolonSceneLayerId layer = backend->interaction_layer;
@@ -422,6 +485,7 @@ bool set_geometry(void *opaque, const EidolonPresentationGeometry *geometry) {
         SDL_SetError("SetWindowPos failed: %lu", static_cast<unsigned long>(GetLastError()));
         return false;
     }
+    backend->environment_dirty = true;
     return true;
 }
 
@@ -477,9 +541,367 @@ bool update_input_region(void *opaque) {
     return true;
 }
 
+EidolonPresentationRect portable_rect(const RECT &rect) {
+    return {
+        static_cast<float>(rect.left),
+        static_cast<float>(rect.top),
+        static_cast<float>(rect.right - rect.left),
+        static_cast<float>(rect.bottom - rect.top),
+    };
+}
+
+EidolonPresentationOrientation portable_orientation(DWORD orientation) {
+    switch (orientation) {
+    case DMDO_DEFAULT:
+        return EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE;
+    case DMDO_90:
+        return EIDOLON_PRESENTATION_ORIENTATION_PORTRAIT;
+    case DMDO_180:
+        return EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE_FLIPPED;
+    case DMDO_270:
+        return EIDOLON_PRESENTATION_ORIENTATION_PORTRAIT_FLIPPED;
+    default:
+        return EIDOLON_PRESENTATION_ORIENTATION_UNKNOWN;
+    }
+}
+
+uint32_t existing_output_id(const Win32DcompPresentation *backend, HMONITOR monitor) {
+    for (const Win32OutputRecord &record : backend->outputs) {
+        if (record.monitor == monitor) {
+            return record.info.output.value;
+        }
+    }
+    return 0U;
+}
+
+struct OutputEnumeration {
+    Win32DcompPresentation *backend = nullptr;
+    std::vector<Win32OutputRecord> records;
+    bool failed = false;
+};
+
+BOOL CALLBACK enumerate_output(HMONITOR monitor, HDC, LPRECT, LPARAM opaque) {
+    auto *enumeration = reinterpret_cast<OutputEnumeration *>(opaque);
+    MONITORINFOEXW native_info = {};
+    native_info.cbSize = sizeof(native_info);
+    if (!GetMonitorInfoW(monitor, &native_info)) {
+        enumeration->failed = true;
+        return FALSE;
+    }
+
+    uint32_t output_id = existing_output_id(enumeration->backend, monitor);
+    if (output_id == 0U) {
+        output_id = enumeration->backend->next_output_id++;
+        if (output_id == 0U) {
+            enumeration->failed = true;
+            return FALSE;
+        }
+    }
+
+    Win32OutputRecord record = {};
+    record.monitor = monitor;
+    record.info.output = {output_id};
+    record.info.bounds = portable_rect(native_info.rcMonitor);
+    record.info.usable_bounds = portable_rect(native_info.rcWork);
+    record.info.coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL;
+    record.info.capabilities = kCapabilities;
+    record.info.flags = (native_info.dwFlags & MONITORINFOF_PRIMARY) != 0U
+                            ? EIDOLON_PRESENTATION_OUTPUT_PRIMARY
+                            : 0U;
+    record.info.valid_fields =
+        EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS | EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
+        EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE;
+
+    DEVMODEW mode = {};
+    mode.dmSize = sizeof(mode);
+    if (EnumDisplaySettingsW(native_info.szDevice, ENUM_CURRENT_SETTINGS, &mode)) {
+        if ((mode.dmFields & DM_DISPLAYFREQUENCY) != 0U && mode.dmDisplayFrequency > 1U) {
+            record.info.nominal_refresh_hz = static_cast<float>(mode.dmDisplayFrequency);
+            record.info.valid_fields |= EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH;
+        }
+        if ((mode.dmFields & DM_DISPLAYORIENTATION) != 0U) {
+            const EidolonPresentationOrientation orientation =
+                portable_orientation(mode.dmDisplayOrientation);
+            if (orientation != EIDOLON_PRESENTATION_ORIENTATION_UNKNOWN) {
+                record.info.orientation = orientation;
+                record.info.valid_fields |= EIDOLON_PRESENTATION_ENV_ORIENTATION;
+            }
+        }
+    }
+
+    try {
+        enumeration->records.push_back(record);
+    } catch (...) {
+        enumeration->failed = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+bool same_rect(const EidolonPresentationRect &left, const EidolonPresentationRect &right) {
+    return left.x == right.x && left.y == right.y && left.width == right.width &&
+           left.height == right.height;
+}
+
+bool same_insets(const EidolonPresentationInsets &left, const EidolonPresentationInsets &right) {
+    return left.top == right.top && left.right == right.right && left.bottom == right.bottom &&
+           left.left == right.left;
+}
+
+bool same_output(const Win32OutputRecord &left, const Win32OutputRecord &right) {
+    const EidolonPresentationOutputInfo &a = left.info;
+    const EidolonPresentationOutputInfo &b = right.info;
+    return left.monitor == right.monitor && a.output.value == b.output.value &&
+           same_rect(a.bounds, b.bounds) && same_rect(a.usable_bounds, b.usable_bounds) &&
+           same_insets(a.safe_area, b.safe_area) && a.content_scale == b.content_scale &&
+           a.pixel_scale == b.pixel_scale && a.nominal_refresh_hz == b.nominal_refresh_hz &&
+           a.orientation == b.orientation && a.coordinate_space == b.coordinate_space &&
+           a.capabilities == b.capabilities && a.flags == b.flags &&
+           a.valid_fields == b.valid_fields;
+}
+
+bool same_topology(const std::vector<Win32OutputRecord> &left,
+                   const std::vector<Win32OutputRecord> &right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (size_t index = 0U; index < left.size(); ++index) {
+        if (!same_output(left[index], right[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool field_presence_changed(const EidolonPresentationEnvironment &previous,
+                            const EidolonPresentationEnvironment &candidate, uint64_t field) {
+    return ((previous.valid_fields ^ candidate.valid_fields) & field) != 0U;
+}
+
+uint64_t environment_changes(const EidolonPresentationEnvironment &previous,
+                             const EidolonPresentationEnvironment &candidate) {
+    uint64_t changed = previous.valid_fields ^ candidate.valid_fields;
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY) != 0U &&
+        (previous.host_geometry.x != candidate.host_geometry.x ||
+         previous.host_geometry.y != candidate.host_geometry.y ||
+         previous.host_geometry.width != candidate.host_geometry.width ||
+         previous.host_geometry.height != candidate.host_geometry.height)) {
+        changed |= EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT) != 0U &&
+        previous.active_output.value != candidate.active_output.value) {
+        changed |= EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS) != 0U &&
+        !same_rect(previous.output_bounds, candidate.output_bounds)) {
+        changed |= EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) != 0U &&
+        !same_rect(previous.usable_bounds, candidate.usable_bounds)) {
+        changed |= EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_SAFE_AREA) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_SAFE_AREA) != 0U &&
+        !same_insets(previous.safe_area, candidate.safe_area)) {
+        changed |= EIDOLON_PRESENTATION_ENV_SAFE_AREA;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) != 0U &&
+        previous.content_scale != candidate.content_scale) {
+        changed |= EIDOLON_PRESENTATION_ENV_CONTENT_SCALE;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_PIXEL_SCALE) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_PIXEL_SCALE) != 0U &&
+        previous.pixel_scale != candidate.pixel_scale) {
+        changed |= EIDOLON_PRESENTATION_ENV_PIXEL_SCALE;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) != 0U &&
+        previous.nominal_refresh_hz != candidate.nominal_refresh_hz) {
+        changed |= EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_ORIENTATION) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_ORIENTATION) != 0U &&
+        previous.orientation != candidate.orientation) {
+        changed |= EIDOLON_PRESENTATION_ENV_ORIENTATION;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE) != 0U &&
+        previous.coordinate_space != candidate.coordinate_space) {
+        changed |= EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY) != 0U &&
+        previous.topology_revision != candidate.topology_revision) {
+        changed |= EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY;
+    }
+    if (!field_presence_changed(previous, candidate, EIDOLON_PRESENTATION_ENV_CAPABILITIES) &&
+        (candidate.valid_fields & EIDOLON_PRESENTATION_ENV_CAPABILITIES) != 0U &&
+        previous.capabilities != candidate.capabilities) {
+        changed |= EIDOLON_PRESENTATION_ENV_CAPABILITIES;
+    }
+    return changed;
+}
+
+bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) {
+    if (backend == nullptr || (!backend->environment_dirty && backend->environment_valid)) {
+        return backend != nullptr;
+    }
+
+    OutputEnumeration enumeration;
+    enumeration.backend = backend;
+    try {
+        enumeration.records.reserve(backend->outputs.size() + 2U);
+    } catch (...) {
+        SDL_SetError("could not reserve DirectComposition output topology");
+        return false;
+    }
+    const BOOL enumerated =
+        EnumDisplayMonitors(nullptr, nullptr, enumerate_output,
+                            reinterpret_cast<LPARAM>(&enumeration));
+    if (!enumerated || enumeration.failed || enumeration.records.empty()) {
+        SDL_SetError("could not enumerate DirectComposition outputs");
+        return false;
+    }
+    std::sort(enumeration.records.begin(), enumeration.records.end(),
+              [](const Win32OutputRecord &left, const Win32OutputRecord &right) {
+                  return left.info.output.value < right.info.output.value;
+              });
+
+    const bool topology_changed = !same_topology(backend->outputs, enumeration.records);
+    if (topology_changed) {
+        if (backend->topology_revision == UINT64_MAX) {
+            SDL_SetError("DirectComposition topology revision exhausted");
+            return false;
+        }
+        ++backend->topology_revision;
+    }
+    backend->outputs = std::move(enumeration.records);
+
+    RECT host_rect = {};
+    if (!GetWindowRect(backend->window, &host_rect)) {
+        SDL_SetError("GetWindowRect failed: %lu", static_cast<unsigned long>(GetLastError()));
+        return false;
+    }
+
+    EidolonPresentationEnvironment candidate = {};
+    candidate.host = {1U};
+    candidate.topology_revision = backend->topology_revision;
+    candidate.host_geometry = {
+        host_rect.left,
+        host_rect.top,
+        host_rect.right - host_rect.left,
+        host_rect.bottom - host_rect.top,
+    };
+    candidate.coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL;
+    candidate.capabilities = kCapabilities;
+    candidate.valid_fields =
+        EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY |
+        EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE |
+        EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY |
+        EIDOLON_PRESENTATION_ENV_CAPABILITIES;
+
+    const HMONITOR active_monitor =
+        MonitorFromWindow(backend->window, MONITOR_DEFAULTTONEAREST);
+    for (const Win32OutputRecord &record : backend->outputs) {
+        if (record.monitor != active_monitor) {
+            continue;
+        }
+        candidate.active_output = record.info.output;
+        candidate.output_bounds = record.info.bounds;
+        candidate.usable_bounds = record.info.usable_bounds;
+        candidate.nominal_refresh_hz = record.info.nominal_refresh_hz;
+        candidate.orientation = record.info.orientation;
+        candidate.valid_fields |=
+            EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
+            EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+            EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS;
+        if ((record.info.valid_fields & EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) != 0U) {
+            candidate.valid_fields |= EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH;
+        }
+        if ((record.info.valid_fields & EIDOLON_PRESENTATION_ENV_ORIENTATION) != 0U) {
+            candidate.valid_fields |= EIDOLON_PRESENTATION_ENV_ORIENTATION;
+        }
+        break;
+    }
+
+    const UINT dpi = GetDpiForWindow(backend->window);
+    if (dpi != 0U) {
+        candidate.content_scale = static_cast<float>(dpi) / 96.0F;
+        candidate.pixel_scale = candidate.content_scale;
+        candidate.valid_fields |=
+            EIDOLON_PRESENTATION_ENV_CONTENT_SCALE | EIDOLON_PRESENTATION_ENV_PIXEL_SCALE;
+    }
+
+    const uint64_t changed =
+        backend->environment_valid ? environment_changes(backend->environment, candidate)
+                                   : candidate.valid_fields;
+    if (!backend->environment_valid || changed != 0U) {
+        if (backend->environment_valid && backend->environment.revision == UINT64_MAX) {
+            SDL_SetError("DirectComposition environment revision exhausted");
+            return false;
+        }
+        candidate.revision =
+            backend->environment_valid ? backend->environment.revision + 1U : 1U;
+        candidate.changed_fields = changed;
+        backend->environment = candidate;
+        backend->environment_valid = true;
+        if (publish_event) {
+            EidolonPresentationEvent event = {};
+            event.kind = EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED;
+            event.monotonic_ns = SDL_GetTicksNS();
+            event.host = candidate.host;
+            event.data.environment.environment = candidate;
+            (void)eidolon_presentation_event_queue_push(&backend->event_queue, &event);
+        }
+    }
+    backend->environment_dirty = false;
+    return true;
+}
+
 bool poll_event(void *opaque, EidolonPresentationEvent *event) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    (void)reconcile_environment(backend, true);
     return eidolon_presentation_event_queue_poll(&backend->event_queue, event);
+}
+
+bool get_environment(void *opaque, EidolonPresentationEnvironment *environment) {
+    auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    if (!reconcile_environment(backend, backend->environment_valid)) {
+        return false;
+    }
+    *environment = backend->environment;
+    return true;
+}
+
+EidolonPresentationTopologyResult copy_outputs(void *opaque,
+                                               EidolonPresentationOutputInfo *outputs,
+                                               size_t capacity) {
+    auto *backend = static_cast<Win32DcompPresentation *>(opaque);
+    if (!reconcile_environment(backend, backend->environment_valid)) {
+        return {
+            0U,
+            0U,
+            0U,
+            EIDOLON_PRESENTATION_TOPOLOGY_ERROR,
+        };
+    }
+    const size_t required = backend->outputs.size();
+    const size_t copied = std::min(capacity, required);
+    for (size_t index = 0U; index < copied; ++index) {
+        outputs[index] = backend->outputs[index].info;
+    }
+    return {
+        backend->topology_revision,
+        required,
+        copied,
+        copied < required ? EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY
+                          : EIDOLON_PRESENTATION_TOPOLOGY_OK,
+    };
 }
 
 bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationTarget id,
@@ -731,6 +1153,9 @@ bool initialize_backend(Win32DcompPresentation *backend, const EidolonWin32Dcomp
         SDL_SetError("CreateWindowExW failed: %lu", static_cast<unsigned long>(GetLastError()));
         return false;
     }
+    if (!reconcile_environment(backend, false)) {
+        return false;
+    }
 
     D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
     HRESULT result = D3D11CreateDevice(
@@ -798,16 +1223,11 @@ eidolon_win32_dcomp_presentation_create(const EidolonWin32DcompConfig *config) {
         submit_target,
         commit_scene,
         present,
+        get_environment,
+        copy_outputs,
     };
-    const uint64_t capabilities =
-        EIDOLON_PRESENTATION_CAP_PERSISTENT_OVER_OTHER_APPS |
-        EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT | EIDOLON_PRESENTATION_CAP_MULTIPLE_OUTPUTS |
-        EIDOLON_PRESENTATION_CAP_COMPOSITOR_TRANSFORM |
-        EIDOLON_PRESENTATION_CAP_COMPOSITOR_OPACITY | EIDOLON_PRESENTATION_CAP_GPU_ZERO_COPY |
-        EIDOLON_PRESENTATION_CAP_BACKGROUND_VISIBILITY | EIDOLON_PRESENTATION_CAP_PER_PIXEL_INPUT |
-        EIDOLON_PRESENTATION_CAP_NATIVE_INTERACTIVE_MOVE;
     EidolonPresentation *presentation =
-        eidolon_presentation_create_backend("win32_dcomp", capabilities, backend, &operations);
+        eidolon_presentation_create_backend("win32_dcomp", kCapabilities, backend, &operations);
     if (presentation == nullptr) {
         destroy_backend(backend);
     }

@@ -2,6 +2,7 @@
 #define EIDOLON_PRESENTATION_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "scene.h"
@@ -11,6 +12,10 @@ typedef struct EidolonPresentation EidolonPresentation;
 typedef struct EidolonPresentationHost {
     uint32_t value;
 } EidolonPresentationHost;
+
+typedef struct EidolonPresentationOutput {
+    uint32_t value;
+} EidolonPresentationOutput;
 
 typedef struct EidolonPresentationLayer {
     uint32_t value;
@@ -73,31 +78,152 @@ typedef struct EidolonPresentationGeometry {
     int height;
 } EidolonPresentationGeometry;
 
+typedef struct EidolonPresentationRect {
+    float x;
+    float y;
+    float width;
+    float height;
+} EidolonPresentationRect;
+
+typedef struct EidolonPresentationInsets {
+    float top;
+    float right;
+    float bottom;
+    float left;
+} EidolonPresentationInsets;
+
+typedef enum EidolonPresentationOrientation {
+    EIDOLON_PRESENTATION_ORIENTATION_UNKNOWN,
+    EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE,
+    EIDOLON_PRESENTATION_ORIENTATION_PORTRAIT,
+    EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE_FLIPPED,
+    EIDOLON_PRESENTATION_ORIENTATION_PORTRAIT_FLIPPED,
+} EidolonPresentationOrientation;
+
+typedef enum EidolonPresentationCoordinateSpace {
+    EIDOLON_PRESENTATION_COORDINATE_SPACE_UNKNOWN,
+    EIDOLON_PRESENTATION_COORDINATE_SPACE_OUTPUT_LOGICAL,
+    EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_LOGICAL,
+    EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL,
+} EidolonPresentationCoordinateSpace;
+
+typedef enum EidolonPresentationEnvironmentField {
+    EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY = UINT64_C(1) << 0,
+    EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT = UINT64_C(1) << 1,
+    EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS = UINT64_C(1) << 2,
+    EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS = UINT64_C(1) << 3,
+    EIDOLON_PRESENTATION_ENV_SAFE_AREA = UINT64_C(1) << 4,
+    EIDOLON_PRESENTATION_ENV_CONTENT_SCALE = UINT64_C(1) << 5,
+    EIDOLON_PRESENTATION_ENV_PIXEL_SCALE = UINT64_C(1) << 6,
+    EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH = UINT64_C(1) << 7,
+    EIDOLON_PRESENTATION_ENV_ORIENTATION = UINT64_C(1) << 8,
+    EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE = UINT64_C(1) << 9,
+    EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY = UINT64_C(1) << 10,
+    EIDOLON_PRESENTATION_ENV_CAPABILITIES = UINT64_C(1) << 11,
+} EidolonPresentationEnvironmentField;
+
+#define EIDOLON_PRESENTATION_ENV_ALL_FIELDS ((UINT64_C(1) << 12) - UINT64_C(1))
+
+typedef struct EidolonPresentationEnvironment {
+    uint64_t revision;
+    uint64_t topology_revision;
+    EidolonPresentationHost host;
+    EidolonPresentationOutput active_output;
+    EidolonPresentationGeometry host_geometry;
+    EidolonPresentationRect output_bounds;
+    EidolonPresentationRect usable_bounds;
+    EidolonPresentationInsets safe_area;
+    float content_scale;
+    float pixel_scale;
+    float nominal_refresh_hz;
+    EidolonPresentationOrientation orientation;
+    EidolonPresentationCoordinateSpace coordinate_space;
+    uint64_t capabilities;
+    uint64_t valid_fields;
+    uint64_t changed_fields;
+} EidolonPresentationEnvironment;
+
+typedef enum EidolonPresentationOutputFlag {
+    EIDOLON_PRESENTATION_OUTPUT_PRIMARY = UINT64_C(1) << 0,
+} EidolonPresentationOutputFlag;
+
+typedef struct EidolonPresentationOutputInfo {
+    EidolonPresentationOutput output;
+    EidolonPresentationRect bounds;
+    EidolonPresentationRect usable_bounds;
+    EidolonPresentationInsets safe_area;
+    float content_scale;
+    float pixel_scale;
+    float nominal_refresh_hz;
+    EidolonPresentationOrientation orientation;
+    EidolonPresentationCoordinateSpace coordinate_space;
+    uint64_t capabilities;
+    uint64_t flags;
+    uint64_t valid_fields;
+} EidolonPresentationOutputInfo;
+
+typedef enum EidolonPresentationTopologyStatus {
+    EIDOLON_PRESENTATION_TOPOLOGY_OK,
+    EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY,
+    EIDOLON_PRESENTATION_TOPOLOGY_CHANGED,
+    EIDOLON_PRESENTATION_TOPOLOGY_UNAVAILABLE,
+    EIDOLON_PRESENTATION_TOPOLOGY_ERROR,
+} EidolonPresentationTopologyStatus;
+
+typedef struct EidolonPresentationTopologyResult {
+    uint64_t revision;
+    size_t required_count;
+    size_t copied_count;
+    EidolonPresentationTopologyStatus status;
+} EidolonPresentationTopologyResult;
+
 typedef enum EidolonPresentationEventKind {
     EIDOLON_PRESENTATION_EVENT_NONE,
     EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED,
     EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
     EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED,
     EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED,
-    EIDOLON_PRESENTATION_EVENT_HOST_GEOMETRY_CHANGED,
-    EIDOLON_PRESENTATION_EVENT_OUTPUT_CHANGED,
-    EIDOLON_PRESENTATION_EVENT_OUTPUT_SCALE_CHANGED,
+    EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED,
     EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
     EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED,
 } EidolonPresentationEventKind;
 
-typedef struct EidolonPresentationEvent {
-    EidolonPresentationEventKind kind;
-    uint64_t sequence;
-    uint64_t monotonic_ns;
+typedef struct EidolonPresentationLayerEvent {
     uint64_t scene_revision;
-    EidolonPresentationHost host;
+    EidolonSceneLayerId layer;
+    float host_x;
+    float host_y;
+    float layer_x;
+    float layer_y;
+} EidolonPresentationLayerEvent;
+
+typedef struct EidolonPresentationMoveEvent {
+    uint64_t scene_revision;
+    uint64_t environment_revision;
     EidolonSceneLayerId layer;
     EidolonPresentationGeometry geometry;
     float host_x;
     float host_y;
     float layer_x;
     float layer_y;
+} EidolonPresentationMoveEvent;
+
+typedef struct EidolonPresentationEnvironmentChanged {
+    EidolonPresentationEnvironment environment;
+} EidolonPresentationEnvironmentChanged;
+
+typedef union EidolonPresentationEventData {
+    EidolonPresentationLayerEvent layer;
+    EidolonPresentationMoveEvent move;
+    EidolonPresentationEnvironmentChanged environment;
+} EidolonPresentationEventData;
+
+typedef struct EidolonPresentationEvent {
+    EidolonPresentationEventKind kind;
+    uint64_t sequence;
+    uint64_t monotonic_ns;
+    EidolonPresentationHost host;
+    EidolonPresentationEventData data;
 } EidolonPresentationEvent;
 
 typedef struct EidolonPresentationBackendOps {
@@ -122,6 +248,10 @@ typedef struct EidolonPresentationBackendOps {
     bool (*submit_target)(void *context, EidolonPresentationTarget target, uint64_t generation);
     bool (*commit_scene)(void *context, const EidolonPresentationSceneCommit *commit);
     bool (*present)(void *context);
+    bool (*get_environment)(void *context, EidolonPresentationEnvironment *environment);
+    EidolonPresentationTopologyResult (*copy_outputs)(void *context,
+                                                      EidolonPresentationOutputInfo *outputs,
+                                                      size_t capacity);
 } EidolonPresentationBackendOps;
 
 #ifdef __cplusplus
@@ -152,6 +282,11 @@ void eidolon_presentation_suspend_input_region(EidolonPresentation *presentation
 bool eidolon_presentation_update_input_region(EidolonPresentation *presentation);
 bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
                                      EidolonPresentationEvent *event);
+bool eidolon_presentation_get_environment(EidolonPresentation *presentation,
+                                          EidolonPresentationEnvironment *environment);
+EidolonPresentationTopologyResult
+eidolon_presentation_copy_outputs(EidolonPresentation *presentation,
+                                  EidolonPresentationOutputInfo *outputs, size_t capacity);
 bool eidolon_presentation_begin_target_update(EidolonPresentation *presentation,
                                               EidolonSceneLayerId layer, uint32_t width,
                                               uint32_t height,

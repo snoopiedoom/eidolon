@@ -503,6 +503,15 @@ static void service_expression_director(EidolonApp *app, uint64_t now_ms) {
 }
 
 static uint64_t current_display_interval_ns(const EidolonApp *app) {
+    if (app->presentation_environment_valid &&
+        (app->presentation_environment.valid_fields &
+         EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) != 0U) {
+        return eidolon_frame_interval_ns(
+            0, 0, app->presentation_environment.nominal_refresh_hz);
+    }
+    if (app->window == NULL) {
+        return eidolon_frame_interval_ns(0, 0, 60.0F);
+    }
     EidolonPresentationGeometry geometry;
     SDL_DisplayID display = 0U;
     if (eidolon_presentation_get_geometry(app->presentation, &geometry)) {
@@ -858,6 +867,117 @@ static bool virtual_usable_bounds(SDL_Rect *result) {
     return found;
 }
 
+static bool presentation_rect_to_sdl(const EidolonPresentationRect *source, SDL_Rect *result) {
+    if (source->width <= 0.0F || source->height <= 0.0F) {
+        return false;
+    }
+    *result = (SDL_Rect){
+        (int)SDL_floorf(source->x),
+        (int)SDL_floorf(source->y),
+        SDL_max(1, (int)SDL_ceilf(source->x + source->width) -
+                       (int)SDL_floorf(source->x)),
+        SDL_max(1, (int)SDL_ceilf(source->y + source->height) -
+                       (int)SDL_floorf(source->y)),
+    };
+    return true;
+}
+
+static bool query_presentation_outputs(EidolonApp *app,
+                                       EidolonPresentationOutputInfo **outputs,
+                                       size_t *output_count, uint64_t *topology_revision) {
+    *outputs = NULL;
+    *output_count = 0U;
+    *topology_revision = 0U;
+    EidolonPresentationTopologyResult result =
+        eidolon_presentation_copy_outputs(app->presentation, NULL, 0U);
+    if (result.status == EIDOLON_PRESENTATION_TOPOLOGY_UNAVAILABLE ||
+        result.status == EIDOLON_PRESENTATION_TOPOLOGY_ERROR) {
+        return false;
+    }
+
+    for (unsigned int attempt = 0U; attempt < 3U; ++attempt) {
+        if (result.required_count == 0U) {
+            *topology_revision = result.revision;
+            return result.status == EIDOLON_PRESENTATION_TOPOLOGY_OK;
+        }
+        if (result.required_count > SIZE_MAX / sizeof(EidolonPresentationOutputInfo)) {
+            return false;
+        }
+        EidolonPresentationOutputInfo *candidate =
+            SDL_malloc(result.required_count * sizeof(*candidate));
+        if (candidate == NULL) {
+            return false;
+        }
+        result = eidolon_presentation_copy_outputs(app->presentation, candidate,
+                                                   result.required_count);
+        if (result.status == EIDOLON_PRESENTATION_TOPOLOGY_OK) {
+            *outputs = candidate;
+            *output_count = result.copied_count;
+            *topology_revision = result.revision;
+            return true;
+        }
+        SDL_free(candidate);
+        if (result.status != EIDOLON_PRESENTATION_TOPOLOGY_CHANGED &&
+            result.status != EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY) {
+            return false;
+        }
+    }
+    return false;
+}
+
+static bool resolve_native_bubble_bounds(EidolonApp *app, SDL_Rect *result) {
+    const EidolonPresentationEnvironment *environment = &app->presentation_environment;
+    if (!app->presentation_environment_valid ||
+        environment->coordinate_space != EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL) {
+        return false;
+    }
+    if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_AVATAR &&
+        (environment->valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) != 0U) {
+        return presentation_rect_to_sdl(&environment->usable_bounds, result);
+    }
+
+    EidolonPresentationOutputInfo *outputs = NULL;
+    size_t output_count = 0U;
+    uint64_t topology_revision = 0U;
+    if (!query_presentation_outputs(app, &outputs, &output_count, &topology_revision) ||
+        ((environment->valid_fields & EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY) != 0U &&
+         topology_revision != environment->topology_revision)) {
+        SDL_free(outputs);
+        return false;
+    }
+    bool found = false;
+    for (size_t index = 0U; index < output_count; ++index) {
+        const EidolonPresentationOutputInfo *output = &outputs[index];
+        if (output->coordinate_space != EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL ||
+            (output->valid_fields & EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) == 0U) {
+            continue;
+        }
+        if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_PRIMARY &&
+            (output->flags & EIDOLON_PRESENTATION_OUTPUT_PRIMARY) == 0U) {
+            continue;
+        }
+        SDL_Rect usable;
+        if (!presentation_rect_to_sdl(&output->usable_bounds, &usable)) {
+            continue;
+        }
+        if (!found) {
+            *result = usable;
+            found = true;
+        } else if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_VIRTUAL) {
+            const int left = SDL_min(result->x, usable.x);
+            const int top = SDL_min(result->y, usable.y);
+            const int right = SDL_max(result->x + result->w, usable.x + usable.w);
+            const int bottom = SDL_max(result->y + result->h, usable.y + usable.h);
+            *result = (SDL_Rect){left, top, right - left, bottom - top};
+        }
+        if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_PRIMARY) {
+            break;
+        }
+    }
+    SDL_free(outputs);
+    return found;
+}
+
 static bool resolve_bubble_bounds(EidolonApp *app, SDL_FRect body, SDL_Rect *result) {
     if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_CUSTOM) {
         if (app->bubble_custom_bounds.w > 0 && app->bubble_custom_bounds.h > 0) {
@@ -866,6 +986,10 @@ static bool resolve_bubble_bounds(EidolonApp *app, SDL_FRect body, SDL_Rect *res
             return true;
         }
         return false;
+    }
+    if (app->window == NULL) {
+        app->bubble_display_id = 0U;
+        return resolve_native_bubble_bounds(app, result);
     }
     if (app->bubble_bounds_mode == EIDOLON_BUBBLE_BOUNDS_VIRTUAL) {
         app->bubble_display_id = 0U;
@@ -1056,10 +1180,18 @@ static void reflow_overlay_layout(EidolonApp *app, float scale) {
 }
 
 static void set_initial_position(EidolonApp *app) {
-    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
     SDL_Rect bounds;
-    if (!SDL_GetDisplayUsableBounds(display, &bounds)) {
-        return;
+    if (app->window == NULL && app->presentation_environment_valid &&
+        (app->presentation_environment.valid_fields &
+         EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS) != 0U) {
+        if (!presentation_rect_to_sdl(&app->presentation_environment.usable_bounds, &bounds)) {
+            return;
+        }
+    } else {
+        const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+        if (!SDL_GetDisplayUsableBounds(display, &bounds)) {
+            return;
+        }
     }
 
     const int margin = 24;
@@ -1074,7 +1206,12 @@ static void set_initial_position(EidolonApp *app) {
 
 static bool update_display_metrics(EidolonApp *app) {
     const float previous_coordinate_scale = app->window_coordinate_scale;
-    float display_scale = eidolon_presentation_display_scale(app->presentation);
+    float display_scale =
+        app->presentation_environment_valid &&
+                (app->presentation_environment.valid_fields &
+                 EIDOLON_PRESENTATION_ENV_CONTENT_SCALE) != 0U
+            ? app->presentation_environment.content_scale
+            : eidolon_presentation_display_scale(app->presentation);
     if (display_scale <= 0.0F) {
         display_scale = 1.0F;
     }
@@ -1228,12 +1365,10 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         presentation_override != NULL && strcmp(presentation_override, "win32_dcomp") == 0;
 #if defined(_WIN32)
     if (native_presentation_requested) {
-        SDL_Rect bounds = {0, 0, EIDOLON_WINDOW_WIDTH, EIDOLON_WINDOW_HEIGHT};
-        (void)SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds);
         const EidolonWin32DcompConfig presentation_config = {
             .title = "Eidolon",
-            .x = bounds.x + bounds.w - EIDOLON_WINDOW_WIDTH - 24,
-            .y = bounds.y + bounds.h - EIDOLON_WINDOW_HEIGHT - 24,
+            .x = 0,
+            .y = 0,
             .width = EIDOLON_WINDOW_WIDTH,
             .height = EIDOLON_WINDOW_HEIGHT,
             .visible = true,
@@ -1269,6 +1404,18 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Presentation creation failed: %s",
                      SDL_GetError());
         return false;
+    }
+    EidolonPresentationEnvironment initial_environment;
+    if (eidolon_presentation_get_environment(app->presentation, &initial_environment)) {
+        app->presentation_environment = initial_environment;
+        app->presentation_environment_valid = true;
+        app->applied_environment_revision = initial_environment.revision;
+    } else if (native_presentation_requested) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Presentation environment bootstrap failed: %s", SDL_GetError());
+        return false;
+    } else {
+        SDL_ClearError();
     }
     if (!native_presentation_requested) {
         app->window = eidolon_sdl_legacy_window(app->presentation);
@@ -2020,12 +2167,51 @@ static void advance_fallback_dialogue(EidolonApp *app, uint64_t now_ms) {
     }
 }
 
-static void finish_native_move(EidolonApp *app) {
-    const SDL_FPoint body_center = current_body_global_center(app);
-    update_presentation_policy(app);
-    if (update_display_metrics(app)) {
-        restore_body_global_center(app, body_center);
+static void stage_presentation_environment(
+    EidolonApp *app, const EidolonPresentationEnvironment *environment) {
+    if (app->presentation_environment_valid &&
+        environment->revision <= app->presentation_environment.revision) {
+        return;
     }
+    app->presentation_environment = *environment;
+    app->presentation_environment_valid = true;
+    app->presentation_environment_pending =
+        environment->revision > app->applied_environment_revision;
+}
+
+static void apply_presentation_updates(EidolonApp *app) {
+    if (app->presentation_resync_pending) {
+        EidolonPresentationEnvironment environment;
+        if (eidolon_presentation_get_environment(app->presentation, &environment)) {
+            stage_presentation_environment(app, &environment);
+        } else {
+            eidolon_log_write("presentation", "environment resync failed: %s", SDL_GetError());
+            SDL_ClearError();
+        }
+        app->presentation_resync_pending = false;
+    }
+    if (!app->presentation_environment_pending &&
+        !app->presentation_move_completion_pending) {
+        return;
+    }
+
+    const SDL_FPoint body_center = current_body_global_center(app);
+    if (app->presentation_environment_pending) {
+        update_presentation_policy(app);
+        if (update_display_metrics(app)) {
+            restore_body_global_center(app, body_center);
+        }
+        app->applied_environment_revision = app->presentation_environment.revision;
+        app->presentation_environment_pending = false;
+        eidolon_log_write(
+            "presentation",
+            "environment applied revision=%llu topology=%llu fields=0x%llx output=%u",
+            (unsigned long long)app->presentation_environment.revision,
+            (unsigned long long)app->presentation_environment.topology_revision,
+            (unsigned long long)app->presentation_environment.changed_fields,
+            app->presentation_environment.active_output.value);
+    }
+    app->presentation_move_completion_pending = false;
     app->bubble_display_id = 0U;
     reflow_overlay_layout(app, app->model_scale);
     app->hit_test_initialized = false;
@@ -2037,29 +2223,30 @@ static void handle_presentation_event(EidolonApp *app, const EidolonPresentation
     switch (event->kind) {
     case EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED:
         for (int slot = 0; slot < (int)EIDOLON_VISIBLE_SESSION_CAPACITY; ++slot) {
-            if (app->bubble_layers[slot].value == event->layer.value) {
+            if (app->bubble_layers[slot].value == event->data.layer.layer.value) {
                 advance_session_bubble(app, slot, now_ms);
                 return;
             }
         }
-        if (app->fallback_dialogue_layer.value == event->layer.value) {
+        if (app->fallback_dialogue_layer.value == event->data.layer.layer.value) {
             advance_fallback_dialogue(app, now_ms);
         }
         break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_COMPLETED:
-        finish_native_move(app);
+        app->presentation_move_completion_pending = true;
         break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED:
         app->native_drag_completed = true;
         break;
     case EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED:
-        finish_native_move(app);
+        app->presentation_resync_pending = true;
+        app->presentation_move_completion_pending = true;
         eidolon_log_write("input", "presentation event queue resynchronized");
         break;
+    case EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED:
+        stage_presentation_environment(app, &event->data.environment.environment);
+        break;
     case EIDOLON_PRESENTATION_EVENT_MOVE_STARTED:
-    case EIDOLON_PRESENTATION_EVENT_HOST_GEOMETRY_CHANGED:
-    case EIDOLON_PRESENTATION_EVENT_OUTPUT_CHANGED:
-    case EIDOLON_PRESENTATION_EVENT_OUTPUT_SCALE_CHANGED:
     case EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED:
     case EIDOLON_PRESENTATION_EVENT_NONE:
         break;
@@ -2073,6 +2260,7 @@ static size_t drain_presentation_events(EidolonApp *app, size_t limit) {
         handle_presentation_event(app, &event);
         ++count;
     }
+    apply_presentation_updates(app);
     return count;
 }
 
@@ -2154,6 +2342,9 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         }
         break;
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
+        if (app->window == NULL) {
+            break;
+        }
         const SDL_FPoint body_center = current_body_global_center(app);
         update_presentation_policy(app);
         if (update_display_metrics(app)) {
@@ -2163,6 +2354,9 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
         break;
     }
     case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+        if (app->window == NULL) {
+            break;
+        }
         update_presentation_policy(app);
         eidolon_app_log_presentation_metrics(app);
         break;
@@ -2176,6 +2370,9 @@ static void handle_event(EidolonApp *app, const SDL_Event *event) {
     case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
     case SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED:
     case SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED:
+        if (app->window == NULL) {
+            break;
+        }
         update_presentation_policy(app);
         app->bubble_display_id = 0U;
         reflow_overlay_layout(app, app->model_scale);

@@ -2,6 +2,19 @@
 
 #include <string.h>
 
+static EidolonPresentationEvent *pending_environment_event(EidolonPresentationEventQueue *queue,
+                                                           EidolonPresentationHost host) {
+    for (size_t offset = 0U; offset < queue->count; ++offset) {
+        const size_t slot = (queue->head + offset) % EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY;
+        EidolonPresentationEvent *candidate = &queue->events[slot];
+        if (candidate->kind == EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED &&
+            candidate->host.value == host.value) {
+            return candidate;
+        }
+    }
+    return NULL;
+}
+
 void eidolon_presentation_event_queue_init(EidolonPresentationEventQueue *queue) {
     if (queue == NULL) {
         return;
@@ -16,18 +29,23 @@ bool eidolon_presentation_event_queue_push(EidolonPresentationEventQueue *queue,
         return false;
     }
 
+    if (event->kind == EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED) {
+        EidolonPresentationEvent *pending = pending_environment_event(queue, event->host);
+        if (pending != NULL) {
+            const uint64_t sequence = pending->sequence;
+            *pending = *event;
+            pending->sequence = sequence;
+            return true;
+        }
+    }
+
     EidolonPresentationEvent accepted = *event;
     accepted.sequence = queue->next_sequence++;
     if (queue->count >= EIDOLON_PRESENTATION_EVENT_QUEUE_CAPACITY) {
         queue->head = 0U;
         queue->count = 1U;
         accepted.kind = EIDOLON_PRESENTATION_EVENT_QUEUE_RESYNC_REQUIRED;
-        accepted.layer = (EidolonSceneLayerId){0U};
-        accepted.scene_revision = 0U;
-        accepted.host_x = 0.0F;
-        accepted.host_y = 0.0F;
-        accepted.layer_x = 0.0F;
-        accepted.layer_y = 0.0F;
+        memset(&accepted.data, 0, sizeof(accepted.data));
         queue->events[0] = accepted;
         return false;
     }

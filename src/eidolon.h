@@ -102,6 +102,12 @@ typedef struct EidolonApp {
     int drag_target_window_y;
     bool drag_position_pending;
     bool native_drag_completed;
+    bool presentation_environment_valid;
+    bool presentation_environment_pending;
+    bool presentation_move_completion_pending;
+    bool presentation_resync_pending;
+    uint64_t applied_environment_revision;
+    EidolonPresentationEnvironment presentation_environment;
     int primary_session_slot;
     int hit_test_row;
     int hit_test_frame;

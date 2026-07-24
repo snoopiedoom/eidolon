@@ -18,6 +18,49 @@ int main() {
     int result = 1;
     const EidolonSceneLayerId layer = {1U};
     EidolonPresentationTargetUpdate update = {};
+    EidolonPresentationEnvironment initial_environment = {};
+    if (!eidolon_presentation_get_environment(presentation, &initial_environment) ||
+        initial_environment.revision == 0U || initial_environment.topology_revision == 0U ||
+        initial_environment.active_output.value == 0U ||
+        initial_environment.coordinate_space !=
+            EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL) {
+        std::fprintf(stderr, "environment bootstrap failed: %s\n", SDL_GetError());
+        goto cleanup;
+    }
+    {
+        EidolonPresentationTopologyResult topology =
+            eidolon_presentation_copy_outputs(presentation, nullptr, 0U);
+        if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY ||
+            topology.revision != initial_environment.topology_revision ||
+            topology.required_count == 0U) {
+            std::fprintf(stderr, "topology probe failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        std::vector<EidolonPresentationOutputInfo> outputs(topology.required_count);
+        topology =
+            eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
+        if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_OK ||
+            topology.copied_count != outputs.size()) {
+            std::fprintf(stderr, "topology copy failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+    }
+    {
+        EidolonPresentationGeometry geometry = initial_environment.host_geometry;
+        ++geometry.x;
+        if (!eidolon_presentation_set_geometry(presentation, &geometry)) {
+            std::fprintf(stderr, "environment move failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        EidolonPresentationEvent event = {};
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_ENVIRONMENT_CHANGED ||
+            event.data.environment.environment.revision <= initial_environment.revision ||
+            event.data.environment.environment.host_geometry.x != geometry.x) {
+            std::fprintf(stderr, "environment publication failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+    }
     if (!eidolon_presentation_configure_host(presentation) ||
         !eidolon_presentation_begin_target_update(presentation, layer, 128U, 192U,
                                                   EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED, 1U,

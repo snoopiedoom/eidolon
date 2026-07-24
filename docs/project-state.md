@@ -78,7 +78,9 @@ overrides with reset-to-inheritance semantics.
 - `sdl_window_legacy` remains the default, while the opt-in portrait-only `win32_dcomp` backend owns
   a no-redirection host, independent body/dialogue targets, premultiplied D3D11 submission,
   DirectComposition transforms/opacity/z-order, cached-alpha hit testing, native body dragging,
-  and bounded presentation events for dialogue activation and final-move reflow;
+  bounded presentation events for dialogue activation and final-move reflow, revisioned
+  active-host environment publication, stable opaque monitor ids, caller-owned topology copying,
+  and transactional cadence/layout application;
 - hidden snapshot commands cover dialogue, sessions, settings, portrait motion, pose, and resolution;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
@@ -92,8 +94,8 @@ overrides with reset-to-inheritance semantics.
 
 The owner accepted the opt-in DirectComposition portrait/dialogue output, transparent per-pixel
 click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
-cancel-on-drag, and one stable final reflow. Revisioned mixed-DPI environment delivery remains
-implementation work.
+cancel-on-drag, one stable final reflow, cross-monitor environment delivery, and native bubble-bound
+selection. Physical output-removal recovery remains unproven.
 
 ## Known limitations
 
@@ -106,9 +108,8 @@ implementation work.
   depend on update order;
 - monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
   renderer reports tighter visible geometry;
-- revisioned presentation-environment publication, topology copying, graphics-reset, close, and
-  routed-pointer events are specified but not yet implemented; SDL legacy still uses its existing
-  direct SDL input path;
+- graphics-reset, close, and routed-pointer events remain specified but unimplemented; SDL legacy
+  still uses its existing direct SDL input and display paths;
 - the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
 - native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
@@ -126,25 +127,22 @@ implementation work.
 
 ## Next priorities
 
-1. implement the revisioned active-host environment, output-topology copy, coalescing, and wake
-   contract in `docs/design/presentation-environment.md`;
-2. apply environment revisions as one anchor-preserving cadence/layout/resource transaction and
-   prove mixed-DPI cross-monitor behavior;
-3. give `sdl_window_legacy` equivalent presentation-event and environment meaning without
+1. give `sdl_window_legacy` equivalent presentation-event and environment meaning without
    regressing its existing
    behavior;
-4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
-5. expose native presentation as a persisted setting only after the portrait path has event,
+2. add a deterministic output-removal/fallback probe where practical;
+3. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
+4. expose native presentation as a persisted setting only after the portrait path has event,
    output, cadence, and recovery parity;
-6. add source-instance identity and source/adapter status controls without moving ownership into the
+5. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
-7. add explicit shared-character performance ownership for concurrent bubbles;
-8. replace the hard-coded body-asset selector with character-package discovery;
-9. make session retirement policy configurable;
-10. expand normalized operational state toward the presence contract;
-11. tune affect targets and continuity thresholds from real expression traces;
-12. calibrate the four initial Rio semantic poses before adding transition dynamics;
-13. consider expression annotation/detection only after the downloaded portrait catalog is present.
+6. add explicit shared-character performance ownership for concurrent bubbles;
+7. replace the hard-coded body-asset selector with character-package discovery;
+8. make session retirement policy configurable;
+9. expand normalized operational state toward the presence contract;
+10. tune affect targets and continuity thresholds from real expression traces;
+11. calibrate the four initial Rio semantic poses before adding transition dynamics;
+12. consider expression annotation/detection only after the downloaded portrait catalog is present.
 
 ## Restart checklist
 

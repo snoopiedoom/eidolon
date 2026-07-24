@@ -5,6 +5,10 @@
 
 typedef struct FakePresentation {
     EidolonPresentationGeometry geometry;
+    EidolonPresentationEnvironment environment;
+    EidolonPresentationOutputInfo outputs[2];
+    uint64_t topology_revision;
+    size_t output_count;
     unsigned int configure_count;
     unsigned int sync_count;
     unsigned int present_count;
@@ -17,6 +21,7 @@ typedef struct FakePresentation {
     int vsync_interval;
     bool input_suspended;
     bool event_pending;
+    bool topology_changed;
     EidolonPresentationEvent event;
 } FakePresentation;
 
@@ -86,6 +91,35 @@ static bool fake_poll_event(void *context, EidolonPresentationEvent *event) {
     return true;
 }
 
+static bool fake_get_environment(void *context, EidolonPresentationEnvironment *environment) {
+    const FakePresentation *fake = context;
+    *environment = fake->environment;
+    return true;
+}
+
+static EidolonPresentationTopologyResult
+fake_copy_outputs(void *context, EidolonPresentationOutputInfo *outputs, size_t capacity) {
+    const FakePresentation *fake = context;
+    if (fake->topology_changed) {
+        return (EidolonPresentationTopologyResult){
+            .revision = fake->topology_revision,
+            .required_count = fake->output_count,
+            .status = EIDOLON_PRESENTATION_TOPOLOGY_CHANGED,
+        };
+    }
+    const size_t copied = capacity < fake->output_count ? capacity : fake->output_count;
+    for (size_t index = 0U; index < copied; ++index) {
+        outputs[index] = fake->outputs[index];
+    }
+    return (EidolonPresentationTopologyResult){
+        .revision = fake->topology_revision,
+        .required_count = fake->output_count,
+        .copied_count = copied,
+        .status = copied < fake->output_count ? EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY
+                                              : EIDOLON_PRESENTATION_TOPOLOGY_OK,
+    };
+}
+
 static bool fake_create_target(void *context, EidolonSceneLayerId layer,
                                EidolonPresentationTarget target, uint64_t generation,
                                uint32_t width, uint32_t height,
@@ -139,6 +173,68 @@ static bool fake_commit_scene(void *context, const EidolonPresentationSceneCommi
 int main(void) {
     FakePresentation fake = {
         .geometry = {10, 20, 520, 360},
+        .environment =
+            {
+                .revision = 4U,
+                .topology_revision = 7U,
+                .host = {1U},
+                .active_output = {9U},
+                .host_geometry = {10, 20, 520, 360},
+                .output_bounds = {-1920.0F, 0.0F, 1920.0F, 1080.0F},
+                .usable_bounds = {-1920.0F, 0.0F, 1920.0F, 1040.0F},
+                .safe_area = {0.0F, 0.0F, 40.0F, 0.0F},
+                .content_scale = 1.5F,
+                .pixel_scale = 1.5F,
+                .nominal_refresh_hz = 75.0F,
+                .orientation = EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE,
+                .coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL,
+                .capabilities = EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT |
+                                EIDOLON_PRESENTATION_CAP_MULTIPLE_OUTPUTS,
+                .valid_fields = EIDOLON_PRESENTATION_ENV_ALL_FIELDS,
+                .changed_fields = EIDOLON_PRESENTATION_ENV_ALL_FIELDS,
+            },
+        .outputs =
+            {
+                {
+                    .output = {9U},
+                    .bounds = {-1920.0F, 0.0F, 1920.0F, 1080.0F},
+                    .usable_bounds = {-1920.0F, 0.0F, 1920.0F, 1040.0F},
+                    .safe_area = {0.0F, 0.0F, 40.0F, 0.0F},
+                    .content_scale = 1.5F,
+                    .pixel_scale = 1.5F,
+                    .nominal_refresh_hz = 75.0F,
+                    .orientation = EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE,
+                    .coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL,
+                    .flags = EIDOLON_PRESENTATION_OUTPUT_PRIMARY,
+                    .valid_fields = EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+                                    EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
+                                    EIDOLON_PRESENTATION_ENV_SAFE_AREA |
+                                    EIDOLON_PRESENTATION_ENV_CONTENT_SCALE |
+                                    EIDOLON_PRESENTATION_ENV_PIXEL_SCALE |
+                                    EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH |
+                                    EIDOLON_PRESENTATION_ENV_ORIENTATION |
+                                    EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE,
+                },
+                {
+                    .output = {10U},
+                    .bounds = {0.0F, 0.0F, 2560.0F, 1440.0F},
+                    .usable_bounds = {0.0F, 0.0F, 2560.0F, 1400.0F},
+                    .content_scale = 1.0F,
+                    .pixel_scale = 1.0F,
+                    .nominal_refresh_hz = 144.0F,
+                    .orientation = EIDOLON_PRESENTATION_ORIENTATION_LANDSCAPE,
+                    .coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL,
+                    .valid_fields = EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+                                    EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
+                                    EIDOLON_PRESENTATION_ENV_CONTENT_SCALE |
+                                    EIDOLON_PRESENTATION_ENV_PIXEL_SCALE |
+                                    EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH |
+                                    EIDOLON_PRESENTATION_ENV_ORIENTATION |
+                                    EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE,
+                },
+            },
+        .topology_revision = 7U,
+        .output_count = 2U,
     };
     const EidolonPresentationBackendOps operations = {
         .destroy = fake_destroy,
@@ -158,6 +254,8 @@ int main(void) {
         .submit_target = fake_submit_target,
         .commit_scene = fake_commit_scene,
         .present = fake_present,
+        .get_environment = fake_get_environment,
+        .copy_outputs = fake_copy_outputs,
     };
     const uint64_t capabilities =
         EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT | EIDOLON_PRESENTATION_CAP_MULTIPLE_OUTPUTS;
@@ -190,25 +288,54 @@ int main(void) {
     assert(fake.input_suspended);
     assert(eidolon_presentation_update_input_region(presentation));
     assert(!fake.input_suspended);
+    EidolonPresentationEnvironment environment;
+    assert(eidolon_presentation_get_environment(presentation, &environment));
+    assert(environment.revision == 4U && environment.active_output.value == 9U);
+    assert(environment.topology_revision == 7U);
+    assert(environment.content_scale == 1.5F && environment.nominal_refresh_hz == 75.0F);
+    fake.environment.revision = 0U;
+    assert(!eidolon_presentation_get_environment(presentation, &environment));
+    fake.environment.revision = 4U;
+
+    EidolonPresentationTopologyResult topology =
+        eidolon_presentation_copy_outputs(presentation, NULL, 0U);
+    assert(topology.status == EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY);
+    assert(topology.revision == 7U && topology.required_count == 2U && topology.copied_count == 0U);
+    EidolonPresentationOutputInfo outputs[2];
+    topology = eidolon_presentation_copy_outputs(presentation, outputs, 1U);
+    assert(topology.status == EIDOLON_PRESENTATION_TOPOLOGY_INSUFFICIENT_CAPACITY);
+    assert(topology.copied_count == 1U && outputs[0].output.value == 9U);
+    topology = eidolon_presentation_copy_outputs(presentation, outputs, 2U);
+    assert(topology.status == EIDOLON_PRESENTATION_TOPOLOGY_OK);
+    assert(topology.copied_count == 2U && outputs[1].output.value == 10U);
+    fake.topology_changed = true;
+    topology = eidolon_presentation_copy_outputs(presentation, outputs, 2U);
+    assert(topology.status == EIDOLON_PRESENTATION_TOPOLOGY_CHANGED && topology.copied_count == 0U);
+    fake.topology_changed = false;
+    topology = eidolon_presentation_copy_outputs(presentation, NULL, 1U);
+    assert(topology.status == EIDOLON_PRESENTATION_TOPOLOGY_ERROR);
+
     EidolonPresentationEvent presentation_event;
     assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
     fake.event = (EidolonPresentationEvent){
         .kind = EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED,
         .sequence = 1U,
         .monotonic_ns = 100U,
-        .scene_revision = 1U,
         .host = {1U},
-        .layer = {7U},
-        .geometry = fake.geometry,
-        .host_x = 12.0F,
-        .host_y = 18.0F,
-        .layer_x = 4.0F,
-        .layer_y = 6.0F,
+        .data.layer =
+            {
+                .scene_revision = 1U,
+                .layer = {7U},
+                .host_x = 12.0F,
+                .host_y = 18.0F,
+                .layer_x = 4.0F,
+                .layer_y = 6.0F,
+            },
     };
     fake.event_pending = true;
     assert(eidolon_presentation_poll_event(presentation, &presentation_event));
     assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED);
-    assert(presentation_event.layer.value == 7U && presentation_event.sequence == 1U);
+    assert(presentation_event.data.layer.layer.value == 7U && presentation_event.sequence == 1U);
     assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
     const EidolonSceneSnapshot scene = {
         .revision = 2U,

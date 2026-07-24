@@ -192,9 +192,10 @@ The opt-in `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device,
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
 It currently supports the portrait body only. Native dialogue activation and move completion now
-cross the bounded presentation-event queue and are owner-confirmed. Revisioned environment
-publication, output-local host migration, sprite/3D targets, and device-loss recovery remain
-unfinished.
+cross the bounded presentation-event queue and are owner-confirmed. Revisioned Win32 environment
+publication, topology copying, and one application-owned environment transaction are implemented;
+mixed-DPI cross-monitor behavior is owner-confirmed. Physical output removal, output-local host
+migration on non-Windows platforms, sprite/3D targets, and device-loss recovery remain unfinished.
 
 The D3D11 vertex layout uses `POSITION`, `TEXCOORD0`, `BLENDINDICES0`, and `BLENDWEIGHT0`. The pixel
 shader input must retain both `SV_Position` and `TEXCOORD0`. Removing `SV_Position` can bind UV to the

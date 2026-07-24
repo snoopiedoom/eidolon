@@ -25,11 +25,12 @@ The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
   observable resync event;
 - Win32 performs hit testing, capture, and host movement immediately, then emits activation and
   move lifecycle events without calling application behavior from `WndProc`;
-- `EidolonApp` drains those events before simulation, advances the matching current dialogue
-  layer, and performs one final layout reflow after native movement.
+- Win32 publishes revisioned active-host environments and caller-owned output topology through the
+  same portable boundary;
+- `EidolonApp` drains the complete batch before simulation, advances the matching current dialogue
+  layer, and applies the newest environment plus final movement as one layout transaction.
 
-This checkpoint does not yet publish presentation environments or emit graphics-reset, close, or
-routed-pointer events.
+This checkpoint does not yet emit graphics-reset, close, or routed-pointer events.
 `sdl_window_legacy` still reaches equivalent product behavior through the existing SDL event path
 rather than this presentation queue. Both are explicit remaining parity work. The owner confirmed
 native activation, cancel-on-drag, click-through, smooth movement, and one stable final reflow.
