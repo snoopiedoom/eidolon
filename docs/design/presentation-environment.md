@@ -257,8 +257,8 @@ work, or application acknowledgement.
 
 ## Current implementation
 
-The opt-in `win32_dcomp` backend and default `sdl_window_legacy` backend now implement the
-producer/consumer path:
+The normal portrait `win32_dcomp` backend and `sdl_window_legacy` compatibility backend implement
+the producer/consumer path:
 
 - Win32 callbacks perform mandatory DPI resizing and otherwise mark environment state dirty;
 - reconciliation enumerates monitors, preserves process-local opaque output ids, and publishes
@@ -294,8 +294,9 @@ expression, motion, and scene state reach the replacement frame unchanged. Real 
 physical display disconnect remain hardware evidence gaps.
 The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
 application consumption until release; native cadence acceptance belongs to `win32_dcomp`. Its
-mixed-DPI/output/placement and post-drag resumption still require owner confirmation before native
-presentation becomes the normal selection.
+mixed-DPI/output/placement and post-drag resumption are owner-accepted. Native presentation is now
+the normal Windows portrait selection; sprite/3D bodies, explicit legacy preference, and native
+failure select the fallback without changing environment meaning.
 
 ## Data flow
 

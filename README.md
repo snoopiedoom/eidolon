@@ -32,6 +32,8 @@ V1 proves that an agent doing real work can visibly feel like one persistent per
   motion accents;
 - atomic expression swaps—no crossfade or previous-frame ghosting;
 - pixel-exact click-through on Windows and a separate Dear ImGui settings window;
+- DirectComposition portrait/dialogue presentation by default on Windows, with persisted
+  `sdl_window_legacy` compatibility selection and explicit capability/failure fallback;
 - a native D3D11 3D path with GLB loading, GPU skinning, semantic poses, and analytic arm IK;
 - hidden snapshot commands for visual QA without stealing focus.
 
@@ -91,13 +93,14 @@ fallback sprite path.
 - press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
   host deliberately does not capture global keyboard shortcuts.
 
-On Windows, the default `sdl_window_legacy` fallback delegates dragging to the native top-level
-move loop, which can pause animation and dialogue presentation until the mouse button is released.
-Continuous presentation while dragging is provided by the opt-in DirectComposition path and is one
-reason completing that path is the active development goal.
+On Windows, portrait bodies normally use `win32_dcomp`. Sprite and 3D bodies, explicit compatibility
+selection, and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
+backend delegates dragging to the native top-level move loop, which can pause animation and dialogue
+presentation until the mouse button is released; presentation resumes after the drag.
 
 Settings persist as sparse per-user overrides. Every field can return to its shipped or
-character-defined default without freezing a copy of that default into the user file.
+character-defined default without freezing a copy of that default into the user file. Presentation
+preference changes apply at the next launch.
 
 ## Design
 
@@ -118,7 +121,7 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-sdl_window_legacy | opt-in win32_dcomp portrait
+native-preferred win32_dcomp portrait | explicit/capability sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```

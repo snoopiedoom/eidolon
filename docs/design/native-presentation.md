@@ -18,10 +18,10 @@ for the second system.
 ## Problem
 
 The original runtime created one transparent SDL window and one SDL renderer owned directly by
-`app`. The default `sdl_window_legacy` path still presents one composed window, but `presentation`
+`app`. The fallback `sdl_window_legacy` path still presents one composed window, but `presentation`
 now owns its host, renderer, cadence, output environment, and native drag boundary. `EidolonApp`
 retains transitional borrowed SDL window/renderer aliases while remaining rasterizers migrate to
-backend-owned targets. The opt-in portrait path already uses DirectComposition.
+backend-owned targets. Normal Windows portrait startup uses DirectComposition.
 
 That was a good bootstrap, but it makes unrelated work share one invalidation boundary:
 
@@ -314,7 +314,7 @@ A native top-level move remains a fallback. It is not equivalent:
 
 The Windows `sdl_window_legacy` backend currently uses that modal caption-drag path. Preserving it as
 a functional fallback does not require compositor-like animation cadence while the button is held.
-A1 therefore prioritizes completing and promoting `win32_dcomp`, not disguising the legacy window
+A1 therefore prioritized completing and promoting `win32_dcomp`, not disguising the legacy window
 as a compositor-layer backend.
 
 The input contract routes pointer id, device kind, global/output position when available, layer id,
@@ -699,13 +699,16 @@ Gate: existing checks and user-owned interaction behavior remain unchanged.
 
 Gate: snapshots and interactive SDL behavior match before any native compositor backend is enabled.
 
-**Status:** in progress. The production boundary now has an opaque C17 presentation owner, runtime
-capability flags, a behavior-preserving `sdl_window_legacy` backend, and an opt-in Windows
-DirectComposition backend behind one quarantined C++ adapter. Stable body and per-session dialogue
+**Status:** complete for the A1 2D daily-driver path; later renderer-target migration remains. The
+production boundary has an opaque C17 presentation owner, runtime capability flags, a
+behavior-preserving `sdl_window_legacy` backend, and a Windows DirectComposition backend behind one
+quarantined C++ adapter. Stable body and per-session dialogue
 layers resolve to independently generated presentation targets. Portrait and dialogue content can
 be authored without an SDL window renderer, premultiplied, and uploaded directly into
-compositor-owned D3D11 targets without readback. Normal startup and snapshots remain on
-`sdl_window_legacy`; the native override is portrait-only. Its Win32 adapter now owns transformed
+compositor-owned D3D11 targets without readback. The persisted `native` preference selects
+DirectComposition for portrait bodies; explicit legacy preference, sprite/3D bodies, native
+creation failure, and snapshots select `sdl_window_legacy` with local, logged degradation. Its
+Win32 adapter owns transformed
 per-pixel hit testing, body dragging, and bounded activation/move events. The owner accepted native
 visual output, transparent click-through, dialogue activation and cancellation, smooth dragging,
 cross-monitor behavior, body-context settings without focus theft, final reflow, revisioned Win32
@@ -720,12 +723,11 @@ reconstruction and forced SDL fallback; the owner accepted visible placement, co
 interaction after both injected branches.
 
 The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
-observation confirmed that application-driven animation pauses during that native top-level move.
-This does not reopen Phase 1 or redefine native cadence acceptance; the active work now finishes
-DirectComposition visual parity so the native path can become the normal selection. Before that
-promotion, the fallback still requires its remaining
-owner-controlled click, settings, mixed-DPI/output, placement, and post-drag cadence regression
-pass.
+observation confirmed that application-driven animation pauses during that native top-level move
+and resumes after release. The owner accepted fallback launch, clicks, `F1`/right-click settings,
+mixed-DPI/output placement, post-drag resumption, body-capability selection, and persisted
+native/legacy restart behavior. DirectComposition visual parity and normal Windows selection are
+accepted; this limitation does not reopen Phase 1 or redefine native cadence acceptance.
 
 ### Phase 2: Windows portrait proof
 

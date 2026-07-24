@@ -33,11 +33,13 @@ typedef enum EidolonUserSettingField {
     EIDOLON_USER_SETTING_BUBBLE_BOUNDS = 1U << 10,
     EIDOLON_USER_SETTING_VSYNC = 1U << 11,
     EIDOLON_USER_SETTING_FPS_LIMIT = 1U << 12,
+    EIDOLON_USER_SETTING_PRESENTATION = 1U << 13,
 } EidolonUserSettingField;
 
 typedef struct EidolonUserSettings {
     uint32_t overrides;
     int render_mode;
+    int presentation_preference;
     float display_scale;
     bool portrait_face_mode;
     int model_render_resolution;

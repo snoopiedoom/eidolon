@@ -171,6 +171,31 @@ static bool fake_commit_scene(void *context, const EidolonPresentationSceneCommi
 }
 
 int main(void) {
+    EidolonPresentationSelection selection = eidolon_presentation_select(
+        EIDOLON_PRESENTATION_PREFERENCE_NATIVE, true, true, true);
+    assert(selection.use_native && !selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED);
+    selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_NATIVE, true, false, true);
+    assert(!selection.use_native && selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_BODY_UNSUPPORTED);
+    selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_NATIVE, false, true, true);
+    assert(!selection.use_native && selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_NATIVE_UNAVAILABLE);
+    selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY, true, true, true);
+    assert(!selection.use_native && !selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_EXPLICIT_LEGACY);
+    selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_NATIVE, true, true, false);
+    assert(!selection.use_native && selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_BODY_UNAVAILABLE);
+    selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_COUNT, true, true, true);
+    assert(!selection.use_native && selection.fallback);
+    assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_INVALID_PREFERENCE);
+
     FakePresentation fake = {
         .geometry = {10, 20, 520, 360},
         .environment =

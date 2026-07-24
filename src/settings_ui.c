@@ -37,13 +37,26 @@ static void reset_setting_button(EidolonApp *app, EidolonUserSettingField field,
     ImGui_EndDisabled();
 }
 
+static void draw_render_mode_metadata(EidolonApp *app) {
+    reset_setting_button(app, EIDOLON_USER_SETTING_RENDER_MODE, "reset##render_mode");
+    ImGui_Text("default: %s  |  source: %s",
+               eidolon_render_mode_name((EidolonRenderMode)app->system_settings.render_mode),
+               setting_source(app, EIDOLON_USER_SETTING_RENDER_MODE));
+    if (eidolon_user_settings_is_overridden(&app->user_settings,
+                                            EIDOLON_USER_SETTING_RENDER_MODE) &&
+        app->user_settings.render_mode >= 0 &&
+        app->user_settings.render_mode < (int)EIDOLON_RENDER_MODE_COUNT &&
+        app->user_settings.render_mode != (int)app->render_mode) {
+        ImGui_Text("next launch: %s via sdl_window_legacy",
+                   eidolon_render_mode_name(
+                       (EidolonRenderMode)app->user_settings.render_mode));
+    }
+}
+
 static void select_render_mode(EidolonApp *app) {
     const char *preview = eidolon_render_mode_name(app->render_mode);
     if (!ImGui_BeginCombo("preferred renderer", preview, 0)) {
-        reset_setting_button(app, EIDOLON_USER_SETTING_RENDER_MODE, "reset##render_mode");
-        ImGui_Text("default: %s  |  source: %s",
-                   eidolon_render_mode_name((EidolonRenderMode)app->system_settings.render_mode),
-                   setting_source(app, EIDOLON_USER_SETTING_RENDER_MODE));
+        draw_render_mode_metadata(app);
         return;
     }
     for (int value = 0; value < (int)EIDOLON_RENDER_MODE_COUNT; ++value) {
@@ -57,10 +70,40 @@ static void select_render_mode(EidolonApp *app) {
         }
     }
     ImGui_EndCombo();
-    reset_setting_button(app, EIDOLON_USER_SETTING_RENDER_MODE, "reset##render_mode");
+    draw_render_mode_metadata(app);
+}
+
+static void select_presentation_preference(EidolonApp *app) {
+    const char *preview =
+        eidolon_presentation_preference_name(app->presentation_preference);
+    if (ImGui_BeginCombo("presentation", preview, 0)) {
+        for (int value = 0; value < (int)EIDOLON_PRESENTATION_PREFERENCE_COUNT; ++value) {
+            const EidolonPresentationPreference preference =
+                (EidolonPresentationPreference)value;
+            const bool selected = preference == app->presentation_preference;
+            if (ImGui_SelectableEx(eidolon_presentation_preference_name(preference), selected, 0,
+                                   (ImVec2){0.0F, 0.0F})) {
+                eidolon_app_set_presentation_preference(app, preference);
+            }
+            if (selected) {
+                ImGui_SetItemDefaultFocus();
+            }
+        }
+        ImGui_EndCombo();
+    }
+    reset_setting_button(app, EIDOLON_USER_SETTING_PRESENTATION, "reset##presentation");
     ImGui_Text("default: %s  |  source: %s",
-               eidolon_render_mode_name((EidolonRenderMode)app->system_settings.render_mode),
-               setting_source(app, EIDOLON_USER_SETTING_RENDER_MODE));
+               eidolon_presentation_preference_name(
+                   (EidolonPresentationPreference)
+                       app->system_settings.presentation_preference),
+               setting_source(app, EIDOLON_USER_SETTING_PRESENTATION));
+    ImGui_Text("active: %s",
+               app->presentation != NULL
+                   ? eidolon_presentation_backend_name(app->presentation)
+                   : "none");
+    ImGui_TextWrapped(
+        "presentation changes apply at next launch. unsupported bodies and native failures "
+        "fall back explicitly to sdl_window_legacy.");
 }
 
 static void select_state(EidolonApp *app) {
@@ -286,6 +329,9 @@ static void draw_character_tab(EidolonApp *app) {
 }
 
 static void draw_display_tab(EidolonApp *app) {
+    ImGui_SeparatorText("presentation backend");
+    select_presentation_preference(app);
+
     ImGui_SeparatorText("presentation cadence");
     bool vsync = app->vsync_enabled;
     if (ImGui_Checkbox("vertical sync", &vsync)) {
@@ -451,6 +497,11 @@ static void draw_diagnostics_tab(const EidolonApp *app) {
                app->affect.current.dominance);
     ImGui_Text("evidence: %.3f", app->affect.evidence);
     ImGui_Text("motion revision: %llu", (unsigned long long)app->motion_config_watch.revision);
+    ImGui_Text("presentation backend: %s  |  preference: %s",
+               app->presentation != NULL
+                   ? eidolon_presentation_backend_name(app->presentation)
+                   : "none",
+               eidolon_presentation_preference_name(app->presentation_preference));
     ImGui_Text("presentation: vsync %s/%s  limit %d  %s  owner %s",
                app->vsync_enabled ? "requested" : "off", app->vsync_active ? "active" : "idle",
                app->fps_limit, app->presentation_uncapped ? "uncapped" : "paced",

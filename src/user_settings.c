@@ -105,6 +105,30 @@ static const char *render_mode_name(int value) {
     }
 }
 
+static bool parse_presentation_preference(const char *text, int *value) {
+    if (SDL_strcasecmp(text, "native") == 0) {
+        *value = 0;
+        return true;
+    }
+    if (SDL_strcasecmp(text, "sdl_window_legacy") == 0 ||
+        SDL_strcasecmp(text, "sdl_legacy") == 0) {
+        *value = 1;
+        return true;
+    }
+    return parse_int(text, value);
+}
+
+static const char *presentation_preference_name(int value) {
+    switch (value) {
+    case 0:
+        return "native";
+    case 1:
+        return "sdl_window_legacy";
+    default:
+        return "invalid";
+    }
+}
+
 static bool parse_bubble_bounds_mode(const char *text, int *value) {
     if (SDL_strcasecmp(text, "avatar") == 0) {
         *value = EIDOLON_BUBBLE_BOUNDS_AVATAR;
@@ -152,6 +176,7 @@ bool eidolon_user_settings_is_overridden(const EidolonUserSettings *settings,
 void eidolon_user_settings_defaults(EidolonUserSettings *settings) {
     *settings = (EidolonUserSettings){
         .render_mode = 1,
+        .presentation_preference = 0,
         .display_scale = 1.0F,
         .portrait_face_mode = false,
         .model_render_resolution = 1024,
@@ -218,6 +243,11 @@ bool eidolon_user_settings_parse(const char *text, size_t length, EidolonUserSet
             parsed = parse_render_mode(value, &candidate.render_mode);
             if (parsed) {
                 candidate.overrides |= EIDOLON_USER_SETTING_RENDER_MODE;
+            }
+        } else if (strcmp(key, "presentation_preference") == 0) {
+            parsed = parse_presentation_preference(value, &candidate.presentation_preference);
+            if (parsed) {
+                candidate.overrides |= EIDOLON_USER_SETTING_PRESENTATION;
             }
         } else if (strcmp(key, "display_scale") == 0) {
             parsed = parse_float(value, &candidate.display_scale);
@@ -317,6 +347,11 @@ bool eidolon_user_settings_parse(const char *text, size_t length, EidolonUserSet
                   EIDOLON_FPS_LIMIT_MIN, EIDOLON_FPS_LIMIT_MAX);
         valid = false;
     }
+    if (valid && (candidate.presentation_preference < 0 ||
+                  candidate.presentation_preference > 1)) {
+        set_error(error, error_capacity, "presentation_preference is invalid");
+        valid = false;
+    }
     if (valid && (!version_seen || version != EIDOLON_USER_SETTINGS_VERSION)) {
         set_error(error, error_capacity, "unsupported or missing settings version");
         valid = false;
@@ -372,6 +407,10 @@ bool eidolon_user_settings_save(const char *path, const EidolonUserSettings *set
     APPEND_SETTING("version = %d\n", EIDOLON_USER_SETTINGS_VERSION);
     if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_RENDER_MODE)) {
         APPEND_SETTING("preferred_renderer = %s\n", render_mode_name(settings->render_mode));
+    }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_PRESENTATION)) {
+        APPEND_SETTING("presentation_preference = %s\n",
+                       presentation_preference_name(settings->presentation_preference));
     }
     if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_DISPLAY_SCALE)) {
         APPEND_SETTING("display_scale = %.4f\n", settings->display_scale);

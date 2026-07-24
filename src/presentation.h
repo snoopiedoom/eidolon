@@ -9,6 +9,27 @@
 
 typedef struct EidolonPresentation EidolonPresentation;
 
+typedef enum EidolonPresentationPreference {
+    EIDOLON_PRESENTATION_PREFERENCE_NATIVE,
+    EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY,
+    EIDOLON_PRESENTATION_PREFERENCE_COUNT,
+} EidolonPresentationPreference;
+
+typedef enum EidolonPresentationSelectionReason {
+    EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED,
+    EIDOLON_PRESENTATION_SELECTION_EXPLICIT_LEGACY,
+    EIDOLON_PRESENTATION_SELECTION_NATIVE_UNAVAILABLE,
+    EIDOLON_PRESENTATION_SELECTION_BODY_UNSUPPORTED,
+    EIDOLON_PRESENTATION_SELECTION_BODY_UNAVAILABLE,
+    EIDOLON_PRESENTATION_SELECTION_INVALID_PREFERENCE,
+} EidolonPresentationSelectionReason;
+
+typedef struct EidolonPresentationSelection {
+    bool use_native;
+    bool fallback;
+    EidolonPresentationSelectionReason reason;
+} EidolonPresentationSelection;
+
 typedef struct EidolonPresentationHost {
     uint32_t value;
 } EidolonPresentationHost;
@@ -332,6 +353,12 @@ eidolon_presentation_create_backend(const char *backend_name, uint64_t capabilit
                                     const EidolonPresentationBackendOps *operations);
 void eidolon_presentation_destroy(EidolonPresentation *presentation);
 
+const char *eidolon_presentation_preference_name(EidolonPresentationPreference preference);
+const char *
+eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason);
+EidolonPresentationSelection
+eidolon_presentation_select(EidolonPresentationPreference preference, bool native_available,
+                            bool native_supports_body, bool native_body_available);
 const char *eidolon_presentation_backend_name(const EidolonPresentation *presentation);
 uint64_t eidolon_presentation_capabilities(const EidolonPresentation *presentation);
 bool eidolon_presentation_supports(const EidolonPresentation *presentation,

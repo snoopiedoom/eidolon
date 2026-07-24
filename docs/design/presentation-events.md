@@ -17,7 +17,8 @@ Eidolon needs a bounded C17 event contract between presentation backends and app
 
 ## Implementation status
 
-The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
+The Windows event contract is implemented for the normal portrait `win32_dcomp` backend and its
+`sdl_window_legacy` compatibility fallback:
 
 - scene layers commit an exclusive primary action plus optional `route_pointer` capability with
   their visual/input state;
@@ -376,15 +377,16 @@ must remain bounded and must not call application code while holding a backend l
    cancellation, close, and reset events while retaining immediate native mechanics.
 5. [x] Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from
    the Win32 adapter.
-6. [~] Implement equivalent SDL legacy translation without changing product behavior. The
+6. [x] Implement equivalent SDL legacy translation without changing product behavior. The
    fixed-size fallback application adapter preserves primary pointer and command behavior; close,
    reset, and middle-button 3D authoring now cross the presentation contract.
 7. [x] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests.
-8. [~] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
+8. [x] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
    checks. The native portrait path is accepted; the legacy modal-drag limitation is confirmed and
    documented. Hidden deterministic probes cover native reconstruction and forced SDL fallback;
-   both recovery branches are owner-accepted. The remaining SDL fallback regression pass and
-   physical output-removal behavior remain pre-default acceptance work.
+   both recovery branches are owner-accepted. The fallback regression pass, persisted selection,
+   body-capability fallback, and post-drag resumption are owner-accepted. Physical output removal
+   remains optional hardware evidence rather than pre-default work.
 
 Environment and topology implementation proceeds through the separate sequence in
 [`presentation-environment.md`](presentation-environment.md).

@@ -25,7 +25,7 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-sdl_window_legacy | opt-in win32_dcomp portrait
+native-preferred win32_dcomp portrait | explicit/capability sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```
@@ -191,14 +191,19 @@ are attached to source offsets, not rendered lines.
 
 ## Windows rendering
 
-The shipped default remains `sdl_window_legacy`: SDL owns the transparent window, D3D11 device,
-context, and swapchain. The 3D renderer borrows that device and draws into an SDL-owned target
-texture; SDL samples the same allocation during final composition. There is no animated full-frame
-CPU transfer, staging-map loop, or upload. On Windows, its character drag delegates to the native
-top-level move loop and may pause application-driven animation until release. That known fallback
-limitation is not a DirectComposition parity target.
+Windows interactive startup uses the persisted, platform-neutral `presentation_preference`.
+`native` is shipped: a portrait body selects `win32_dcomp`; an unsupported sprite/3D body or native
+startup failure selects `sdl_window_legacy` and logs the exact fallback reason. Explicit
+`sdl_window_legacy` preference bypasses the native attempt. Snapshots remain on the legacy backend.
 
-The opt-in `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
+The legacy backend owns the transparent SDL window, D3D11 device, context, and swapchain. The 3D
+renderer borrows that device and draws into an SDL-owned target texture; SDL samples the same
+allocation during final composition. There is no animated full-frame CPU transfer, staging-map
+loop, or upload. Its Windows character drag delegates to the native top-level move loop and may
+pause application-driven animation until release. That accepted fallback limitation is not a
+DirectComposition parity target.
+
+The normal portrait `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
 It currently supports the portrait body only. Native dialogue activation, body-context settings,
@@ -211,8 +216,9 @@ Output-local host migration, sprite/3D targets, and real hardware display-discon
 remain unfinished. Device/backend reset preserves application state through one fresh
 DirectComposition reconstruction and an explicitly logged SDL fallback; deterministic hidden
 probes cover both paths, while visible continuity and the resulting interaction are owner-accepted.
-Real device loss still requires evidence. Finishing the portrait path's visual parity so it can
-replace the legacy default is the active presentation goal.
+Real device loss still requires optional hardware evidence. The owner accepted native and legacy
+interaction, output/DPI behavior, persisted selection, body-capability fallback, and restart
+behavior; the 2D A1 presentation gate is complete.
 
 The D3D11 vertex layout uses `POSITION`, `TEXCOORD0`, `BLENDINDICES0`, and `BLENDWEIGHT0`. The pixel
 shader input must retain both `SV_Position` and `TEXCOORD0`. Removing `SV_Position` can bind UV to the

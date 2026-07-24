@@ -134,6 +134,8 @@ formats.
 
 ### A1. Finish the native presentation foundation
 
+**Status: complete and owner-accepted on Windows for the 2D daily-driver path (2026-07-24).**
+
 Complete the current presentation migration for the 2D daily-driver path:
 
 - preserve the backend-neutral scene, event, and environment contracts;

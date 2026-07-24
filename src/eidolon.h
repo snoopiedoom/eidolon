@@ -75,6 +75,7 @@ typedef struct EidolonApp {
     EidolonSettingsUi *settings_ui;
     EidolonEventPump *event_pump;
     EidolonRenderMode render_mode;
+    EidolonPresentationPreference presentation_preference;
     EidolonDialogueTheme dialogue_theme;
     EidolonDialogueMovement dialogue_movement;
     unsigned int dialogue_hold_ms;

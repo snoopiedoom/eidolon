@@ -21,6 +21,7 @@ ImGui does not create `imgui.ini`; Eidolon has one persistence system.
 `config/settings.cfg` owns application-wide defaults:
 
 - `preferred_renderer`: `sprite`, `portrait`, or `model_3d`;
+- `presentation_preference`: `native` or `sdl_window_legacy`;
 - `display_scale`: presentation multiplier;
 - `vsync`: requests synchronization to the active display refresh;
 - `fps_limit`: an independent presentation ceiling from 1 to 1000, or `0` for no explicit cap;
@@ -41,7 +42,7 @@ Eidolon uses the active display rate as a software fallback instead of running w
 SDL resolves the per-user file through `SDL_GetPrefPath("snoopiedoom", "Eidolon")`; on Windows it is
 normally under `%APPDATA%\snoopiedoom\Eidolon\settings.cfg`.
 
-The file is sparse and may additionally contain:
+The file is sparse, may override the system fields above, and may additionally contain:
 
 - `portrait_face_mode`;
 - `dialogue_theme`;
@@ -58,29 +59,38 @@ seams. `primary` pins bubbles to the primary work area. `virtual` permits the bo
 all usable displays. `custom` uses the persisted rectangle; negative coordinates are valid. Reset
 returns the complete policy to its inherited default.
 
-## Experimental presentation backend
+## Presentation selection
 
-Windows developers can opt into the incomplete native composition path for controlled visual
-evaluation:
+The shipped `native` preference selects the best supported platform presentation at startup. On
+Windows, a portrait body normally selects `win32_dcomp`. Sprite and 3D bodies select
+`sdl_window_legacy` until native targets exist. Native host, graphics, or environment-bootstrap
+failure also selects `sdl_window_legacy` and records the exact reason. Explicit
+`sdl_window_legacy` preference skips the native attempt. Snapshots always use the legacy backend.
+
+The Display settings tab persists this portable preference; changes apply at the next launch.
+`native` does not encode DirectComposition into the user format, so another platform may resolve it
+to its own native backend.
+
+`EIDOLON_PRESENTATION_BACKEND` remains a developer override above persisted configuration:
 
 ```powershell
 $env:EIDOLON_PRESENTATION_BACKEND = "win32_dcomp"
 .\build\windows\eidolon.exe
 ```
 
-This override deliberately remains outside the saved user-settings contract while the backend is
-under construction. It currently supports portrait and dialogue layers, generation-bound CPU alpha
+Accepted override values are `native`, `win32_dcomp`, `sdl_legacy`, and `sdl_window_legacy`.
+Invalid values are logged and ignored. An override cannot make an unsupported body native: the
+body-capability decision still falls back explicitly. The preference UI continues to show the
+persisted choice rather than rewriting it from a temporary environment override.
+
+The DirectComposition backend supports portrait and dialogue layers, generation-bound CPU alpha
 masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
-body dragging, revisioned output/DPI state, deterministic active-output retirement and fallback,
-and bounded host-close/graphics-reset requests. Sprite and 3D targets, product-level native 3D
-pointer use, output-local host migration, default enablement, and evidence from real hardware
-device loss or display disconnect remain unfinished. The
-backend-level routed-pointer contract is covered deterministically. If native host/graphics
-creation or environment bootstrap fails, startup logs the reason and selects
-`sdl_window_legacy`. A device/backend reset during native operation stops submissions, attempts one
-fresh DirectComposition reconstruction from current product state, then logs and selects
-`sdl_window_legacy` if that reconstruction cannot present a complete current frame. Normal startup
-without the override and every snapshot continue to use `sdl_window_legacy`.
+body dragging, revisioned output/DPI state, deterministic active-output retirement, and bounded
+host-close/graphics-reset requests. A device/backend reset stops submissions, attempts one fresh
+DirectComposition reconstruction from current product state, then logs and selects
+`sdl_window_legacy` if that candidate cannot present a complete current frame. Sprite/3D native
+targets, output-local host migration, and evidence from real hardware device loss or display
+disconnect remain future or optional work rather than A1 blockers.
 
 Debug builds expose deterministic recovery probes. Set
 `EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES` to a positive frame count to inject a device reset, and
@@ -92,7 +102,9 @@ deterministic on single-monitor hosts.
 `EIDOLON_PRESENTATION_TEST_HIDDEN=1` and
 `EIDOLON_PRESENTATION_TEST_EXIT_AFTER_RECOVERY=1` support hidden reset automation.
 `EIDOLON_PRESENTATION_TEST_EXIT_AFTER_OUTPUT_REMOVAL=1` exits after the first complete replacement
-frame. Release builds ignore these test hooks.
+frame. `EIDOLON_PRESENTATION_TEST_IGNORE_USER_SETTINGS=1` isolates the shipped defaults, and
+`EIDOLON_PRESENTATION_TEST_EXIT_AFTER_FRAMES=<n>` terminates after a complete startup frame for
+selection proofs. Release builds ignore these test hooks.
 
 The Windows legacy fallback delegates character dragging to the native top-level move loop.
 Animation and dialogue presentation may pause until release; this is a documented fallback

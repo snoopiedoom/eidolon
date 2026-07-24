@@ -41,6 +41,82 @@ struct EidolonPresentation {
     uint64_t committed_scene_revision;
 };
 
+const char *eidolon_presentation_preference_name(EidolonPresentationPreference preference) {
+    switch (preference) {
+    case EIDOLON_PRESENTATION_PREFERENCE_NATIVE:
+        return "native";
+    case EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY:
+        return "sdl_window_legacy";
+    case EIDOLON_PRESENTATION_PREFERENCE_COUNT:
+        break;
+    }
+    return "invalid";
+}
+
+const char *
+eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason) {
+    switch (reason) {
+    case EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED:
+        return "native presentation selected";
+    case EIDOLON_PRESENTATION_SELECTION_EXPLICIT_LEGACY:
+        return "SDL legacy presentation explicitly selected";
+    case EIDOLON_PRESENTATION_SELECTION_NATIVE_UNAVAILABLE:
+        return "native presentation unavailable on this platform";
+    case EIDOLON_PRESENTATION_SELECTION_BODY_UNSUPPORTED:
+        return "native presentation does not support the requested body renderer";
+    case EIDOLON_PRESENTATION_SELECTION_BODY_UNAVAILABLE:
+        return "requested native body is unavailable";
+    case EIDOLON_PRESENTATION_SELECTION_INVALID_PREFERENCE:
+        return "presentation preference is invalid";
+    }
+    return "unknown presentation selection";
+}
+
+EidolonPresentationSelection
+eidolon_presentation_select(EidolonPresentationPreference preference, bool native_available,
+                            bool native_supports_body, bool native_body_available) {
+    if (preference == EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY) {
+        return (EidolonPresentationSelection){
+            .use_native = false,
+            .fallback = false,
+            .reason = EIDOLON_PRESENTATION_SELECTION_EXPLICIT_LEGACY,
+        };
+    }
+    if (preference != EIDOLON_PRESENTATION_PREFERENCE_NATIVE) {
+        return (EidolonPresentationSelection){
+            .use_native = false,
+            .fallback = true,
+            .reason = EIDOLON_PRESENTATION_SELECTION_INVALID_PREFERENCE,
+        };
+    }
+    if (!native_available) {
+        return (EidolonPresentationSelection){
+            .use_native = false,
+            .fallback = true,
+            .reason = EIDOLON_PRESENTATION_SELECTION_NATIVE_UNAVAILABLE,
+        };
+    }
+    if (!native_supports_body) {
+        return (EidolonPresentationSelection){
+            .use_native = false,
+            .fallback = true,
+            .reason = EIDOLON_PRESENTATION_SELECTION_BODY_UNSUPPORTED,
+        };
+    }
+    if (!native_body_available) {
+        return (EidolonPresentationSelection){
+            .use_native = false,
+            .fallback = true,
+            .reason = EIDOLON_PRESENTATION_SELECTION_BODY_UNAVAILABLE,
+        };
+    }
+    return (EidolonPresentationSelection){
+        .use_native = true,
+        .fallback = false,
+        .reason = EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED,
+    };
+}
+
 static EidolonPresentationLayerTarget *find_layer_target(EidolonPresentation *presentation,
                                                          EidolonSceneLayerId layer) {
     for (size_t index = 0U; index < EIDOLON_SCENE_LAYER_CAPACITY; ++index) {

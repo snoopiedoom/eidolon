@@ -29,6 +29,7 @@
 static void capture_runtime_settings(const EidolonApp *app, EidolonUserSettings *settings) {
     settings->overrides = 0U;
     settings->render_mode = (int)app->render_mode;
+    settings->presentation_preference = (int)app->presentation_preference;
     settings->display_scale = app->model_scale;
     settings->portrait_face_mode = eidolon_portrait_face_mode(app->portrait);
     settings->model_render_resolution = app->model_render_resolution;
@@ -62,6 +63,9 @@ static void mark_user_settings_dirty(EidolonApp *app, EidolonUserSettingField fi
     switch (field) {
     case EIDOLON_USER_SETTING_RENDER_MODE:
         app->user_settings.render_mode = (int)app->render_mode;
+        break;
+    case EIDOLON_USER_SETTING_PRESENTATION:
+        app->user_settings.presentation_preference = (int)app->presentation_preference;
         break;
     case EIDOLON_USER_SETTING_DISPLAY_SCALE:
         app->user_settings.display_scale = app->model_scale;
@@ -645,7 +649,6 @@ static bool ensure_portrait(EidolonApp *app) {
         eidolon_portrait_create(app->renderer, EIDOLON_CHARACTER_CONFIG_PATH, EIDOLON_ASSET_DIR);
     if (app->portrait == NULL) {
         eidolon_log_write("portrait", "could not activate portrait renderer: %s", SDL_GetError());
-        SDL_ClearError();
         return false;
     }
     return true;
@@ -664,7 +667,6 @@ static bool ensure_model(EidolonApp *app) {
                                       idle_tuning_from_config(&app->motion_config));
     if (app->model == NULL) {
         eidolon_log_write("model", "could not activate 3D renderer: %s", SDL_GetError());
-        SDL_ClearError();
         return false;
     }
     eidolon_app_set_model_rotation(app, app->model_yaw_degrees, app->model_pitch_degrees,
@@ -1284,9 +1286,22 @@ static void apply_settings_layer(EidolonApp *app, const EidolonUserSettings *set
             app->model_render_resolution = resolution;
         }
     }
+    if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_PRESENTATION) &&
+        settings->presentation_preference >= 0 &&
+        settings->presentation_preference < (int)EIDOLON_PRESENTATION_PREFERENCE_COUNT) {
+        eidolon_app_set_presentation_preference(
+            app, (EidolonPresentationPreference)settings->presentation_preference);
+    }
     if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_RENDER_MODE) &&
         settings->render_mode >= 0 && settings->render_mode < (int)EIDOLON_RENDER_MODE_COUNT) {
-        (void)eidolon_app_set_render_mode(app, (EidolonRenderMode)settings->render_mode);
+        const EidolonRenderMode requested = (EidolonRenderMode)settings->render_mode;
+        if (!eidolon_app_set_render_mode(app, requested)) {
+            eidolon_log_write("settings",
+                              "renderer unavailable requested=%s active=%s reason=%s",
+                              eidolon_render_mode_name(requested),
+                              eidolon_render_mode_name(app->render_mode), SDL_GetError());
+            SDL_ClearError();
+        }
     }
     if (eidolon_user_settings_is_overridden(settings, EIDOLON_USER_SETTING_PORTRAIT_FACE_MODE)) {
         eidolon_app_set_portrait_framing(app, settings->portrait_face_mode);
@@ -1336,6 +1351,16 @@ static bool presentation_test_hidden(void) {
 #if !defined(NDEBUG)
     const char *hidden_test = SDL_getenv("EIDOLON_PRESENTATION_TEST_HIDDEN");
     return hidden_test != NULL && SDL_strcmp(hidden_test, "1") == 0;
+#else
+    return false;
+#endif
+}
+
+static bool presentation_test_ignore_user_settings(void) {
+#if !defined(NDEBUG)
+    const char *ignore_settings =
+        SDL_getenv("EIDOLON_PRESENTATION_TEST_IGNORE_USER_SETTINGS");
+    return ignore_settings != NULL && SDL_strcmp(ignore_settings, "1") == 0;
 #else
     return false;
 #endif
@@ -1399,6 +1424,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     app->semantic_pose_index = EIDOLON_SEMANTIC_POSE_CUSTOM;
     app->primary_session_slot = -1;
     app->render_mode = EIDOLON_RENDER_MODE_PORTRAIT;
+    app->presentation_preference = EIDOLON_PRESENTATION_PREFERENCE_NATIVE;
     app->model_render_resolution = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
     app->bubble_bounds_mode = EIDOLON_BUBBLE_BOUNDS_AVATAR;
     app->bubble_custom_bounds = (SDL_Rect){0, 0, 1920, 1080};
@@ -1429,7 +1455,8 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
 
     bool stored_settings_loaded = false;
-    if (!app->snapshot_mode && eidolon_user_settings_resolve_path(
+    if (!app->snapshot_mode && !presentation_test_ignore_user_settings() &&
+        eidolon_user_settings_resolve_path(
                                    app->user_settings_path, sizeof(app->user_settings_path))) {
         SDL_PathInfo path_info;
         if (SDL_GetPathInfo(app->user_settings_path, &path_info)) {
@@ -1445,11 +1472,85 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         }
     }
 
+    EidolonRenderMode requested_render_mode = app->render_mode;
+    if (configured_defaults_loaded &&
+        eidolon_user_settings_is_overridden(&configured_defaults,
+                                            EIDOLON_USER_SETTING_RENDER_MODE) &&
+        configured_defaults.render_mode >= 0 &&
+        configured_defaults.render_mode < (int)EIDOLON_RENDER_MODE_COUNT) {
+        requested_render_mode = (EidolonRenderMode)configured_defaults.render_mode;
+    }
+    if (stored_settings_loaded &&
+        eidolon_user_settings_is_overridden(&app->user_settings,
+                                            EIDOLON_USER_SETTING_RENDER_MODE) &&
+        app->user_settings.render_mode >= 0 &&
+        app->user_settings.render_mode < (int)EIDOLON_RENDER_MODE_COUNT) {
+        requested_render_mode = (EidolonRenderMode)app->user_settings.render_mode;
+    }
+
+    EidolonPresentationPreference startup_preference = app->presentation_preference;
+    const char *preference_source = "built-in";
+    if (configured_defaults_loaded &&
+        eidolon_user_settings_is_overridden(&configured_defaults,
+                                            EIDOLON_USER_SETTING_PRESENTATION) &&
+        configured_defaults.presentation_preference >= 0 &&
+        configured_defaults.presentation_preference <
+            (int)EIDOLON_PRESENTATION_PREFERENCE_COUNT) {
+        startup_preference =
+            (EidolonPresentationPreference)configured_defaults.presentation_preference;
+        preference_source = "system";
+    }
+    if (stored_settings_loaded &&
+        eidolon_user_settings_is_overridden(&app->user_settings,
+                                            EIDOLON_USER_SETTING_PRESENTATION) &&
+        app->user_settings.presentation_preference >= 0 &&
+        app->user_settings.presentation_preference <
+            (int)EIDOLON_PRESENTATION_PREFERENCE_COUNT) {
+        startup_preference =
+            (EidolonPresentationPreference)app->user_settings.presentation_preference;
+        preference_source = "user";
+    }
+
     const char *presentation_override =
         !app->snapshot_mode ? SDL_getenv("EIDOLON_PRESENTATION_BACKEND") : NULL;
-    const bool native_presentation_requested =
-        presentation_override != NULL && strcmp(presentation_override, "win32_dcomp") == 0;
+    if (presentation_override != NULL) {
+        if (SDL_strcmp(presentation_override, "win32_dcomp") == 0 ||
+            SDL_strcmp(presentation_override, "native") == 0) {
+            startup_preference = EIDOLON_PRESENTATION_PREFERENCE_NATIVE;
+            preference_source = "environment";
+        } else if (SDL_strcmp(presentation_override, "sdl_window_legacy") == 0 ||
+                   SDL_strcmp(presentation_override, "sdl_legacy") == 0) {
+            startup_preference = EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY;
+            preference_source = "environment";
+        } else {
+            eidolon_log_write("renderer",
+                              "ignoring invalid EIDOLON_PRESENTATION_BACKEND=%s",
+                              presentation_override);
+        }
+    }
+    if (app->snapshot_mode) {
+        startup_preference = EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY;
+        preference_source = "snapshot";
+    }
+
+#if defined(_WIN32)
+    const bool native_available = true;
+    const char *native_backend_name = "win32_dcomp";
+#else
+    const bool native_available = false;
+    const char *native_backend_name = "native";
+#endif
+    const EidolonPresentationSelection presentation_selection = eidolon_presentation_select(
+        startup_preference, native_available,
+        requested_render_mode == EIDOLON_RENDER_MODE_PORTRAIT);
+    const bool native_presentation_requested = presentation_selection.use_native;
     char presentation_fallback_reason[256] = "";
+    if (presentation_selection.fallback) {
+        SDL_snprintf(
+            presentation_fallback_reason, sizeof(presentation_fallback_reason), "%s; body=%s",
+            eidolon_presentation_selection_reason_name(presentation_selection.reason),
+            eidolon_render_mode_name(requested_render_mode));
+    }
 #if defined(_WIN32)
     if (native_presentation_requested) {
         app->presentation = create_win32_dcomp_presentation(NULL);
@@ -1458,13 +1559,6 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
                         sizeof(presentation_fallback_reason));
             SDL_ClearError();
         }
-    }
-#else
-    (void)presentation_override;
-    if (native_presentation_requested) {
-        SDL_strlcpy(presentation_fallback_reason,
-                    "win32_dcomp is available only on Windows",
-                    sizeof(presentation_fallback_reason));
     }
 #endif
     if (app->presentation == NULL) {
@@ -1513,8 +1607,13 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         app->renderer = eidolon_sdl_legacy_renderer(app->presentation);
     }
     eidolon_log_write("renderer",
-                      "presentation requested=%s active=%s graphics=%s capabilities=0x%llx%s%s",
-                      native_presentation_requested ? "win32_dcomp" : "sdl_window_legacy",
+                      "presentation preference=%s source=%s requested=%s active=%s graphics=%s "
+                      "capabilities=0x%llx%s%s",
+                      eidolon_presentation_preference_name(startup_preference),
+                      preference_source,
+                      startup_preference == EIDOLON_PRESENTATION_PREFERENCE_NATIVE
+                          ? native_backend_name
+                          : "sdl_window_legacy",
                       eidolon_presentation_backend_name(app->presentation),
                       app->renderer != NULL ? SDL_GetRendererName(app->renderer) : "direct3d11",
                       (unsigned long long)eidolon_presentation_capabilities(app->presentation),
@@ -1671,7 +1770,18 @@ bool eidolon_app_set_render_mode(EidolonApp *app, EidolonRenderMode mode) {
         return false;
     }
     if (app->renderer == NULL && mode != EIDOLON_RENDER_MODE_PORTRAIT) {
-        SDL_SetError("the native presentation proof currently supports portrait bodies only");
+        if (!app->user_settings_applying && app->user_settings_ready) {
+            app->user_settings.render_mode = (int)mode;
+            app->user_settings.overrides |= EIDOLON_USER_SETTING_RENDER_MODE;
+            schedule_user_settings_save(app);
+            eidolon_log_write(
+                "renderer",
+                "body renderer queued requested=%s active=%s presentation=win32_dcomp "
+                "applies=next_launch fallback=sdl_window_legacy",
+                eidolon_render_mode_name(mode), eidolon_render_mode_name(app->render_mode));
+        }
+        SDL_SetError("the active native presentation supports portrait bodies only; "
+                     "the requested renderer will use SDL legacy after restart");
         return false;
     }
     bool ready = false;
@@ -1701,6 +1811,20 @@ bool eidolon_app_set_render_mode(EidolonApp *app, EidolonRenderMode mode) {
         mark_user_settings_dirty(app, EIDOLON_USER_SETTING_RENDER_MODE);
     }
     return true;
+}
+
+void eidolon_app_set_presentation_preference(EidolonApp *app,
+                                             EidolonPresentationPreference preference) {
+    if (preference < 0 || preference >= EIDOLON_PRESENTATION_PREFERENCE_COUNT ||
+        app->presentation_preference == preference) {
+        return;
+    }
+    app->presentation_preference = preference;
+    eidolon_log_write(
+        "renderer", "presentation preference=%s active=%s applies=next_launch",
+        eidolon_presentation_preference_name(preference),
+        app->presentation != NULL ? eidolon_presentation_backend_name(app->presentation) : "none");
+    mark_user_settings_dirty(app, EIDOLON_USER_SETTING_PRESENTATION);
 }
 
 void eidolon_app_select_portrait(EidolonApp *app, int expression) {
@@ -2047,6 +2171,11 @@ bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField fie
     switch (field) {
     case EIDOLON_USER_SETTING_RENDER_MODE:
         (void)eidolon_app_set_render_mode(app, (EidolonRenderMode)app->system_settings.render_mode);
+        break;
+    case EIDOLON_USER_SETTING_PRESENTATION:
+        eidolon_app_set_presentation_preference(
+            app,
+            (EidolonPresentationPreference)app->system_settings.presentation_preference);
         break;
     case EIDOLON_USER_SETTING_DISPLAY_SCALE:
         eidolon_app_set_model_scale(app, app->system_settings.display_scale);
@@ -2846,6 +2975,8 @@ void eidolon_app_run(EidolonApp *app) {
         debug_frame_trigger("EIDOLON_DCOMP_TEST_RESET_AFTER_FRAMES");
     const uint64_t dcomp_test_output_removal_after_frames =
         debug_frame_trigger("EIDOLON_DCOMP_TEST_REMOVE_ACTIVE_OUTPUT_AFTER_FRAMES");
+    const uint64_t presentation_test_exit_after_frames =
+        debug_frame_trigger("EIDOLON_PRESENTATION_TEST_EXIT_AFTER_FRAMES");
     uint64_t presented_frame_count = 0U;
     bool dcomp_test_reset_injected = false;
     bool dcomp_test_output_removal_injected = false;
@@ -3093,6 +3224,16 @@ void eidolon_app_run(EidolonApp *app) {
         const bool frame_drawn = eidolon_draw_frame(app);
 #if defined(_WIN32) && !defined(NDEBUG)
         ++presented_frame_count;
+        if (presentation_test_exit_after_frames > 0U &&
+            presented_frame_count >= presentation_test_exit_after_frames) {
+            eidolon_log_write(
+                "renderer",
+                "presentation startup proof complete active=%s body=%s frame=%llu",
+                eidolon_presentation_backend_name(app->presentation),
+                eidolon_render_mode_name(app->render_mode),
+                (unsigned long long)presented_frame_count);
+            app->running = false;
+        }
         if (!dcomp_test_reset_injected && dcomp_test_reset_after_frames > 0U &&
             presented_frame_count >= dcomp_test_reset_after_frames &&
             presentation_backend_is(app->presentation, "win32_dcomp")) {

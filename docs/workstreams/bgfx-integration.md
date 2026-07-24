@@ -163,14 +163,16 @@ exposes a public external-resource contract that removes the animated CPU bridge
   and integrate a native presentation wake source;
 - [ ] remove transitional SDL window/renderer aliases from `EidolonApp` as backend targets replace
   them;
-- [ ] enable the Win32 DirectComposition backend as a normal/default path after its snapshots,
+- [x] enable the Win32 DirectComposition backend as a normal/default path after its snapshots,
   interaction, environment handling, and recovery are accepted and fallback is explicit.
 
-This gate is the production migration, not another graphics experiment. The default visible runtime
-remains on `sdl_window_legacy`. Body, portrait, dialogue, and snapshot renderers still borrow its SDL
-renderer explicitly; the presentation object owns and destroys that renderer and its host. The
-portrait-only DirectComposition backend is now available through an explicit environment override,
-while default enablement remains blocked on parity and recovery.
+This gate is the production migration, not another graphics experiment. Windows portrait startup
+normally uses the DirectComposition backend. Body, portrait, dialogue, and snapshot renderers still
+borrow the SDL renderer explicitly where the legacy backend is selected; the presentation object
+owns and destroys that renderer and its host. Persisted `native` preference resolves by body
+capability: portrait uses DirectComposition, while sprite/3D bodies and native failure select
+`sdl_window_legacy` with a logged reason. Snapshots and explicit compatibility selection also use
+the legacy backend.
 
 #### Completed backend-owned target checkpoint
 
@@ -284,16 +286,16 @@ thresholds. Gate 5 owns comparative performance policy.
 
 ## Current checkpoint
 
-Gates 0 through 5 are complete. Gate 6 is in progress at the first opt-in native presentation
-checkpoint. Gate 5 selected direct D3D11 for the Windows compositor backend.
+Gates 0 through 5 are complete. Gate 6 has completed the A1 Windows 2D production slice; later
+sprite/3D native targets and removal of transitional SDL aliases remain separate migration work.
+Gate 5 selected direct D3D11 for the Windows compositor backend.
 bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
 not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
 unacceptable CPU readback bridge into DirectComposition. SDL_Renderer could wrap the external
 D3D11 targets, but retaining its unused window swapchain violated presentation ownership and
-produced a persistent idle worker on the test machine. No candidate entered the production
-renderer. The default production runtime still uses `sdl_window_legacy`. An explicit
-`EIDOLON_PRESENTATION_BACKEND=win32_dcomp` environment override now enables the incomplete
-portrait-only DirectComposition path for owner-controlled evaluation; it is not a shipped default.
+produced a persistent idle worker on the test machine. No shared graphics candidate entered the
+production renderer. Direct D3D11 now feeds the normal portrait-only DirectComposition path;
+`EIDOLON_PRESENTATION_BACKEND` remains a developer override rather than the activation mechanism.
 
 The first backend-neutral interaction slice is compiled: committed layer policy replaces
 layer-kind inference, Win32 translates activation and native move lifecycle into a bounded C17
@@ -311,10 +313,9 @@ remains Gate 6 work under
 Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal native top-level move
 loop and pauses application-driven animation while dragging. That is an established fallback
 limitation, not an unfinished DirectComposition cadence patch. Deterministic active-output
-retirement and fallback are now proven, and the native dialogue raster is seam-free and
-owner-accepted. Remaining native visual-parity checks are next. The remaining SDL click, settings,
-mixed-DPI/output, placement, and post-drag cadence checks are required before normal Windows
-selection, but do not block native implementation.
+retirement and fallback are proven, and the native dialogue raster is seam-free and owner-accepted.
+The owner also accepted native visual parity, SDL clicks/settings/mixed-DPI/output placement,
+post-drag resumption, persisted presentation selection, and body-capability fallback.
 
 ## Restart checklist
 
@@ -330,6 +331,23 @@ selection, but do not block native implementation.
    before handoff.
 
 ## Evidence log
+
+### 2026-07-24: A1 native presentation foundation accepted
+
+- a portable persisted `presentation_preference` now selects `native` or
+  `sdl_window_legacy` without encoding a Windows backend into user state;
+- startup resolves the requested body before backend creation: portrait selects DirectComposition,
+  while sprite/3D bodies select SDL compatibility with an explicit unsupported-body reason;
+- native creation or environment bootstrap failure retains the existing explicit SDL fallback;
+- the settings UI exposes inherited preference, active backend, restart semantics, and queued
+  unsupported body selection instead of silently coercing the body to portrait;
+- deterministic hidden startup proofs pass for ordinary DirectComposition, explicit SDL, saved 3D
+  body fallback, and forced native creation failure;
+- debug and release builds, `make check`, settings snapshot inspection, and whitespace validation
+  pass;
+- the owner accepted no-environment native startup, automatic 3D fallback, legacy interaction and
+  mixed-DPI/output behavior, post-drag resumption, and persisted native/legacy restart selection;
+- A1 is complete; source-instance identity is the next roadmap gate.
 
 ### 2026-07-24: native dialogue seam removed and accepted
 
