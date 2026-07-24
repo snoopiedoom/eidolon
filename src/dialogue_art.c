@@ -50,37 +50,35 @@ static void fill_rounded_rect(SDL_Renderer *renderer, const SDL_FRect *rect, flo
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 
     const float bounded_radius = SDL_min(radius, SDL_min(rect->w, rect->h) * 0.5F);
-    const SDL_FRect bands[] = {
-        {rect->x + bounded_radius, rect->y, rect->w - bounded_radius * 2.0F, bounded_radius},
-        {rect->x, rect->y + bounded_radius, rect->w, rect->h - bounded_radius * 2.0F},
-        {rect->x + bounded_radius, rect->y + rect->h - bounded_radius,
-         rect->w - bounded_radius * 2.0F, bounded_radius},
-    };
-    SDL_RenderFillRects(renderer, bands, SDL_arraysize(bands));
-
     const int radius_i = (int)SDL_ceilf(bounded_radius);
+    const SDL_FRect center = {
+        rect->x,
+        rect->y + (float)radius_i,
+        rect->w,
+        rect->h - (float)(radius_i * 2),
+    };
+    if (center.h > 0.0F) {
+        SDL_RenderFillRect(renderer, &center);
+    }
     for (int row = 0; row < radius_i; ++row) {
         const float yf = bounded_radius - ((float)row + 0.5F);
         const float span = SDL_sqrtf(SDL_max(0.0F, bounded_radius * bounded_radius - yf * yf));
-        SDL_FRect left = {
-            rect->x + bounded_radius - span,
-            rect->y + (float)row,
-            span,
-            1.0F,
+        const float inset = bounded_radius - span;
+        SDL_FRect strips[2] = {
+            {
+                rect->x + inset,
+                rect->y + (float)row,
+                rect->w - inset * 2.0F,
+                1.0F,
+            },
+            {
+                rect->x + inset,
+                rect->y + rect->h - (float)row - 1.0F,
+                rect->w - inset * 2.0F,
+                1.0F,
+            },
         };
-        SDL_FRect right = {
-            rect->x + rect->w - bounded_radius,
-            rect->y + (float)row,
-            span,
-            1.0F,
-        };
-        SDL_RenderFillRect(renderer, &left);
-        SDL_RenderFillRect(renderer, &right);
-
-        left.y = rect->y + rect->h - (float)row - 1.0F;
-        right.y = left.y;
-        SDL_RenderFillRect(renderer, &left);
-        SDL_RenderFillRect(renderer, &right);
+        SDL_RenderFillRects(renderer, strips, SDL_arraysize(strips));
     }
 }
 

@@ -766,8 +766,10 @@ A physical display disconnect remains hardware evidence rather than a missing co
 Gate: one bubble can type or fade without invalidating body or sibling-bubble content.
 
 **Status:** implemented and owner-accepted for the portrait path. Legacy and DirectComposition
-presentation use independently revised dialogue targets. The remaining native black seam is a
-raster-parity defect, not a layer-ownership gap.
+presentation use independently revised dialogue targets. The native software-surface raster now
+draws each rounded-corner scanline as one continuous span, eliminating the internal join that
+created two one-pixel gaps near the left edge; automated pixel coverage and owner-controlled native
+output are accepted.
 
 ### Phase 4: sprite and 3D targets
 

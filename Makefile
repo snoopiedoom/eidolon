@@ -506,6 +506,7 @@ TEST_DIR := $(BUILD_ROOT)/tests/$(MODE)
 ANIMATION_TEST := $(TEST_DIR)/animation_test$(EXE)
 STATE_TEST := $(TEST_DIR)/state_test$(EXE)
 DIALOGUE_TEST := $(TEST_DIR)/dialogue_test$(EXE)
+DIALOGUE_ART_TEST := $(TEST_DIR)/dialogue_art_test$(EXE)
 DELIVERY_TEST := $(TEST_DIR)/delivery_test$(EXE)
 HOOK_OUTPUT_TEST := $(TEST_DIR)/hook_output_test$(EXE)
 MOTION_TEST := $(TEST_DIR)/motion_test$(EXE)
@@ -553,6 +554,13 @@ $(DIALOGUE_TEST): tests/dialogue_test.c src/dialogue.c src/delivery.c \
 		src/expression_director.c src/affect.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(DIALOGUE_ART_TEST): tests/dialogue_art_test.c src/dialogue_art.c src/text_renderer.c \
+		src/dialogue.c src/delivery.c src/expression_director.c src/affect.c src/log.c \
+		| $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+	$(copy-runtime)
 
 $(DELIVERY_TEST): tests/delivery_test.c src/delivery.c | $(TEST_RUNTIME)
 	$(make-dir)
@@ -674,7 +682,7 @@ provider-live-test: $(LIVE_SOURCE_TEST)
 codex-relay-test: $(CODEX_RELAY_TEST)
 	"$(CODEX_RELAY_TEST)"
 
-check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
+check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
@@ -683,6 +691,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DELIVERY_TEST) $(HOOK_
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
+	$(DIALOGUE_ART_TEST)
 	$(DELIVERY_TEST)
 	$(HOOK_OUTPUT_TEST)
 	$(MOTION_TEST)

@@ -311,9 +311,10 @@ remains Gate 6 work under
 Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal native top-level move
 loop and pauses application-driven animation while dragging. That is an established fallback
 limitation, not an unfinished DirectComposition cadence patch. Deterministic active-output
-retirement and fallback are now proven; native dialogue-raster parity is next. The remaining SDL
-click, settings, mixed-DPI/output, placement, and post-drag cadence checks are required before
-normal Windows selection, but do not block native implementation.
+retirement and fallback are now proven, and the native dialogue raster is seam-free and
+owner-accepted. Remaining native visual-parity checks are next. The remaining SDL click, settings,
+mixed-DPI/output, placement, and post-drag cadence checks are required before normal Windows
+selection, but do not block native implementation.
 
 ## Restart checklist
 
@@ -329,6 +330,18 @@ normal Windows selection, but do not block native implementation.
    before handoff.
 
 ## Evidence log
+
+### 2026-07-24: native dialogue seam removed and accepted
+
+- the native software-surface probe reproduced two one-pixel gaps where separately rasterized
+  rounded-corner strips met the center band at `bubble.x + radius`;
+- rounded rectangles now draw one continuous span per corner scanline, removing the internal join
+  without changing alpha mode, compositor ownership, or the D3D11 upload path;
+- the dialogue-art regression asserts opaque coverage at both formerly broken pixels and now runs
+  under `make check`;
+- the normal debug and release builds, ordinary regressions, DirectComposition backend smoke,
+  legacy dialogue snapshot, and whitespace validation pass;
+- the owner confirmed both left-edge lines are gone in the live DirectComposition dialogue.
 
 ### 2026-07-24: deterministic active-output fallback compiled
 
@@ -483,8 +496,9 @@ normal Windows selection, but do not block native implementation.
 - transparent pixels return native hit-test transparency. Opaque body pixels start Win32-owned
   capture and top-level movement without coupling mouse motion to frame presentation. Native
   dialogue-click routing and output-local host migration remain future work;
-- the owner observed a short black seam near the left side of the native dialogue artwork. It is a
-  known surface-raster parity defect, not a compositor-ownership blocker;
+- at this checkpoint the owner observed a short black seam near the left side of the native
+  dialogue artwork; it was recorded as a deferred surface-raster parity defect and is resolved by
+  the later seam-removal checkpoint;
 - the hidden production-backend smoke passed host creation, target creation, D3D11 submission,
   alpha-mask attachment, visual-tree commit, compositor synchronization, and teardown; ordinary
   regression gates, the normal Windows build, formatting, and whitespace validation passed.

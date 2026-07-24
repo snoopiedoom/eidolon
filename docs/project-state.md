@@ -127,7 +127,6 @@ interaction after both injected recovery branches.
 - Windows `sdl_window_legacy` dragging enters the native top-level modal move loop, so animation and
   dialogue presentation may pause until release; this is a documented fallback limitation, not the
   cadence target for DirectComposition;
-- the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
 - native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
 - portable Linux font fallback and feature parity remain unfinished;
@@ -154,7 +153,7 @@ The immediate goal is to finish the DirectComposition portrait/dialogue path and
 replace `sdl_window_legacy` as the normal Windows presentation selection. The legacy backend remains
 a functional fallback; its confirmed modal-drag cadence limitation does not block native progress.
 
-1. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
+1. complete owner-controlled DirectComposition visual parity checks;
 2. owner-confirm the SDL fallback still launches, routes clicks and `F1`/right-click settings,
    publishes correct mixed-DPI/output/placement state, and resumes cadence cleanly after its known
    modal drag;
