@@ -161,7 +161,16 @@ the no-activate native host deliberately does not register a global hotkey.
 
 ## EPR and local VRM development
 
-Debug builds expose an intentionally non-persistent body override:
+The first EPR body is a manually acquired local asset. Eidolon cannot redistribute it and does not
+implement VRoid Hub/Pixiv authentication. Sign in through the
+[reference model's VRoid Hub page](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654),
+accept the current terms, download the VRM 1.0 file, and validate it:
+
+```powershell
+make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+```
+
+Debug builds then expose an intentionally non-persistent body override:
 
 ```powershell
 $env:EIDOLON_BODY_RENDERER = "model_3d"
@@ -172,13 +181,15 @@ $env:EIDOLON_PRESENTATION_BACKEND = "sdl_window_legacy"
 
 `EIDOLON_BODY_RENDERER` accepts `sprite`, `portrait`, or `model_3d`. It is ignored by release
 builds, does not write user settings, and does not change the shipped portrait default.
-`EIDOLON_VRM_PATH` replaces Rio's compiled model path only when the 3D renderer is initialized. The
-first EPR path accepts VRM 1.0; legacy VRM 0.x files are rejected rather than guessed into the new
-contract. Third-party VRM assets remain local and separately licensed.
+`EIDOLON_VRM_PATH` selects a user-supplied body variant only when the existing 3D renderer is
+initialized. Without it, legacy Rio 3D remains available but EPR has no VRM body profile and stays
+inactive. The first EPR path accepts VRM 1.0; legacy VRM 0.x files are rejected rather than guessed
+into the new contract. Third-party VRM assets remain local and separately licensed.
 
-An unavailable or invalid override leaves the already initialized portrait active. EPR starts only
-after a valid VRM body profile exists; EPR or VRM failure does not stop IPC, configured session
-sources, or the session registry.
+An unavailable or invalid configured path emits the acquisition page and validation command and
+leaves the already initialized portrait active. EPR starts only after a valid VRM body profile
+exists; EPR or VRM failure does not stop IPC, configured session sources, or the session registry.
+Neither Make nor the runtime downloads the file or handles Pixiv credentials.
 
 ## Agent adapters
 

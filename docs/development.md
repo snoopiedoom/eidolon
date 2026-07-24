@@ -110,6 +110,9 @@ exit:
 `--snapshot-performance` accepts a fixed logical tick from 0 through 5000 milliseconds in 20 ms
 increments. It drives the synthetic EPR evidence fixture, projects the resulting canonical control
 through the selected VRM, and captures the existing SDL 3D path. It does not make 3D the default.
+The VRM must first be acquired manually and pass `make vrm-check VRM_PATH=...`; set
+`EIDOLON_VRM_PATH` before invoking the snapshot. The runtime never performs VRoid Hub/Pixiv
+authentication or asset download.
 
 Automated Blender inspection must use `--background`. `make model-mouth-calibrate` is the sole
 intentional live exception because it is an explicitly user-operated calibration tool.

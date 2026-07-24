@@ -100,6 +100,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
 - one local VRM 1.0 path validates authoritative humanoid roles and optional morph/look-at
   capabilities, projects monotonic control transactions, renders morph/material/alpha data, and
   degrades optional capabilities locally;
+- the reference VRM is acquired manually through its Pixiv-authenticated VRoid Hub page, remains
+  outside Git under its no-redistribution terms, and is validated locally by `make vrm-check`;
 - deterministic performance snapshots and a hidden five-second SDL 3D run complete with the
   portrait/default and native-presentation selections unchanged;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait

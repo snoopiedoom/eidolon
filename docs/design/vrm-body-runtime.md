@@ -76,6 +76,14 @@ The visible first body is a local legally usable VRM 1.0 asset. Large third-part
 archives are not committed. Runtime selection uses an explicit local path/configuration boundary;
 it does not replace the current portrait default.
 
+The first reference implementation uses
+[DECAGRAMMATON on VRoid Hub](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654).
+The operator owns the Pixiv-authenticated acquisition step and passes the resulting path through
+`EIDOLON_VRM_PATH`. `make vrm-check VRM_PATH=...` validates the format, required humanoid roles, and
+body profile before launch. Make and the runtime must not download the asset, receive Pixiv
+credentials, or weaken the model's embedded terms. The current terms forbid redistribution and
+modification and require credit, so the asset remains outside Git.
+
 An invalid or unavailable VRM disables only that body variant. Portrait and session observation
 remain operational.
 

@@ -74,6 +74,20 @@ make check
 `make text-setup` and `make affect-setup` are explicit, checksum-verified dependency setup steps.
 Ordinary builds never download anything.
 
+The optional EPR/VRM performance body is also not downloaded or redistributed by Eidolon. Sign in
+to VRoid Hub with Pixiv, manually acquire the
+[reference VRM 1.0 model](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654),
+and validate the local file before using it:
+
+```powershell
+make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+$env:EIDOLON_VRM_PATH = "C:\local-assets\character.vrm"
+```
+
+The model page currently permits avatar use but forbids redistribution and modification and
+requires credit. Do not add the downloaded file to this repository. Eidolon never receives or
+stores Pixiv credentials.
+
 The bundled Bunny Asuna manifest expects ten transparent portraits under
 `assets/characters/asuna-bunny/portraits`. Extracted game art and the Rio source rip are deliberately
 excluded from Git; a fresh checkout without those assets still retains the reusable engines and

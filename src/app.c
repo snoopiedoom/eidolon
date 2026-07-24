@@ -656,6 +656,7 @@ static bool ensure_portrait(EidolonApp *app) {
 
 static bool ensure_model(EidolonApp *app) {
     const char *model_path;
+    bool vrm_path_configured = false;
     if (app->renderer == NULL) {
         SDL_SetError("3D rendering requires the SDL legacy presentation");
         return false;
@@ -665,13 +666,29 @@ static bool ensure_model(EidolonApp *app) {
     }
     model_path = SDL_getenv("EIDOLON_VRM_PATH");
     if (model_path == NULL || model_path[0] == '\0') {
+        eidolon_log_write(
+            "performance",
+            "EPR VRM body inactive; manually acquire a VRM 1.0 model from %s, validate it with "
+            "make vrm-check VRM_PATH=..., then set EIDOLON_VRM_PATH; legacy Rio 3D remains "
+            "available",
+            EIDOLON_VRM_REFERENCE_URL);
         model_path = EIDOLON_MODEL_PATH;
+    } else {
+        vrm_path_configured = true;
     }
     app->model = eidolon_model_create(app->renderer, model_path, EIDOLON_SHADER_DIR,
                                       neutral_pose_from_config(&app->motion_config),
                                       idle_tuning_from_config(&app->motion_config));
     if (app->model == NULL) {
-        eidolon_log_write("model", "could not activate 3D renderer: %s", SDL_GetError());
+        if (vrm_path_configured) {
+            eidolon_log_write(
+                "model",
+                "configured EIDOLON_VRM_PATH is unusable path=%s reason=%s; acquire the body "
+                "manually from %s and validate it with make vrm-check VRM_PATH=...",
+                model_path, SDL_GetError(), EIDOLON_VRM_REFERENCE_URL);
+        } else {
+            eidolon_log_write("model", "could not activate 3D renderer: %s", SDL_GetError());
+        }
         return false;
     }
     eidolon_app_set_model_rotation(app, app->model_yaw_degrees, app->model_pitch_degrees,

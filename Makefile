@@ -145,6 +145,8 @@ else
 SHADER_OUTPUTS := $(SPIRV_SHADERS) $(DXIL_SHADERS)
 endif
 RUNTIME_MODEL := $(CURDIR)/assets/model/rio.glb
+VRM_REFERENCE_URL := https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654
+VRM_PATH ?=
 MOTION_CONFIG := $(CURDIR)/config/motion.cfg
 CHARACTER_CONFIG := $(CURDIR)/config/character.cfg
 SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
@@ -158,6 +160,7 @@ CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
 	"-DEIDOLON_FONT_PATH=\"$(CURDIR)/assets/fonts/MesloLG Nerd Font/MesloLGSNerdFontMono-Regular.ttf\"" \
 	-DEIDOLON_MODEL_PATH=\"$(RUNTIME_MODEL)\" \
+	-DEIDOLON_VRM_REFERENCE_URL=\"$(VRM_REFERENCE_URL)\" \
 	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
 	-DEIDOLON_SYSTEM_SETTINGS_PATH=\"$(abspath config/settings.cfg)\" \
 	-DEIDOLON_CHARACTER_CONFIG_PATH=\"$(abspath $(CHARACTER_CONFIG))\" \
@@ -182,7 +185,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -766,6 +769,17 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(VRM_BODY_TEST)
 	$(VRM_PROJECTION_TEST)
 
+vrm-check: $(VRM_BODY_TEST)
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Eidolon does not download or redistribute its reference VRM."
+	@echo "Sign in with Pixiv and acquire the VRM 1.0 model manually:"
+	@echo "$(VRM_REFERENCE_URL)"
+	@echo "Then run: make vrm-check VRM_PATH=/absolute/path/to/model.vrm"
+	@false
+else
+	"$(VRM_BODY_TEST)" "$(VRM_PATH)"
+endif
+
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json
 MODEL_MATERIAL_AUDIT := $(CURDIR)/build/model-audit/ch0331-materials.json
@@ -853,6 +867,7 @@ help:
 	@echo "make character-sprites  inspect the complete Blue Archive portrait download"
 	@echo "make character-sprites-download  download all grouped character portraits"
 	@echo "make character-sprites-check  test wiki filename grouping without network access"
+	@echo "make vrm-check VRM_PATH=...  validate a manually acquired VRM 1.0 performance body"
 	@echo "make log             tail the Eidolon debug log"
 	@echo "make shaders         bake SDL_GPU SPIR-V and DXIL shaders"
 	@echo "make model-audit     inspect every Rio FBX with Blender"

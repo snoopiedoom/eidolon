@@ -108,6 +108,19 @@ Large third-party VRM files remain local and uncommitted. A distributable charac
 carry compatible rights metadata before it can ship. See the
 [VRM body runtime contract](design/vrm-body-runtime.md).
 
+The first reference body is
+[DECAGRAMMATON by Leona_SAN34](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654).
+Its current VRoid Hub terms identify it as VRM 1.0, permit avatar use, require credit, and prohibit
+redistribution and modification. The embedded author is `reona`. Operators must authenticate with
+their own Pixiv account, acquire the file manually, and re-check the page terms at download time.
+Eidolon does not automate authentication or download and must never commit the resulting `.vrm`.
+
+Validate any manually acquired candidate through the same parser used by the runtime:
+
+```powershell
+make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+```
+
 ## Project-specific: Rio authoring and repair
 
 The canonical body source is `CH0331_Mesh.fbx`: five meshes, 10,842 vertices, and a 127-bone body
