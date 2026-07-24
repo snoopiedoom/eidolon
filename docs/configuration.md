@@ -70,10 +70,16 @@ $env:EIDOLON_PRESENTATION_BACKEND = "win32_dcomp"
 
 This override deliberately remains outside the saved user-settings contract while the backend is
 under construction. It currently supports portrait and dialogue layers, generation-bound CPU alpha
-masks, transformed per-pixel hit testing, and Win32-owned body dragging. Dialogue click routing,
-sprite and 3D targets, device-loss recovery, output-local host migration, and default enablement
-remain unfinished. An explicit native request fails closed if host or graphics initialization
-fails; normal startup and every snapshot continue to use `sdl_window_legacy`.
+masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
+body dragging, and revisioned output/DPI state. Sprite and 3D targets, graphics-reset/close/routed
+pointer parity, physical output-removal proof, device-loss recovery, output-local host migration,
+and default enablement remain unfinished. An explicit native request fails closed if host or
+graphics initialization fails; normal startup and every snapshot continue to use
+`sdl_window_legacy`.
+
+The Windows legacy fallback delegates character dragging to the native top-level move loop.
+Animation and dialogue presentation may pause until release; this is a documented fallback
+limitation rather than the cadence expected from `win32_dcomp`.
 
 ## 2D character manifest
 
@@ -121,7 +127,8 @@ Units are part of key names. Arm lowering accepts `-45..90` degrees, elbow addit
 sliders for pose authoring; raw neutral values are diagnostics, not a semantic pose format.
 
 Press `F5` to force-reload character and motion configuration even when file timestamps or hashes
-have not changed.
+have not changed. This shortcut requires the legacy SDL presentation window to own keyboard focus;
+the no-activate native host deliberately does not register a global hotkey.
 
 ## Agent adapters
 

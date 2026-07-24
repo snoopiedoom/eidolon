@@ -2,15 +2,15 @@
 
 ## Purpose
 
-This document is the resumable working state for evaluating bgfx as Eidolon's shared graphics
-backend. It records approved constraints, dependency revisions, completed gates, evidence, failures,
-and the exact next checkpoint.
+This document records the completed bgfx/SDL_GPU graphics evaluation and the production
+presentation-boundary migration that followed it. It retains approved constraints, dependency
+revisions, evidence, failures, and the exact Gate 6 restart state.
 
 Stable architectural conclusions belong in
 [`docs/design/native-presentation.md`](../design/native-presentation.md). This file may describe
 unfinished experiments, but it must never present them as production behavior.
 
-## Objective
+## Original graphics-spike objective
 
 Determine whether bgfx can provide one maintainable rendering layer for Eidolon's sprite, portrait,
 and 3D bodies across Windows, Linux, macOS, Android, and iOS without weakening native compositor
@@ -159,23 +159,23 @@ exposes a public external-resource contract that removes the animated CPU bridge
   presentation revisions;
 - [x] publish committed interaction policy and route native activation/move edges through a
   bounded C17 queue without application calls from native callbacks;
-- [ ] publish revisioned active-host environments, copy full topology into caller-owned storage,
+- [x] publish revisioned active-host environments, copy full topology into caller-owned storage,
   and integrate a native presentation wake source;
 - [ ] remove transitional SDL window/renderer aliases from `EidolonApp` as backend targets replace
   them;
-- [ ] enable the Win32 DirectComposition backend only after legacy snapshots, interaction,
-  mixed-DPI environment handling, and recovery remain equivalent.
+- [ ] enable the Win32 DirectComposition backend as a normal/default path after its snapshots,
+  interaction, environment handling, and recovery are accepted and fallback is explicit.
 
-This gate is the production migration, not another graphics experiment. The first checkpoint keeps
-the visible runtime on `sdl_window_legacy`. Body, portrait, dialogue, and snapshot renderers still
-borrow its SDL renderer explicitly; the presentation object now owns and destroys that renderer and
-its host. Native DirectComposition remains disabled until immutable scene snapshots and independent
-layer revisions exist.
+This gate is the production migration, not another graphics experiment. The default visible runtime
+remains on `sdl_window_legacy`. Body, portrait, dialogue, and snapshot renderers still borrow its SDL
+renderer explicitly; the presentation object owns and destroys that renderer and its host. The
+portrait-only DirectComposition backend is now available through an explicit environment override,
+while default enablement remains blocked on parity and recovery.
 
-#### Backend-owned target checkpoint
+#### Completed backend-owned target checkpoint
 
-The next checkpoint preserves the legacy SDL presentation while removing monolithic pixel
-ownership in small, owner-verified slices:
+This checkpoint preserved legacy SDL presentation while removing monolithic pixel ownership in
+small, owner-verified slices:
 
 1. represent portrait motion as resolved bounds, rotation, and a normalized pivot while expression
    and crop selection remain content;
@@ -189,8 +189,8 @@ ownership in small, owner-verified slices:
 6. accept the checkpoint through four narrow revision/independence tests, redraw instrumentation,
    ordinary regression gates, deterministic snapshots, and owner-controlled visual evaluation.
 
-DirectComposition remains disabled throughout this checkpoint. Failed content updates retain the
-last valid target and do not acknowledge the requested content revision.
+DirectComposition remained disabled while this checkpoint was implemented. Failed content updates
+retain the last valid target and do not acknowledge the requested content revision.
 
 ## Build contract proven by Gates 1 and 2
 
@@ -300,9 +300,15 @@ layer-kind inference, Win32 translates activation and native move lifecycle into
 queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
 completion. The owner accepted that interaction slice. Both Windows backends now publish
 revisioned active-host environments and caller-owned topology; SDL legacy pointer, close, and
-graphics-reset parity plus owner-controlled mixed-DPI checks remain Gate 6 work under
+graphics-reset event meaning remains Gate 6 work under
 [`docs/design/presentation-events.md`](../design/presentation-events.md) and
 [`docs/design/presentation-environment.md`](../design/presentation-environment.md).
+
+Owner evaluation confirmed that Windows `sdl_window_legacy` enters the modal native top-level move
+loop and pauses application-driven animation while dragging. That is an established fallback
+limitation, not an unfinished DirectComposition cadence patch. The next Gate 6 goal is to finish
+the native event, output-removal, recovery, and visual-parity work required to make
+`win32_dcomp` the normal Windows selection with explicit legacy fallback.
 
 ## Restart checklist
 
@@ -312,12 +318,22 @@ graphics-reset parity plus owner-controlled mixed-DPI checks remain Gate 6 work 
 2. Run `git status --short --branch`; do not absorb unrelated changes.
 3. Confirm the current gate and its unchecked acceptance items.
 4. Record dependency commit hashes before editing build rules.
-5. Keep bgfx targets opt-in until Gate 5.
+5. Keep bgfx targets opt-in as retained evidence; Gate 5 rejected production adoption on Windows.
 6. After each gate, update its evidence and the current checkpoint here.
-7. Run `git diff --check`, the new focused target, `make check`, and a normal Windows build before
-   handoff.
+7. Run `git diff --check`, `make check`, the focused presentation tests, and a normal Windows build
+   before handoff.
 
 ## Evidence log
+
+### 2026-07-24: legacy modal drag recorded; DirectComposition made the next goal
+
+- owner evaluation confirmed that `sdl_window_legacy` pauses application-driven animation during
+  its Windows modal top-level drag;
+- source inspection confirmed the fallback deliberately delegates to `WM_NCLBUTTONDOWN` with
+  `HTCAPTION`, while `win32_dcomp` owns capture and movement without entering that modal loop;
+- documentation now distinguishes equivalent event/environment meaning from compositor cadence;
+- Gate 6 proceeds through DirectComposition event completion, output-removal proof, recovery,
+  visual parity, and explicit fallback before normal/default selection.
 
 ### 2026-07-24: SDL event and environment ownership compiled
 
@@ -336,8 +352,8 @@ graphics-reset parity plus owner-controlled mixed-DPI checks remain Gate 6 work 
   dragging, click-through, dialogue activation, and final reflow behavior;
 - all ordinary regressions, the warning-clean Windows build, formatting, whitespace validation,
   and a hidden staged snapshot pass;
-- owner-controlled legacy drag, click, settings, mixed-DPI, and cross-monitor confirmation remains
-  the current checkpoint.
+- owner-controlled legacy drag confirmed the documented modal-loop limitation; it is no longer the
+  current checkpoint or a native cadence gate.
 
 ### 2026-07-24: presentation event slice compiled
 

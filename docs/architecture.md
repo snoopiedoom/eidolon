@@ -23,11 +23,17 @@ lifecycle state + semantic expression + delivery cues
                     ↓
 selected sprite | portrait | 3D body renderer
                     ↓
-transparent SDL composition + native hit testing
+renderer-neutral scene + body/dialogue content
+                    ↓
+sdl_window_legacy | opt-in win32_dcomp portrait
+                    ↓
+transparent desktop presentation + native hit testing
 ```
 
-This is the current implementation, not the permanent presentation boundary. The target separates
-content rendering from platform-native surface presentation:
+This is the current implementation. Its presentation boundary is real, but the legacy path still
+retains transitional SDL renderer aliases and the native path currently supports only portraits.
+The completed target separates every body/content renderer from platform-native surface
+presentation:
 
 ```text
 renderer-neutral scene snapshot
@@ -188,16 +194,20 @@ are attached to source offsets, not rendered lines.
 The shipped default remains `sdl_window_legacy`: SDL owns the transparent window, D3D11 device,
 context, and swapchain. The 3D renderer borrows that device and draws into an SDL-owned target
 texture; SDL samples the same allocation during final composition. There is no animated full-frame
-CPU transfer, staging-map loop, or upload.
+CPU transfer, staging-map loop, or upload. On Windows, its character drag delegates to the native
+top-level move loop and may pause application-driven animation until release. That known fallback
+limitation is not a DirectComposition parity target.
 
 The opt-in `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
-It currently supports the portrait body only. Native dialogue activation and move completion now
-cross the bounded presentation-event queue and are owner-confirmed. Revisioned Win32 environment
-publication, topology copying, and one application-owned environment transaction are implemented;
-mixed-DPI cross-monitor behavior is owner-confirmed. Physical output removal, output-local host
-migration on non-Windows platforms, sprite/3D targets, and device-loss recovery remain unfinished.
+It currently supports the portrait body only. Native dialogue activation, body-context settings,
+and move completion cross the bounded presentation-event queue and are owner-confirmed. Revisioned
+Win32 environment publication, topology copying, and one application-owned environment transaction
+are implemented; mixed-DPI cross-monitor behavior is owner-confirmed. Physical output removal,
+output-local host migration, sprite/3D targets, and device-loss recovery remain unfinished.
+Finishing the portrait path's event, output-removal, recovery, and visual-parity work so it can
+replace the legacy default is the active presentation goal.
 
 The D3D11 vertex layout uses `POSITION`, `TEXCOORD0`, `BLENDINDICES0`, and `BLENDWEIGHT0`. The pixel
 shader input must retain both `SV_Position` and `TEXCOORD0`. Removing `SV_Position` can bind UV to the

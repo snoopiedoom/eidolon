@@ -40,6 +40,9 @@ Presentation-event parity for those remaining edges is still explicit work. The 
 native activation, body-context settings, cancel-on-drag, click-through, smooth movement, and one
 stable final reflow. The no-activate native host deliberately does not claim keyboard focus or
 register a system-wide `F1` hotkey; right-click is its reliable settings entry point.
+The Windows SDL fallback still delegates character movement to the modal native top-level move
+loop, so its animation cadence can pause until release. Equivalent event meaning does not imply
+equivalent compositor cadence.
 
 Output, DPI, usable bounds, safe area, orientation, and refresh are revisioned state rather than
 lossless interaction history. Their publication, coalescing, topology, and wake semantics are owned
@@ -345,23 +348,30 @@ must remain bounded and must not call application code while holding a backend l
 - forced capture loss cancels the interaction without leaving a stuck pressed or dragging state;
 - a motion-flood test demonstrates bounded queue use, coalescing, and observable resync behavior;
 - a retired bubble cannot receive a delayed activation intended for its former layer id/revision;
-- `sdl_window_legacy` and `win32_dcomp` produce equivalent activation and move-completion meaning;
+- `sdl_window_legacy` and `win32_dcomp` produce equivalent activation and move-completion meaning,
+  while backend capabilities may produce different in-drag cadence;
 - the Win32 adapter remains the only translation unit that interprets Win32 messages;
 - ordinary builds, presentation contract tests, the hidden DirectComposition smoke, and
   owner-controlled interaction checks pass.
 
 ## Implementation sequence
 
-1. Add fixed-size presentation event and layer-interaction-policy types to the C17 contract.
-2. Add a bounded queue and polling operation owned by each presentation instance/backend.
-3. Publish interaction policy atomically with committed layer geometry.
-4. Translate DirectComposition `WndProc` input into activation, move lifecycle, cancellation, and
-   reset events while retaining immediate native mechanics.
-5. Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from the
-   Win32 adapter.
-6. Implement equivalent SDL legacy translation without changing product behavior.
-7. Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests.
-8. Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through checks.
+1. [x] Add fixed-size presentation event and layer-interaction-policy types to the C17 contract.
+2. [x] Add a bounded queue and polling operation owned by each presentation instance/backend.
+3. [x] Publish interaction policy atomically with committed layer geometry.
+4. [~] Translate DirectComposition `WndProc` input into activation, context, move lifecycle,
+   cancellation, and reset events while retaining immediate native mechanics. Activation, context,
+   and normal move lifecycle are implemented; reset and forced-capture recovery remain.
+5. [x] Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from
+   the Win32 adapter.
+6. [~] Implement equivalent SDL legacy translation without changing product behavior. The
+   fixed-size fallback application adapter preserves current pointer and command behavior; moving
+   its remaining close/reset/routed-pointer meaning into the presentation contract remains.
+7. [~] Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests. Queue
+   and stale-layer behavior are covered; forced-capture and routed-coordinate cases remain.
+8. [~] Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through
+   checks. The native portrait path is accepted; the legacy modal-drag limitation is confirmed and
+   documented, while physical output-removal behavior remains.
 
 Environment and topology implementation proceeds through the separate sequence in
 [`presentation-environment.md`](presentation-environment.md).

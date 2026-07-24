@@ -7,8 +7,10 @@ Eidolon gives existing agents a native, persistent presence while real work happ
 The terminal remains the interface to the work.
 Eidolon becomes the interface to the worker.
 
-Today, Eidolon observes existing Codex and OpenCode sessions and turns their real activity into
-dialogue, expression, and motion. It does not replace the agent runtime or the terminal.
+Today, Eidolon observes Codex sessions and turns their real activity into dialogue, expression, and
+motion. An OpenCode SSE adapter is implemented and transport-tested, but its ordinary local
+end-to-end workflow is not yet accepted. Eidolon does not replace the agent runtime or the
+terminal.
 
 ![Bunny Asuna presenting two active Codex sessions](screen0.png)
 
@@ -20,8 +22,8 @@ V1 proves that an agent doing real work can visibly feel like one persistent per
 - three body renderers: v2 sprite atlases, full-canvas 2D portraits, and skinned 3D models;
 - one independently scrolling dialogue bubble per active agent session, with stable placement
   and real session titles;
-- normalized agent adapters, an OpenCode SSE stream, a live in-path Codex CLI relay, and
-  optional completion-only Codex transcript and hook fallbacks;
+- normalized agent adapters, a transport-tested OpenCode SSE path, a live in-path Codex CLI relay,
+  and optional completion-only Codex transcript and hook fallbacks;
 - semantic expression planning over stable streamed prefixes, deterministic delivery timing,
   completion repair, and a local GoEmotions worker with lifecycle fallback;
 - Unicode dialogue through SDL_ttf with bundled MesloLGS Nerd Font Mono and Windows CJK/emoji
@@ -84,8 +86,15 @@ fallback sprite path.
 - middle-drag a 3D model to rotate yaw/pitch;
 - hold `Shift` while middle-dragging to rotate roll;
 - double middle-click to reset 3D rotation;
-- press `F5` to reload character and motion configuration;
-- press `Escape` in the pet window to quit.
+- press `F5` to reload character and motion configuration when the legacy SDL pet window owns
+  keyboard focus;
+- press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
+  host deliberately does not capture global keyboard shortcuts.
+
+On Windows, the default `sdl_window_legacy` fallback delegates dragging to the native top-level
+move loop, which can pause animation and dialogue presentation until the mouse button is released.
+Continuous presentation while dragging is provided by the opt-in DirectComposition path and is one
+reason completing that path is the active development goal.
 
 Settings persist as sparse per-user overrides. Every field can return to its shipped or
 character-defined default without freezing a copy of that default into the user file.
@@ -107,7 +116,11 @@ lifecycle state + semantic expression + delivery cues
                     ↓
 selected sprite | portrait | 3D body renderer
                     ↓
-transparent SDL composition + native hit testing
+renderer-neutral scene + body/dialogue content
+                    ↓
+sdl_window_legacy | opt-in win32_dcomp portrait
+                    ↓
+transparent desktop presentation + native hit testing
 ```
 
 The target stack separates body/dialogue rendering from native presentation so compositor layers can
@@ -133,9 +146,10 @@ stay separate from frame-rate motion and drawing.
 - [Backend-neutral presentation event contract](docs/design/presentation-events.md)
 - [Presentation environment and output topology contract](docs/design/presentation-environment.md)
 
-Eidolon is an early-stage native project with a working Windows daily-driver path and unfinished
-product packaging. Character assets remain the responsibility of the local user and are not part
-of the reusable engine repository.
+Eidolon is an early-stage native project with a working Windows development path; the
+[daily-driver alpha](docs/product-roadmap.md#gate-a-daily-driver-alpha) is the next product gate,
+not a capability already claimed. Character assets remain the responsibility of the local user and
+are not part of the reusable engine repository.
 
 ## License
 

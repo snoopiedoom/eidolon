@@ -41,10 +41,12 @@ rollout must not create a second bubble merely because its dated directory is ol
 The first bounded implementation tracks eight sessions and presents four. Active/unread entries take
 priority. Capacity overflow evicts the oldest inactive entry deterministically and logs it.
 
-Each bubble has an independent five-second presentation lease. Text deltas, completed messages, and
-turn activity renew the matching session's lease. Five seconds without adapter activity hides that
-bubble even when its dialogue has not finished revealing; the session and its dialogue state remain
-tracked and the next output makes it visible again. The timeout is policy and should become
+Each bubble has an independent presentation lease, but transport silence does not start dismissal
+while the current response is streaming or the dialogue still has unread text. Once the response
+is complete and its dialogue reaches the terminal presented state, the bubble remains fully opaque
+for five seconds and then fades for three seconds. New deltas, completed messages, or turn activity
+cancel a pending dismissal and restore full opacity without changing the slot. The session and its
+dialogue state remain tracked after the bubble hides. The timeout is policy and should become
 runtime-configurable.
 
 ## Layout
@@ -112,6 +114,8 @@ bubble, shadow, and character pixels remain interactive.
 - clicking the left bubble never advances the right bubble;
 - one quiet bubble remains opaque for five seconds, fades continuously for three seconds, and then
   disappears without hiding or resetting another session;
+- transport silence cannot start the hold or fade while a response is streaming or its dialogue
+  still has unread text;
 - new activity during the fade restores full opacity immediately without changing the session slot;
 - new output renews a hidden session and restores its bubble;
 - subagent rollouts never appear as user bubbles;

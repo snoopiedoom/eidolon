@@ -9,6 +9,13 @@ This document separates the generic body contract from project-specific acquisit
 - Blue Archive downloading and Rio authoring are local importer examples;
 - extracted game assets are not assumed to be commercially redistributable.
 
+## Planned audio reference
+
+Startup music candidate: **“Below Between Beyond” — Ludo, _Cafe de Touhou 1_.**
+
+This records the product reference only. No audio asset is included in the repository, and
+redistribution or release use requires separate rights verification.
+
 ## Project-specific: Blue Archive portrait catalog
 
 The Blue Archive wiki's `Category:Character_sprites` currently follows two filename forms:

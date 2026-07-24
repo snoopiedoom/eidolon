@@ -279,8 +279,9 @@ producer/consumer path:
   from the presentation snapshot instead of calling SDL display APIs.
 
 The owner confirmed the Win32 cross-monitor environment transaction and bubble-bound behavior.
-Graphics-reset/close/routed-pointer event parity, owner-controlled SDL mixed-DPI confirmation, and
-physical output-removal proof remain open.
+Graphics-reset/close/routed-pointer event parity and physical output-removal proof remain open.
+The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
+application consumption until release; native cadence acceptance belongs to `win32_dcomp`.
 
 ## Data flow
 
@@ -521,8 +522,10 @@ No backend may rely on unrelated SDL traffic to make its private native queue ob
    reflowing once.
 8. [x] Translate SDL display/window invalidations into equivalent legacy environment
    publications.
-9. [~] Owner-confirm mixed-DPI, refresh, usable-bounds, cross-monitor, and wake behavior; the
-   ordinary cross-monitor path is accepted, while physical output removal remains unproven.
+9. [~] Owner-confirm mixed-DPI, refresh, usable-bounds, cross-monitor, and wake behavior on the
+   native path; the ordinary cross-monitor path is accepted, while physical output removal remains
+   unproven. The SDL fallback's modal drag is documented rather than treated as native cadence
+   parity.
 10. Implement the same contract for later Wayland/X11, macOS, Android, and iOS backends without
     changing portable product ownership.
 

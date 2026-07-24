@@ -42,8 +42,8 @@ particular implementation changes.
 
 ## Active workstreams
 
-- [bgfx integration](workstreams/bgfx-integration.md) — current gate, dependency revisions,
-  evidence, and restart checklist for the shared-renderer experiment.
+- [bgfx and native-presentation workstream](workstreams/bgfx-integration.md) — completed graphics
+  evaluation plus the current production-presentation gate, evidence, and restart checklist.
 
 New designs belong under `docs/design/`. Each specification should state the problem, goals,
 non-goals, ownership, data flow, invariants, failure behavior, and acceptance criteria. Temporary

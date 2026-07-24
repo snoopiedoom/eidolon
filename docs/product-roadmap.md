@@ -138,7 +138,8 @@ Complete the current presentation migration for the 2D daily-driver path:
 
 - preserve the backend-neutral scene, event, and environment contracts;
 - complete Windows portrait/dialogue interaction and recovery parity;
-- retain `sdl_window_legacy` as a proven fallback until native parity is accepted;
+- retain `sdl_window_legacy` as a functional fallback until native parity is accepted, without
+  requiring its Windows modal move loop to match compositor-layer drag cadence;
 - close remaining routed-input, graphics-reset, output-removal, DPI, and visual-parity gaps;
 - persist presentation selection only after failure recovery and fallback are trustworthy;
 - keep body animation, dragging, bubble reveal, and desktop input independent under load.
@@ -314,7 +315,8 @@ Public V1 preserves the alpha experience while making it reproducible for anothe
 - keep voice identity separate from the body asset and model provider.
 
 Speech does not require the future persona bridge. It consumes the same canonical response and
-performance plan until a distinct persona channel exists.
+performance plan until a distinct persona channel exists. Public V1 includes a supported speech
+capability, although individual users may disable it.
 
 ### B5. Package the product
 
@@ -342,7 +344,7 @@ A new technical user can:
 2. select a redistributable character package;
 3. attach Codex or OpenCode;
 4. understand connection and operational state;
-5. receive coherent dialogue, expression, motion, and optional speech;
+5. receive coherent dialogue, expression, motion, and optional-to-enable audio speech;
 6. handle concurrent sessions and supported interventions safely;
 7. restart and upgrade without losing configured continuity;
 8. use the product on a supported desktop without unexplained setup knowledge.

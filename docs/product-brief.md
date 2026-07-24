@@ -35,7 +35,7 @@ blocked, requesting approval, responding, interruption, completion, and failure 
 session activity. Semantic analysis may style that performance, but may not contradict operational
 ground truth.
 
-## Current product boundary
+## First-release product boundary
 
 The first release observes and embodies existing agent sessions. It does not initially replace:
 
@@ -45,9 +45,10 @@ The first release observes and embodies existing agent sessions. It does not ini
 - dense code, logs, diffs, and long-form output;
 - general-purpose tool orchestration.
 
-The terminal remains authoritative for dense work. Eidolon provides a parallel channel for
-presence, attention, operational state, short dialogue, expression, interruption, approval
-requests, session identity, and relationship continuity.
+The terminal remains authoritative for dense work. The first release provides a parallel channel
+for presence, attention, operational state, short dialogue, expression, interruption, approval
+requests, session identity, and presentation/session continuity. Durable relationship memory and
+persona-owned conversational continuity belong to the later persistent-persona platform.
 
 ## Development sequence
 

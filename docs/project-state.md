@@ -24,7 +24,7 @@ product capability is absent.
 - [~] concurrent sessions — independent bubbles work; explicit shared-character performance
   ownership remains unimplemented.
 - [~] unobtrusive terminal coexistence — transparent click-through and non-intrusive QA exist, but
-  final desktop feel remains owner-verified.
+  fallback/native parity and all-day desktop feel still require owner verification.
 - [ ] restart continuity — preferences and discovered sessions recover, but no product-level
   acceptance case yet proves that the same persona and presentation survive restart.
 - [ ] approve/cancel/pause/redirect interaction — relay traffic can carry upstream controls, but
@@ -36,7 +36,7 @@ product capability is absent.
 
 ## Current product
 
-Bunny Asuna is the daily-driver portrait body: ten full-canvas expressions, full/bust framing,
+Bunny Asuna is the alpha-driving portrait body: ten full-canvas expressions, full/bust framing,
 Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible agent
 session. The Mutsuki Dress v2 sprite remains a fallback. Rio's procedural 3D renderer remains
 selectable and is deliberately initialized only when requested.
@@ -67,7 +67,8 @@ overrides with reset-to-inheritance semantics.
 - tiny discourse fragments merge into the thought they modify and ambiguous faces preserve
   continuity;
 - portrait art swaps atomically with no crossfade; damped semantic motion remains independent;
-- session bubbles remain opaque for five quiet seconds, then fade out over three seconds;
+- after streaming and dialogue reveal finish, session bubbles remain opaque for five seconds, then
+  fade out over three seconds;
 - mouse-motion floods are bounded and character dragging coalesces native window moves at the
   configured presentation boundary; Windows uses compositor-owned native dragging so HWND moves
   cannot consume the renderer's frame budget;
@@ -112,6 +113,9 @@ delivery, and native bubble-bound selection. Physical output-removal recovery re
 - graphics-reset, close, and routed-pointer presentation events remain specified but
   unimplemented; SDL legacy input uses a normalized fallback adapter, while display state already
   uses the revisioned presentation environment;
+- Windows `sdl_window_legacy` dragging enters the native top-level modal move loop, so animation and
+  dialogue presentation may pause until release; this is a documented fallback limitation, not the
+  cadence target for DirectComposition;
 - the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
 - native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
@@ -125,30 +129,51 @@ delivery, and native bubble-bound selection. Physical output-removal recovery re
 - ChatGPT Desktop chat and ZCode expose no verified attachable local stream, so their agent adapters
   correctly remain unavailable rather than scraping or injecting into their processes;
 - the packaged desktop app's private Codex stdio app-server cannot be shared safely; the relay
-  supports a CLI explicitly started with `--remote`, while Desktop remains on transcript fallback.
+  supports a CLI explicitly started with `--remote`, while Desktop remains on transcript fallback;
+- the public-domain notice covers Eidolon's original work only; contributor terms and the project
+  license must be deliberately revisited before substantial outside contributions, investment, or
+  commercial distribution, and extracted character assets remain separately governed.
 
 ## Next priorities
 
-1. owner-confirm SDL legacy dragging, clicks, `F1`/right-click settings commands, mixed-DPI
-   crossing, placement bounds, and refresh cadence after the event/environment ownership migration;
-2. move SDL legacy close, graphics-reset, and routed-pointer meaning into presentation events;
-3. add a deterministic output-removal/fallback probe where practical;
-4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
-5. expose native presentation as a persisted setting only after the portrait path has event,
+The active roadmap gate is
+[A1: finish the native presentation foundation](product-roadmap.md#a1-finish-the-native-presentation-foundation).
+
+The immediate goal is to finish the DirectComposition portrait/dialogue path and make it safe to
+replace `sdl_window_legacy` as the normal Windows presentation selection. The legacy backend remains
+a functional fallback; its confirmed modal-drag cadence limitation does not block native progress.
+
+1. move remaining close, graphics-reset, and routed-pointer meaning into presentation events,
+   including the DirectComposition reset and forced-capture edges;
+2. add a deterministic DirectComposition output-removal/fallback probe where practical;
+3. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
+4. expose native presentation as a persisted setting only after the portrait path has event,
    output, cadence, and recovery parity;
+5. make DirectComposition the normal Windows selection only with an explicit, trustworthy fallback
+   to `sdl_window_legacy`;
 6. add source-instance identity and source/adapter status controls without moving ownership into the
    UI;
-7. add explicit shared-character performance ownership for concurrent bubbles;
-8. replace the hard-coded body-asset selector with character-package discovery;
-9. make session retirement policy configurable;
-10. expand normalized operational state toward the presence contract;
-11. tune affect targets and continuity thresholds from real expression traces;
-12. calibrate the four initial Rio semantic poses before adding transition dynamics;
-13. consider expression annotation/detection only after the downloaded portrait catalog is present.
+7. expand the truthful minimum operational vocabulary required by alpha;
+8. tune Expression Director targets and continuity thresholds from real performance traces;
+9. add explicit shared-character performance ownership for concurrent bubbles;
+10. make session retirement policy configurable;
+11. restore versioned presentation and session continuity across restart;
+12. define and measure the idle resource budget, then complete an owner-controlled workday soak;
+13. begin public-V1 character-package discovery only after the daily-driver alpha gate closes.
+
+## Deferred by the active roadmap
+
+- Rio pose calibration and making 3D the default body remain important, but do not interrupt the 2D
+  daily-driver alpha unless a shared renderer-neutral contract requires 3D validation.
+- portrait-catalog expression annotation remains downstream of current Expression Director tuning
+  and distributable character-package decisions.
+- conversational memory, persona-mediated output, and the local-first persona bridge are post-V1
+  horizons, not missing alpha implementation.
 
 ## Restart checklist
 
-1. Read [the documentation index](README.md), this file, and the specification owning the next task.
+1. Read the [product brief](product-brief.md), [V1 goal](v1-goal.md),
+   [product roadmap](product-roadmap.md), this file, and the specification owning the next task.
 2. Run `git status --short`; preserve existing work and extracted local assets.
 3. On a fresh machine, set `SDL3_ROOT` as needed and run `make text-setup`.
 4. Run `make check`, then build the relevant debug target. Use `make affect-setup` only when the

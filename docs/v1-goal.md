@@ -28,7 +28,11 @@ Eidolon supplies the parallel channel for:
 - expression;
 - interruption;
 - approval requests;
-- relationship continuity.
+- presentation and session continuity.
+
+For V1, continuity means that character selection, presentation state, source/session identity, and
+sensible dialogue state survive restart. It does not require conversational memory, relationship
+history, or persona-mediated rewriting of canonical agent output.
 
 ## Success criterion
 

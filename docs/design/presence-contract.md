@@ -31,8 +31,9 @@ stable source id. It uses one **agent adapter**, the reusable parser and transpo
 that runtime kind, to produce normalized events. The source owns connection state and source-local
 correlation; the adapter owns protocol interpretation. Neither owns visible behavior.
 
-The session registry owns `(source_id, session_id)` identity, current operational state, activity
-time, and dialogue continuity. Adapter kind is metadata, not identity. A future persona layer may
+Under the target contract, the session registry owns `(source_id, session_id)` identity, current
+operational state, activity time, and dialogue continuity. Adapter kind is metadata, not identity.
+The current registry still uses its legacy `(provider, session id)` key. A future persona layer may
 style state but may not rewrite its operational meaning. The active body follows its deterministic
 fallback mapping for unsupported intent. Body renderers own only drawing and local motion state.
 

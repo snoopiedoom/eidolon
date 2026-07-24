@@ -33,8 +33,10 @@ branches to the renderer or dialogue engine.
 - **Codex** — live CLI lifecycle, deltas, snapshots, titles, and multiple sessions through an
   in-path WebSocket/stdin relay; completion and history remain available through the independent
   transcript fallback. A passive app-server client remains available for protocol development.
-- **OpenCode** — live lifecycle, deltas, completion snapshots, titles, and multiple sessions
-  through the server's SSE event stream.
+- **OpenCode** — the adapter and deterministic SSE transport probe cover live lifecycle, deltas,
+  completion snapshots, titles, and multiple sessions. The installed local server is currently
+  blocked by its model configuration before an ordinary end-to-end workflow, so public workflow
+  support remains unaccepted.
 - **ChatGPT Desktop chat** — reserved adapter, currently unavailable. Ordinary Chat has no
   documented local conversation stream. The Codex surface inside the combined desktop app belongs
   to the Codex adapter, not a ChatGPT-specific transport.
@@ -56,7 +58,7 @@ version = 1
 codex.live.enabled = false
 codex.live.url = ws://127.0.0.1:4500
 
-codex.relay.enabled = false
+codex.relay.enabled = true
 codex.relay.listen = ws://127.0.0.1:4500
 codex.relay.executable = codex
 

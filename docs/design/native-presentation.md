@@ -3,8 +3,8 @@
 ## Status
 
 This document defines the intended presentation architecture and the gated migration from the
-current SDL-window implementation. It is a design plan, not a claim that the native backends below
-already exist.
+legacy SDL-window implementation. Implemented checkpoints are labeled explicitly; a platform plan
+is not a claim that its native backend already exists.
 
 The central decision is:
 
@@ -17,10 +17,11 @@ for the second system.
 
 ## Problem
 
-The current runtime creates one transparent SDL window and one SDL renderer. `app` owns the window,
-display scale, event loop, cadence, renderer selection, drag state, and composition state. `draw`
-composes the body and bubbles into that window and calls `SDL_RenderPresent`. Windows-specific code
-adds hit testing, regions, readback, and native drag behavior around the SDL-owned surface.
+The original runtime created one transparent SDL window and one SDL renderer owned directly by
+`app`. The default `sdl_window_legacy` path still presents one composed window, but `presentation`
+now owns its host, renderer, cadence, output environment, and native drag boundary. `EidolonApp`
+retains transitional borrowed SDL window/renderer aliases while remaining rasterizers migrate to
+backend-owned targets. The opt-in portrait path already uses DirectComposition.
 
 That was a good bootstrap, but it makes unrelated work share one invalidation boundary:
 
@@ -310,6 +311,11 @@ A native top-level move remains a fallback. It is not equivalent:
   serial;
 - X11 `_NET_WM_MOVERESIZE` delegates the operation to the window manager;
 - macOS `performWindowDragWithEvent:` delegates it to WindowServer.
+
+The Windows `sdl_window_legacy` backend currently uses that modal caption-drag path. Preserving it as
+a functional fallback does not require compositor-like animation cadence while the button is held.
+A1 therefore prioritizes completing and promoting `win32_dcomp`, not disguising the legacy window
+as a compositor-layer backend.
 
 The input contract routes pointer id, device kind, global/output position when available, layer id,
 layer-local position, buttons, modifiers, timestamp, and compositor serial where required. It must
@@ -700,6 +706,12 @@ visual output, transparent click-through, dialogue activation and cancellation, 
 cross-monitor behavior, body-context settings without focus theft, final reflow, revisioned Win32
 environment/topology delivery, and one transactional mixed-DPI application update.
 
+The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
+observation confirmed that application-driven animation pauses during that native top-level move.
+This does not reopen Phase 1 or redefine native cadence acceptance; the active work now finishes
+DirectComposition event, output-removal, recovery, and visual parity so the native path can become
+the normal selection.
+
 ### Phase 2: Windows portrait proof
 
 - create one output-local Win32 host and DirectComposition device/tree;
@@ -734,6 +746,10 @@ environment delivery and bounds behavior; physical output-removal recovery remai
 - remove the default local-state placeholder from normal operation.
 
 Gate: one bubble can type or fade without invalidating body or sibling-bubble content.
+
+**Status:** implemented and owner-accepted for the portrait path. Legacy and DirectComposition
+presentation use independently revised dialogue targets. The remaining native black seam is a
+raster-parity defect, not a layer-ownership gap.
 
 ### Phase 4: sprite and 3D targets
 
