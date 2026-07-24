@@ -129,6 +129,7 @@ stay separate from frame-rate motion and drawing.
 - [Design specifications](docs/design/README.md)
 - [Native presentation and graphics plan](docs/design/native-presentation.md)
 - [Backend-neutral presentation event contract](docs/design/presentation-events.md)
+- [Presentation environment and output topology contract](docs/design/presentation-environment.md)
 
 Eidolon is an early-stage native project with a working Windows daily-driver path and unfinished
 product packaging. Character assets remain the responsibility of the local user and are not part

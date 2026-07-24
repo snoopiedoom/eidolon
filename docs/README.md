@@ -36,6 +36,7 @@ particular implementation changes.
 - [Body capabilities](design/body-capabilities.md)
 - [Native presentation and graphics stack](design/native-presentation.md)
 - [Backend-neutral presentation events](design/presentation-events.md)
+- [Presentation environment and output topology](design/presentation-environment.md)
 
 ## Active workstreams
 

@@ -42,7 +42,9 @@ platform compositor layer tree
 The presentation backend owns hosts, independent body/bubble layers, input regions, output topology,
 cadence, and compositor commits. The graphics backend owns pixel production. The two are independent
 selections. Native callbacks perform only latency-critical platform mechanics; product input crosses
-the bounded [presentation event contract](design/presentation-events.md). See the
+the bounded [presentation event contract](design/presentation-events.md). Active-host geometry,
+scale, output, safe area, refresh, topology, and wake behavior cross the revisioned
+[presentation environment contract](design/presentation-environment.md). See the
 [native presentation and graphics stack](design/native-presentation.md) for the contract, strategy
 analysis, platform mappings, and migration gates.
 
@@ -55,7 +57,7 @@ snapshots and prepared expression tracks.
 - `app`: product lifecycle, portable event routing, timing, renderer selection, and
   composition-level state;
 - `presentation`: backend selection, host/layer/target ownership, scene commits, capability
-  reporting, and the portable event contract;
+  reporting, portable edge events, revisioned active-host environments, and output topology;
 - `conversation_sources`: adapter catalog, configured source state, capability state, and event bus;
 - `providers/*_stream`: one vendor protocol parser per session source, producing only normalized
   events; `providers` is the legacy source-directory name;
@@ -189,8 +191,10 @@ CPU transfer, staging-map loop, or upload.
 The opt-in `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
-It currently supports the portrait body only. Dialogue activation events, output-local host
-migration, sprite/3D targets, and device-loss recovery remain unfinished.
+It currently supports the portrait body only. Native dialogue activation and move completion now
+cross the bounded presentation-event queue and are owner-confirmed. Revisioned environment
+publication, output-local host migration, sprite/3D targets, and device-loss recovery remain
+unfinished.
 
 The D3D11 vertex layout uses `POSITION`, `TEXCOORD0`, `BLENDINDICES0`, and `BLENDWEIGHT0`. The pixel
 shader input must retain both `SV_Position` and `TEXCOORD0`. Removing `SV_Position` can bind UV to the

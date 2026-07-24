@@ -91,9 +91,9 @@ overrides with reset-to-inheritance semantics.
   persistence.
 
 The owner accepted the opt-in DirectComposition portrait/dialogue output, transparent per-pixel
-click-through, smooth native body dragging, and cross-monitor movement. Native dialogue activation,
-activation cancellation, and one-reflow drag completion now compile and pass deterministic contract
-tests, but remain unconfirmed interactively. Mixed-DPI event delivery remains implementation work.
+click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
+cancel-on-drag, and one stable final reflow. Revisioned mixed-DPI environment delivery remains
+implementation work.
 
 ## Known limitations
 
@@ -106,8 +106,9 @@ tests, but remain unconfirmed interactively. Mixed-DPI event delivery remains im
   depend on update order;
 - monitor-aware bubble placement uses conservative body and upper-body/face rectangles until each
   renderer reports tighter visible geometry;
-- presentation output/DPI, graphics-reset, close, and routed-pointer events are specified but not
-  yet emitted; SDL legacy still uses its existing direct SDL input path;
+- revisioned presentation-environment publication, topology copying, graphics-reset, close, and
+  routed-pointer events are specified but not yet implemented; SDL legacy still uses its existing
+  direct SDL input path;
 - the DirectComposition dialogue raster has a short black seam near the left edge of the bubble;
 - native presentation selection is an environment override rather than a persisted user setting;
 - expression target projection needs more interactive tuning across real dialogue;
@@ -125,11 +126,12 @@ tests, but remain unconfirmed interactively. Mixed-DPI event delivery remains im
 
 ## Next priorities
 
-1. confirm native dialogue activation, cancellation, final drag reflow, and click-through against
-   the opt-in DirectComposition backend;
-2. integrate output/DPI changes and presentation readiness with the native event/wait boundary,
-   preserving placement and animation across mixed-DPI monitors;
-3. give `sdl_window_legacy` equivalent presentation-event meaning without regressing its existing
+1. implement the revisioned active-host environment, output-topology copy, coalescing, and wake
+   contract in `docs/design/presentation-environment.md`;
+2. apply environment revisions as one anchor-preserving cadence/layout/resource transaction and
+   prove mixed-DPI cross-monitor behavior;
+3. give `sdl_window_legacy` equivalent presentation-event and environment meaning without
+   regressing its existing
    behavior;
 4. fix the DirectComposition dialogue seam and complete owner-controlled native parity checks;
 5. expose native presentation as a persisted setting only after the portrait path has event,

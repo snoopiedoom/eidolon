@@ -153,6 +153,9 @@ No backend may acquire session ownership. No body renderer may move a native win
 Native callback normalization, queueing, coordinate semantics, capture, and the division between
 immediate platform mechanics and deferred product behavior are owned by the
 [backend-neutral presentation event contract](presentation-events.md).
+Revisioned host geometry, scale, safe area, refresh, output identity, topology, and application
+wake semantics are owned by the
+[presentation environment contract](presentation-environment.md).
 
 ## Presentation contract
 
@@ -163,7 +166,9 @@ needs operations equivalent to:
 bool presentation_open(const EidolonPresentationConfig *config);
 void presentation_close(void);
 
-size_t presentation_enumerate_outputs(EidolonOutput *outputs, size_t capacity);
+bool presentation_get_environment(EidolonPresentationEnvironment *environment);
+EidolonPresentationTopologyResult
+presentation_copy_outputs(EidolonOutput *outputs, size_t capacity);
 EidolonHost presentation_create_host(const EidolonHostDesc *desc);
 EidolonLayer presentation_create_layer(EidolonHost host,
                                        const EidolonLayerDesc *desc);
@@ -316,22 +321,23 @@ immediately. Dialogue activation, final reflow, body behavior, and session-facin
 bounded fixed-size event queue; a native callback never invokes application behavior directly.
 
 The initial `win32_dcomp` implementation now commits interaction policy with each layer and carries
-dialogue activation plus native move lifecycle through that queue. Output/DPI and reset events,
-SDL-legacy queue parity, and owner-controlled interaction confirmation remain open.
+dialogue activation plus native move lifecycle through that queue. The owner confirmed native
+activation, cancellation, click-through, movement, and final reflow. Presentation-environment
+publication, reset events, and SDL-legacy queue parity remain open.
 
 ## Output topology and DPI
 
-Hosts are output-local where the platform supports it. Logical scene coordinates are independent
-from buffer pixels.
+The [presentation environment and output topology contract](presentation-environment.md) owns this
+boundary.
 
-- output bounds and usable bounds are separate;
-- each output reports logical scale, pixel scale, transform/orientation, and refresh information;
-- the character has one global logical anchor where the platform exposes global placement;
-- moving between outputs preserves the anchor and rebuilds only output-dependent resources;
-- cross-output transfer must not reset session ordering, animation, or dialogue reveal;
-- platforms without global coordinates expose output-relative placement only;
-- mobile scenes expose their safe area and orientation instead of pretending to be desktop
-  monitors.
+One small immutable active-host snapshot carries geometry, active output, scale, usable bounds,
+safe area, orientation, nominal refresh, capabilities, validity, and revision. Environment
+publications may coalesce to the newest revision. Causally unique interaction edges remain
+lossless. Complete variable-sized topology is copied separately into caller-owned storage.
+
+Hosts are output-local where supported, logical coordinates remain independent from target pixels,
+and unsupported global coordinates remain absent. Cross-output transfer preserves the strongest
+valid body anchor and never resets session ordering, animation, or dialogue reveal.
 
 ## Graphics strategy analysis
 
@@ -688,9 +694,10 @@ layers resolve to independently generated presentation targets. Portrait and dia
 be authored without an SDL window renderer, premultiplied, and uploaded directly into
 compositor-owned D3D11 targets without readback. Normal startup and snapshots remain on
 `sdl_window_legacy`; the native override is portrait-only. Its Win32 adapter now owns transformed
-per-pixel hit testing and body dragging. The owner accepted native visual output, transparent
-click-through, smooth dragging, and cross-monitor behavior. Native product-event delivery is the
-next boundary.
+per-pixel hit testing, body dragging, and bounded activation/move events. The owner accepted native
+visual output, transparent click-through, dialogue activation and cancellation, smooth dragging,
+cross-monitor behavior, and final reflow. Revisioned presentation-environment delivery is the next
+boundary.
 
 ### Phase 2: Windows portrait proof
 
@@ -709,10 +716,11 @@ visual transforms and sampled through the inverse committed matrix. Transparent 
 native hit-test transparency. Body drag capture and top-level movement run in the Win32 window
 procedure, independent of frame rendering. This is a transitional single-host implementation;
 output-local host migration and layer-transform dragging remain the intended multi-output design.
-Dialogue pixels are detected, but native dialogue-click event routing is not implemented yet. The
-next gate implements the fixed-size event and committed interaction-policy contract in
-[`presentation-events.md`](presentation-events.md), replacing layer-kind inference in the Win32
-adapter.
+Dialogue activation and native move completion cross the fixed-size event queue without invoking
+application behavior from `WndProc`, and the owner accepted the resulting interaction. The next
+gate implements immutable revisioned environment publication, topology copying, wake integration,
+and one transactional mixed-DPI application update through
+[`presentation-environment.md`](presentation-environment.md).
 
 ### Phase 3: independent dialogue layers
 

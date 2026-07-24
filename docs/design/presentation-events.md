@@ -28,10 +28,15 @@ The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
 - `EidolonApp` drains those events before simulation, advances the matching current dialogue
   layer, and performs one final layout reflow after native movement.
 
-This checkpoint does not yet emit output/DPI, graphics-reset, close, or routed-pointer events.
+This checkpoint does not yet publish presentation environments or emit graphics-reset, close, or
+routed-pointer events.
 `sdl_window_legacy` still reaches equivalent product behavior through the existing SDL event path
-rather than this presentation queue. Both are explicit remaining parity work, and the Windows
-interaction behavior still requires owner-controlled visual confirmation.
+rather than this presentation queue. Both are explicit remaining parity work. The owner confirmed
+native activation, cancel-on-drag, click-through, smooth movement, and one stable final reflow.
+
+Output, DPI, usable bounds, safe area, orientation, and refresh are revisioned state rather than
+lossless interaction history. Their publication, coalescing, topology, and wake semantics are owned
+by the [presentation environment contract](presentation-environment.md).
 
 ## Goals
 
@@ -149,27 +154,27 @@ the body. More complex gesture arbitration remains an open decision.
 
 ## Conceptual event model
 
-The exact C names may change, but every event is a fixed-size value equivalent to:
+The exact C names may change, but every event is a fixed-size discriminated value equivalent to:
 
 ```c
 typedef struct EidolonPresentationEvent {
     EidolonPresentationEventKind kind;
     uint64_t sequence;
     uint64_t monotonic_ns;
-    uint64_t scene_revision;
     EidolonPresentationHost host;
-    EidolonPresentationOutput output;
-    EidolonSceneLayerId layer;
-    EidolonPresentationPointer pointer;
-    EidolonPresentationCoordinates coordinates;
-    EidolonPresentationGeometry geometry;
-    uint32_t flags;
+    union {
+        EidolonPresentationLayerEvent layer;
+        EidolonPresentationPointerEvent pointer;
+        EidolonPresentationMoveEvent move;
+        EidolonPresentationEnvironmentChanged environment;
+        EidolonPresentationGraphicsEvent graphics;
+    } data;
 } EidolonPresentationEvent;
 ```
 
-The value contains ids and copied scalars only. It never contains a native handle, pointer to
-backend storage, dynamically allocated string, or object whose lifetime is controlled by the
-callback.
+Each payload remains fixed-size and contains ids and copied scalars only. The value never contains a
+native handle, pointer to backend storage, dynamically allocated string, or object whose lifetime
+is controlled by the callback.
 
 The initial event vocabulary is:
 
@@ -183,9 +188,7 @@ move.started
 move.motion
 move.completed
 move.canceled
-host.geometry_changed
-output.changed
-output.scale_changed
+environment.changed
 host.close_requested
 graphics.reset_required
 queue.resync_required
@@ -193,9 +196,13 @@ queue.resync_required
 
 `pointer.*` is emitted only for `route_pointer`. `layer.activated` is the stable semantic result of
 an `activate` policy, not a synonym for a platform mouse-up message. `move.motion` and
-`host.geometry_changed` may be coalesced. `move.completed`, `move.canceled`, output/scale changes,
-close requests, graphics-reset requests, and resync requests are terminal or structural and may not
-be silently dropped.
+replaceable `environment.changed` publications may be coalesced. `move.completed`,
+`move.canceled`, close requests, graphics-reset requests, and resync requests are causal or
+structural edges and may not be silently dropped.
+
+`environment.changed` carries the complete fixed-size active-host environment for its revision.
+The latest revision supersedes older unapplied environment publications; full output topology is
+queried separately through caller-owned storage.
 
 Presentation readiness, frame-latency objects, compositor feedback, and timers remain members of
 the presentation wait set. They wake the loop but do not enter this product-event queue.
@@ -208,9 +215,9 @@ the presentation wait set. They wake the loop but do not enter this product-even
 - events reference stable ids, never addresses of layer records;
 - layer events carry the committed scene revision used for hit testing;
 - an event for a retired layer is discarded by the application without mutating another layer;
-- a structural host/output event remains valid independently from layer retirement;
-- move completion contains the final committed or observed geometry, so reflow does not race a
-  later geometry query;
+- an environment publication remains valid independently from layer retirement;
+- move completion contains final observed geometry and its environment revision, preserving the
+  causal edge even when a newer environment supersedes that state;
 - restarting a presentation creates a new instance identity and invalidates old interaction tokens.
 
 Native serials required by Wayland or another platform remain backend-owned. Portable code receives
@@ -263,12 +270,13 @@ Terminal and structural events remain observable even when replaceable motion is
 - native callbacks do not allocate, wait for the render thread, or invoke user code;
 - the backend coalesces consecutive motion for the same pointer/interaction and the latest geometry
   for the same host;
-- down, up, cancel, activation, move completion/cancellation, output/scale change, close, reset, and
-  resync events are not ordinary coalescible motion;
+- a pending environment publication may be replaced by the newest revision for the same host;
+- down, up, cancel, activation, move completion/cancellation, close, reset, and resync events are
+  not ordinary coalescible state;
 - when pressure threatens a complete pointer or move sequence, the backend cancels that interaction
   and sets a sticky resync condition;
-- the next available slot exposes `queue.resync_required`; the application queries authoritative
-  host/output state and clears transient interaction state;
+- the next available slot exposes `queue.resync_required`; the application retrieves the
+  authoritative active environment/topology revision and clears transient interaction state;
 - overflow increments bounded diagnostics rather than producing one log line per dropped motion;
 - a full queue never blocks native callback dispatch or frame presentation.
 
@@ -298,10 +306,10 @@ must remain bounded and must not call application code while holding a backend l
 - capture lost: stop native manipulation and enqueue cancellation;
 - queue pressure: coalesce replaceable events, then cancel/resync rather than block;
 - unsupported native interaction: reject the policy or report capability fallback before commit;
-- output disappears during movement: cancel or migrate according to backend capability, emit the
-  resulting output and final geometry, and preserve session/dialogue state;
-- scale changes mid-interaction: retain logical anchor, update output/scale state, and ensure the
-  final event identifies the applied scale;
+- output disappears during movement: cancel or migrate according to backend capability, publish
+  the resulting environment, and preserve session/dialogue state;
+- scale changes mid-interaction: retain the strongest valid anchor, publish a new environment
+  revision, and ensure move completion identifies the observed revision;
 - graphics reset: stop target submissions, enqueue one reset request, and keep non-presentation
   state alive;
 - application drains slowly: native manipulation may continue, but only bounded/coalesced state is
@@ -317,7 +325,7 @@ must remain bounded and must not call application code while holding a backend l
   continue;
 - drag release emits one completion with final geometry and causes one application reflow rather
   than per-motion reflow;
-- moving across monitors emits deterministic output/scale changes without resetting dialogue,
+- moving across monitors publishes deterministic environment revisions without resetting dialogue,
   session ordering, or body animation;
 - forced capture loss cancels the interaction without leaving a stuck pressed or dragging state;
 - a motion-flood test demonstrates bounded queue use, coalescing, and observable resync behavior;
@@ -332,21 +340,22 @@ must remain bounded and must not call application code while holding a backend l
 1. Add fixed-size presentation event and layer-interaction-policy types to the C17 contract.
 2. Add a bounded queue and polling operation owned by each presentation instance/backend.
 3. Publish interaction policy atomically with committed layer geometry.
-4. Translate DirectComposition `WndProc` input into activation, move lifecycle, geometry,
-   output/scale, cancellation, and reset events while retaining immediate native mechanics.
+4. Translate DirectComposition `WndProc` input into activation, move lifecycle, cancellation, and
+   reset events while retaining immediate native mechanics.
 5. Drain and route presentation events in `EidolonApp`; remove direct layer-kind behavior from the
    Win32 adapter.
 6. Implement equivalent SDL legacy translation without changing product behavior.
 7. Add deterministic queue, stale-revision, capture-loss, and coordinate-transform tests.
 8. Perform owner-controlled bubble-click, drag, mixed-DPI, cross-monitor, and click-through checks.
 
+Environment and topology implementation proceeds through the separate sequence in
+[`presentation-environment.md`](presentation-environment.md).
+
 ## Open decisions
 
 - whether `route_pointer` is sufficient for 3D rotation and future authoring, or whether a small
   gesture layer belongs above presentation;
 - exact portable button/modifier bit assignments and interaction-token lifetime;
-- whether output/scale changes are events, authoritative state revisions observed through a single
-  resync event, or both;
 - whether future compositor-layer dragging moves a shared character anchor or one body layer;
 - how mobile multi-touch arbitration interacts with dialogue activation and character movement;
 - which diagnostics belong in the event value versus presentation counters;

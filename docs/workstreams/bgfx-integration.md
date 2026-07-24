@@ -157,10 +157,14 @@ exposes a public external-resource contract that removes the animated CPU bridge
 - [x] add a fake-backend contract test to ordinary `make check`;
 - [x] publish renderer-neutral body and dialogue scene descriptions with independent content and
   presentation revisions;
+- [x] publish committed interaction policy and route native activation/move edges through a
+  bounded C17 queue without application calls from native callbacks;
+- [ ] publish revisioned active-host environments, copy full topology into caller-owned storage,
+  and integrate a native presentation wake source;
 - [ ] remove transitional SDL window/renderer aliases from `EidolonApp` as backend targets replace
   them;
-- [ ] enable the Win32 DirectComposition backend only after legacy snapshots and owner-controlled
-  interaction remain equivalent.
+- [ ] enable the Win32 DirectComposition backend only after legacy snapshots, interaction,
+  mixed-DPI environment handling, and recovery remain equivalent.
 
 This gate is the production migration, not another graphics experiment. The first checkpoint keeps
 the visible runtime on `sdl_window_legacy`. Body, portrait, dialogue, and snapshot renderers still
@@ -294,12 +298,16 @@ portrait-only DirectComposition path for owner-controlled evaluation; it is not 
 The first backend-neutral interaction slice is compiled: committed layer policy replaces
 layer-kind inference, Win32 translates activation and native move lifecycle into a bounded C17
 queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
-completion. Interactive parity, output/DPI events, and SDL-legacy queue parity remain Gate 6 work.
+completion. The owner accepted that interaction slice. Revisioned active-host environment
+publication, topology copying, wake integration, mixed-DPI application, and SDL-legacy parity
+remain Gate 6 work under
+[`docs/design/presentation-environment.md`](../design/presentation-environment.md).
 
 ## Restart checklist
 
-1. Read this file, `docs/design/native-presentation.md`, and
-   `docs/design/presentation-events.md`.
+1. Read this file, `docs/design/native-presentation.md`,
+   `docs/design/presentation-events.md`, and
+   `docs/design/presentation-environment.md`.
 2. Run `git status --short --branch`; do not absorb unrelated changes.
 3. Confirm the current gate and its unchecked acceptance items.
 4. Record dependency commit hashes before editing build rules.
@@ -323,10 +331,11 @@ completion. Interactive parity, output/DPI events, and SDL-legacy queue parity r
   performs one final post-drag display/layout reconciliation;
 - all ordinary regressions, the focused queue/contract tests, the hidden DirectComposition backend
   smoke, the normal Windows build, and whitespace validation pass;
-- dialogue activation, cancel-on-drag, release reflow, and mixed-DPI behavior still require
-  owner-controlled confirmation.
+- the owner confirmed dialogue activation, cancel-on-drag, click-through, smooth movement, and one
+  stable final reflow;
+- mixed-DPI environment publication remains the next owner-controlled behavior gate.
 
-### 2026-07-24: native interaction accepted; event contract is next
+### 2026-07-24: native interaction accepted; event contract specified
 
 - the owner accepted opt-in DirectComposition portrait/dialogue output, transparent per-pixel
   click-through, smooth Win32-owned body dragging, and cross-monitor movement;
