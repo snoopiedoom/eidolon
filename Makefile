@@ -170,7 +170,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check epr-boundary-check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -531,6 +531,7 @@ CONVERSATION_TEST := $(TEST_DIR)/conversation_test$(EXE)
 LIVE_SOURCE_TEST := $(TEST_DIR)/live_source_test$(EXE)
 RELAY_CORE_TEST := $(TEST_DIR)/relay_core_test$(EXE)
 CODEX_RELAY_TEST := $(TEST_DIR)/codex_relay_test$(EXE)
+PERFORMANCE_RUNTIME_TEST := $(TEST_DIR)/performance_runtime_test$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
@@ -674,6 +675,12 @@ $(CODEX_RELAY_TEST): tests/codex_relay_test.c src/conversation.c src/json_scan.c
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(PERFORMANCE_RUNTIME_TEST): tests/performance_runtime_test.c src/epr/performance_intent.c \
+		src/epr/performance_trace.c src/epr/temporal.c src/epr/body_resources.c \
+		src/epr/behavior_plan.c src/epr/performance_runtime.c src/ik.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 PROVIDER ?= codex
 PROVIDER_URL ?= ws://127.0.0.1:4500
 provider-live-test: $(LIVE_SOURCE_TEST)
@@ -682,12 +689,15 @@ provider-live-test: $(LIVE_SOURCE_TEST)
 codex-relay-test: $(CODEX_RELAY_TEST)
 	"$(CODEX_RELAY_TEST)"
 
-check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
+epr-boundary-check:
+	$(PYTHON) tests/epr_boundary_test.py src/epr
+
+check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
 	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
-	$(CONVERSATION_TEST) $(RELAY_CORE_TEST)
+	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -714,6 +724,7 @@ check: $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(D
 	$(USER_SETTINGS_TEST)
 	$(CONVERSATION_TEST)
 	$(RELAY_CORE_TEST)
+	$(PERFORMANCE_RUNTIME_TEST)
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
 MODEL_AUDIT := $(CURDIR)/build/model-audit/index.json
