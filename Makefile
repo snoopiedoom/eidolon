@@ -18,6 +18,7 @@ COMMON_SOURCES := \
 	src/dialogue.c \
 	src/dialogue_art.c \
 	src/draw.c \
+	src/event_pump_sdl.c \
 	src/expression_director.c \
 	src/frame_clock.c \
 	src/hook_output.c \

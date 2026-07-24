@@ -58,6 +58,8 @@ snapshots and prepared expression tracks.
   composition-level state;
 - `presentation`: backend selection, host/layer/target ownership, scene commits, capability
   reporting, portable edge events, revisioned active-host environments, and output topology;
+- `event_pump`: SDL-backed wait/poll and translation for application commands plus the transitional
+  legacy pointer path; raw `SDL_Event` values never enter `EidolonApp`;
 - `conversation_sources`: adapter catalog, configured source state, capability state, and event bus;
 - `providers/*_stream`: one vendor protocol parser per session source, producing only normalized
   events; `providers` is the legacy source-directory name;

@@ -13,6 +13,7 @@ typedef struct EidolonSdlLegacyConfig {
 } EidolonSdlLegacyConfig;
 
 EidolonPresentation *eidolon_sdl_legacy_presentation_create(const EidolonSdlLegacyConfig *config);
+bool eidolon_sdl_legacy_handle_event(EidolonPresentation *presentation, const SDL_Event *event);
 SDL_Window *eidolon_sdl_legacy_window(EidolonPresentation *presentation);
 SDL_Renderer *eidolon_sdl_legacy_renderer(EidolonPresentation *presentation);
 SDL_Texture *eidolon_sdl_legacy_target_texture(EidolonPresentation *presentation,

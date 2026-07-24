@@ -257,7 +257,8 @@ work, or application acknowledgement.
 
 ## Current implementation
 
-The opt-in `win32_dcomp` backend now implements the first complete producer and consumer path:
+The opt-in `win32_dcomp` backend and default `sdl_window_legacy` backend now implement the
+producer/consumer path:
 
 - Win32 callbacks perform mandatory DPI resizing and otherwise mark environment state dirty;
 - reconciliation enumerates monitors, preserves process-local opaque output ids, and publishes
@@ -271,10 +272,15 @@ The opt-in `win32_dcomp` backend now implements the first complete producer and 
   display state piecemeal;
 - Win32 messages wake the owning thread's native message pump; reconciliation occurs when portable
   presentation work is polled, outside `WndProc`.
+- SDL display and host-window events only mark the legacy environment dirty; the adapter
+  reconciles one global-logical snapshot, compares cached caller-owned topology, and publishes the
+  newest revision through the common bounded queue;
+- `EidolonApp` obtains cadence, placement bounds, scale, pixel density, and opaque output identity
+  from the presentation snapshot instead of calling SDL display APIs.
 
 The owner confirmed the Win32 cross-monitor environment transaction and bubble-bound behavior.
-Graphics-reset/close/routed-pointer events, SDL-legacy environment parity, and physical
-output-removal proof remain open.
+Graphics-reset/close/routed-pointer event parity, owner-controlled SDL mixed-DPI confirmation, and
+physical output-removal proof remain open.
 
 ## Data flow
 
@@ -513,7 +519,8 @@ No backend may rely on unrelated SDL traffic to make its private native queue ob
 6. [x] Integrate Win32 native-message readiness with the application wait boundary.
 7. [x] Apply environment revisions transactionally in `EidolonApp`, preserving anchor and
    reflowing once.
-8. Translate SDL display/window invalidations into equivalent legacy environment publications.
+8. [x] Translate SDL display/window invalidations into equivalent legacy environment
+   publications.
 9. [~] Owner-confirm mixed-DPI, refresh, usable-bounds, cross-monitor, and wake behavior; the
    ordinary cross-monitor path is accepted, while physical output removal remains unproven.
 10. Implement the same contract for later Wayland/X11, macOS, Android, and iOS backends without

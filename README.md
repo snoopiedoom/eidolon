@@ -79,7 +79,8 @@ fallback sprite path.
 
 - left-drag the character to move Eidolon;
 - left-click a dialogue bubble to advance manual dialogue;
-- right-click the character or press `F1` to open settings;
+- right-click the character to open settings; `F1` is also available when an Eidolon SDL window
+  owns keyboard focus;
 - middle-drag a 3D model to rotate yaw/pitch;
 - hold `Shift` while middle-dragging to rotate roll;
 - double middle-click to reset 3D rotation;
@@ -120,6 +121,7 @@ stay separate from frame-rate motion and drawing.
 - [Documentation index](docs/README.md)
 - [Product brief](docs/product-brief.md)
 - [V1 goal](docs/v1-goal.md)
+- [Product roadmap](docs/product-roadmap.md)
 - [Current project state](docs/project-state.md)
 - [Architecture](docs/architecture.md)
 - [Building, testing, and debugging](docs/development.md)

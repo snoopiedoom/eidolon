@@ -25,15 +25,21 @@ The first Windows slice is implemented behind the opt-in `win32_dcomp` backend:
   observable resync event;
 - Win32 performs hit testing, capture, and host movement immediately, then emits activation and
   move lifecycle events without calling application behavior from `WndProc`;
+- a native right-click emits `layer.context_requested`; `EidolonApp` opens settings only when the
+  referenced current layer is the body;
 - Win32 publishes revisioned active-host environments and caller-owned output topology through the
   same portable boundary;
 - `EidolonApp` drains the complete batch before simulation, advances the matching current dialogue
   layer, and applies the newest environment plus final movement as one layout transaction.
 
-This checkpoint does not yet emit graphics-reset, close, or routed-pointer events.
-`sdl_window_legacy` still reaches equivalent product behavior through the existing SDL event path
-rather than this presentation queue. Both are explicit remaining parity work. The owner confirmed
-native activation, cancel-on-drag, click-through, smooth movement, and one stable final reflow.
+This checkpoint does not yet emit graphics-reset, close, or routed-pointer events through the
+presentation queue. `sdl_window_legacy` now publishes environment changes through that queue, while
+an SDL-backed event adapter translates its existing pointer and application-command behavior into
+fixed-size `EidolonAppEvent` values. Raw `SDL_Event` values no longer enter `EidolonApp`.
+Presentation-event parity for those remaining edges is still explicit work. The owner confirmed
+native activation, body-context settings, cancel-on-drag, click-through, smooth movement, and one
+stable final reflow. The no-activate native host deliberately does not claim keyboard focus or
+register a system-wide `F1` hotkey; right-click is its reliable settings entry point.
 
 Output, DPI, usable bounds, safe area, orientation, and refresh are revisioned state rather than
 lossless interaction history. Their publication, coalescing, topology, and wake semantics are owned
@@ -181,6 +187,7 @@ The initial event vocabulary is:
 
 ```text
 layer.activated
+layer.context_requested
 pointer.down
 pointer.motion
 pointer.up
@@ -196,10 +203,11 @@ queue.resync_required
 ```
 
 `pointer.*` is emitted only for `route_pointer`. `layer.activated` is the stable semantic result of
-an `activate` policy, not a synonym for a platform mouse-up message. `move.motion` and
-replaceable `environment.changed` publications may be coalesced. `move.completed`,
-`move.canceled`, close requests, graphics-reset requests, and resync requests are causal or
-structural edges and may not be silently dropped.
+an `activate` policy, not a synonym for a platform mouse-up message.
+`layer.context_requested` carries the hit layer without deciding what product UI it opens.
+`move.motion` and replaceable `environment.changed` publications may be coalesced.
+`move.completed`, `move.canceled`, context requests, close requests, graphics-reset requests, and
+resync requests are causal or structural edges and may not be silently dropped.
 
 `environment.changed` carries the complete fixed-size active-host environment for its revision.
 The latest revision supersedes older unapplied environment publications; full output topology is
@@ -261,9 +269,11 @@ EidolonApp routing against current scene
 dialogue activation | final reflow | body interaction | lifecycle recovery
 ```
 
-The application drains presentation events alongside SDL/fallback events before simulation and
-scene publication. A bounded per-tick budget prevents motion floods from starving rendering.
-Terminal and structural events remain observable even when replaceable motion is coalesced.
+The application drains presentation events alongside backend-neutral fallback application events
+before simulation and scene publication. SDL remains the current wait/pump implementation, but its
+event union is contained inside the adapter. A bounded per-tick budget prevents motion floods from
+starving rendering. Terminal and structural events remain observable even when replaceable motion
+is coalesced.
 
 ## Queue and overload behavior
 
@@ -293,6 +303,8 @@ must remain bounded and must not call application code while holding a backend l
 - layer interaction policy becomes active atomically with its visual and input geometry;
 - transparent or `pass_through` pixels reach the underlying application;
 - one physical activation produces at most one `layer.activated`;
+- one native context request identifies the current committed layer without backend-owned product
+  behavior;
 - capture loss always produces cancellation or an observable resync requirement;
 - dragging remains responsive when rendering misses a frame;
 - drag completion produces one final geometry suitable for one application reflow;
@@ -320,6 +332,8 @@ must remain bounded and must not call application code while holding a backend l
 ## Acceptance criteria
 
 - clicking an opaque native dialogue layer advances exactly that session bubble once;
+- right-clicking the native body opens settings without making the no-activate overlay steal
+  keyboard focus;
 - pressing or releasing outside the originally activated layer does not activate it;
 - transparent portrait and bubble pixels continue to reach the underlying desktop application;
 - native body dragging remains smooth while breathing, expression, and dialogue presentation

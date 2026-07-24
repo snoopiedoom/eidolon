@@ -298,9 +298,10 @@ portrait-only DirectComposition path for owner-controlled evaluation; it is not 
 The first backend-neutral interaction slice is compiled: committed layer policy replaces
 layer-kind inference, Win32 translates activation and native move lifecycle into a bounded C17
 queue, and `EidolonApp` routes activation by stable current layer id and reflows once after move
-completion. The owner accepted that interaction slice. Revisioned active-host environment
-publication, topology copying, wake integration, mixed-DPI application, and SDL-legacy parity
-remain Gate 6 work under
+completion. The owner accepted that interaction slice. Both Windows backends now publish
+revisioned active-host environments and caller-owned topology; SDL legacy pointer, close, and
+graphics-reset parity plus owner-controlled mixed-DPI checks remain Gate 6 work under
+[`docs/design/presentation-events.md`](../design/presentation-events.md) and
 [`docs/design/presentation-environment.md`](../design/presentation-environment.md).
 
 ## Restart checklist
@@ -317,6 +318,26 @@ remain Gate 6 work under
    handoff.
 
 ## Evidence log
+
+### 2026-07-24: SDL event and environment ownership compiled
+
+- `EidolonApp` no longer receives `SDL_Event`, SDL keycodes, SDL mouse-event structs, SDL display
+  ids, or direct display queries;
+- the SDL wait/poll adapter translates fixed-size application commands and legacy pointer input,
+  while the SDL presentation adapter owns display/window invalidation and coherent reconciliation;
+- `sdl_window_legacy` now publishes global-logical host/output state, content and pixel scale,
+  nominal refresh, orientation, opaque output ids, and caller-owned topology through the same
+  revisioned presentation contract as DirectComposition;
+- avatar, primary, virtual, and custom bubble bounds resolve from opaque presentation outputs while
+  preserving the existing avatar-output hysteresis;
+- DirectComposition right-click hit testing emits a layer context request; application routing
+  opens settings only for the current body layer without activating the no-focus overlay;
+- the owner confirmed the native body-context settings path alongside the previously accepted
+  dragging, click-through, dialogue activation, and final reflow behavior;
+- all ordinary regressions, the warning-clean Windows build, formatting, whitespace validation,
+  and a hidden staged snapshot pass;
+- owner-controlled legacy drag, click, settings, mixed-DPI, and cross-monitor confirmation remains
+  the current checkpoint.
 
 ### 2026-07-24: presentation event slice compiled
 

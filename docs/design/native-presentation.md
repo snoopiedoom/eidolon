@@ -697,8 +697,8 @@ compositor-owned D3D11 targets without readback. Normal startup and snapshots re
 `sdl_window_legacy`; the native override is portrait-only. Its Win32 adapter now owns transformed
 per-pixel hit testing, body dragging, and bounded activation/move events. The owner accepted native
 visual output, transparent click-through, dialogue activation and cancellation, smooth dragging,
-cross-monitor behavior, final reflow, revisioned Win32 environment/topology delivery, and one
-transactional mixed-DPI application update.
+cross-monitor behavior, body-context settings without focus theft, final reflow, revisioned Win32
+environment/topology delivery, and one transactional mixed-DPI application update.
 
 ### Phase 2: Windows portrait proof
 
@@ -718,9 +718,10 @@ native hit-test transparency. Body drag capture and top-level movement run in th
 procedure, independent of frame rendering. This is a transitional single-host implementation;
 output-local host migration and layer-transform dragging remain the intended multi-output design.
 Dialogue activation and native move completion cross the fixed-size event queue without invoking
-application behavior from `WndProc`, and the owner accepted the resulting interaction. Immutable
-revisioned environment publication, topology copying, native-message wake integration, and one
-transactional mixed-DPI application update now follow
+application behavior from `WndProc`; body right-click emits a backend-neutral context request, and
+the owner accepted the resulting interaction. Immutable revisioned environment publication,
+topology copying, native-message wake integration, and one transactional mixed-DPI application
+update now follow
 [`presentation-environment.md`](presentation-environment.md). The owner confirmed cross-monitor
 environment delivery and bounds behavior; physical output-removal recovery remains unproven.
 

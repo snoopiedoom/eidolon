@@ -30,10 +30,9 @@ constexpr LONG kActivationDragThreshold = 4L;
 constexpr uint64_t kCapabilities =
     EIDOLON_PRESENTATION_CAP_PERSISTENT_OVER_OTHER_APPS |
     EIDOLON_PRESENTATION_CAP_GLOBAL_PLACEMENT | EIDOLON_PRESENTATION_CAP_MULTIPLE_OUTPUTS |
-    EIDOLON_PRESENTATION_CAP_COMPOSITOR_TRANSFORM |
-    EIDOLON_PRESENTATION_CAP_COMPOSITOR_OPACITY | EIDOLON_PRESENTATION_CAP_GPU_ZERO_COPY |
-    EIDOLON_PRESENTATION_CAP_BACKGROUND_VISIBILITY | EIDOLON_PRESENTATION_CAP_PER_PIXEL_INPUT |
-    EIDOLON_PRESENTATION_CAP_NATIVE_INTERACTIVE_MOVE;
+    EIDOLON_PRESENTATION_CAP_COMPOSITOR_TRANSFORM | EIDOLON_PRESENTATION_CAP_COMPOSITOR_OPACITY |
+    EIDOLON_PRESENTATION_CAP_GPU_ZERO_COPY | EIDOLON_PRESENTATION_CAP_BACKGROUND_VISIBILITY |
+    EIDOLON_PRESENTATION_CAP_PER_PIXEL_INPUT | EIDOLON_PRESENTATION_CAP_NATIVE_INTERACTIVE_MOVE;
 
 struct DcompTarget {
     EidolonSceneLayerId layer = {};
@@ -184,20 +183,17 @@ bool enqueue_event(Win32DcompPresentation *backend, EidolonPresentationEventKind
     event.kind = kind;
     event.monotonic_ns = SDL_GetTicksNS();
     event.host = {1U};
-    if (kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED) {
+    if (kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED ||
+        kind == EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED) {
         event.data.layer = {
             scene_revision, layer, host_x, host_y, layer_x, layer_y,
         };
     } else {
         event.data.move = {
-            scene_revision,
-            backend->environment_valid ? backend->environment.revision : 0U,
-            layer,
-            current_geometry(backend),
-            host_x,
-            host_y,
-            layer_x,
-            layer_y,
+            scene_revision, backend->environment_valid ? backend->environment.revision : 0U,
+            layer,          current_geometry(backend),
+            host_x,         host_y,
+            layer_x,        layer_y,
         };
     }
     return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
@@ -328,6 +324,19 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
                 (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED, layer,
                                     scene_revision, host_x, host_y, hit.layer_x, hit.layer_y);
             }
+        }
+        return 0;
+    }
+    case WM_RBUTTONDOWN:
+        return 0;
+    case WM_RBUTTONUP: {
+        const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
+        const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
+        const HitTestResult hit = hit_test(backend, host_x, host_y);
+        if (hit.target != nullptr) {
+            (void)enqueue_event(backend, EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED,
+                                hit.target->layer, hit.target->committed_scene_revision, host_x,
+                                host_y, hit.layer_x, hit.layer_y);
         }
         return 0;
     }
@@ -608,9 +617,9 @@ BOOL CALLBACK enumerate_output(HMONITOR monitor, HDC, LPRECT, LPARAM opaque) {
     record.info.flags = (native_info.dwFlags & MONITORINFOF_PRIMARY) != 0U
                             ? EIDOLON_PRESENTATION_OUTPUT_PRIMARY
                             : 0U;
-    record.info.valid_fields =
-        EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS | EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
-        EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE;
+    record.info.valid_fields = EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+                               EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS |
+                               EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE;
 
     DEVMODEW mode = {};
     mode.dmSize = sizeof(mode);
@@ -760,9 +769,8 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
         SDL_SetError("could not reserve DirectComposition output topology");
         return false;
     }
-    const BOOL enumerated =
-        EnumDisplayMonitors(nullptr, nullptr, enumerate_output,
-                            reinterpret_cast<LPARAM>(&enumeration));
+    const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, enumerate_output,
+                                                reinterpret_cast<LPARAM>(&enumeration));
     if (!enumerated || enumeration.failed || enumeration.records.empty()) {
         SDL_SetError("could not enumerate DirectComposition outputs");
         return false;
@@ -800,13 +808,10 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
     candidate.coordinate_space = EIDOLON_PRESENTATION_COORDINATE_SPACE_GLOBAL_PIXEL;
     candidate.capabilities = kCapabilities;
     candidate.valid_fields =
-        EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY |
-        EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE |
-        EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY |
-        EIDOLON_PRESENTATION_ENV_CAPABILITIES;
+        EIDOLON_PRESENTATION_ENV_HOST_GEOMETRY | EIDOLON_PRESENTATION_ENV_COORDINATE_SPACE |
+        EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY | EIDOLON_PRESENTATION_ENV_CAPABILITIES;
 
-    const HMONITOR active_monitor =
-        MonitorFromWindow(backend->window, MONITOR_DEFAULTTONEAREST);
+    const HMONITOR active_monitor = MonitorFromWindow(backend->window, MONITOR_DEFAULTTONEAREST);
     for (const Win32OutputRecord &record : backend->outputs) {
         if (record.monitor != active_monitor) {
             continue;
@@ -816,10 +821,9 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
         candidate.usable_bounds = record.info.usable_bounds;
         candidate.nominal_refresh_hz = record.info.nominal_refresh_hz;
         candidate.orientation = record.info.orientation;
-        candidate.valid_fields |=
-            EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
-            EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
-            EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS;
+        candidate.valid_fields |= EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
+                                  EIDOLON_PRESENTATION_ENV_OUTPUT_BOUNDS |
+                                  EIDOLON_PRESENTATION_ENV_USABLE_BOUNDS;
         if ((record.info.valid_fields & EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH) != 0U) {
             candidate.valid_fields |= EIDOLON_PRESENTATION_ENV_NOMINAL_REFRESH;
         }
@@ -837,16 +841,15 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
             EIDOLON_PRESENTATION_ENV_CONTENT_SCALE | EIDOLON_PRESENTATION_ENV_PIXEL_SCALE;
     }
 
-    const uint64_t changed =
-        backend->environment_valid ? environment_changes(backend->environment, candidate)
-                                   : candidate.valid_fields;
+    const uint64_t changed = backend->environment_valid
+                                 ? environment_changes(backend->environment, candidate)
+                                 : candidate.valid_fields;
     if (!backend->environment_valid || changed != 0U) {
         if (backend->environment_valid && backend->environment.revision == UINT64_MAX) {
             SDL_SetError("DirectComposition environment revision exhausted");
             return false;
         }
-        candidate.revision =
-            backend->environment_valid ? backend->environment.revision + 1U : 1U;
+        candidate.revision = backend->environment_valid ? backend->environment.revision + 1U : 1U;
         candidate.changed_fields = changed;
         backend->environment = candidate;
         backend->environment_valid = true;
@@ -878,8 +881,7 @@ bool get_environment(void *opaque, EidolonPresentationEnvironment *environment) 
     return true;
 }
 
-EidolonPresentationTopologyResult copy_outputs(void *opaque,
-                                               EidolonPresentationOutputInfo *outputs,
+EidolonPresentationTopologyResult copy_outputs(void *opaque, EidolonPresentationOutputInfo *outputs,
                                                size_t capacity) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     if (!reconcile_environment(backend, backend->environment_valid)) {

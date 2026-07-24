@@ -8,6 +8,8 @@ the details needed to change Eidolon without rediscovering its boundaries.
 - [Product brief](product-brief.md) — positioning, audience, product boundary, and long-term
   direction.
 - [V1 goal](v1-goal.md) — the first product milestone and its acceptance sequence.
+- [Product roadmap](product-roadmap.md) — ordered gates from the daily-driver alpha through public
+  V1, plus guarded post-V1 horizons.
 - [Current project state](project-state.md) — verified implementation, V1 scorecard, limitations,
   and restart checklist.
 

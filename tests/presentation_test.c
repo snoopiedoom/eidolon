@@ -337,6 +337,12 @@ int main(void) {
     assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED);
     assert(presentation_event.data.layer.layer.value == 7U && presentation_event.sequence == 1U);
     assert(!eidolon_presentation_poll_event(presentation, &presentation_event));
+    fake.event.kind = EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED;
+    fake.event.sequence = 2U;
+    fake.event_pending = true;
+    assert(eidolon_presentation_poll_event(presentation, &presentation_event));
+    assert(presentation_event.kind == EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED);
+    assert(presentation_event.data.layer.layer.value == 7U);
     const EidolonSceneSnapshot scene = {
         .revision = 2U,
         .layer_count = 1U,

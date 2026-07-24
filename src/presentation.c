@@ -213,11 +213,10 @@ static bool valid_output_info(const EidolonPresentationOutputInfo *output) {
     return output->output.value != 0U &&
            (output->flags & ~(uint64_t)EIDOLON_PRESENTATION_OUTPUT_PRIMARY) == 0U &&
            (output->valid_fields & ~allowed_fields) == 0U &&
-           valid_optional_environment_fields(output->valid_fields, &output->bounds,
-                                             &output->usable_bounds, &output->safe_area,
-                                             output->content_scale, output->pixel_scale,
-                                             output->nominal_refresh_hz, output->orientation,
-                                             output->coordinate_space);
+           valid_optional_environment_fields(
+               output->valid_fields, &output->bounds, &output->usable_bounds, &output->safe_area,
+               output->content_scale, output->pixel_scale, output->nominal_refresh_hz,
+               output->orientation, output->coordinate_space);
 }
 
 static EidolonPresentationTopologyResult topology_error(const char *message) {
@@ -352,6 +351,7 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
     }
     switch (next.kind) {
     case EIDOLON_PRESENTATION_EVENT_LAYER_ACTIVATED:
+    case EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED:
         if (next.data.layer.layer.value == 0U) {
             SDL_SetError("invalid presentation layer event");
             return false;

@@ -58,6 +58,7 @@ typedef enum EidolonPrimaryInteraction {
 } EidolonPrimaryInteraction;
 
 typedef struct EidolonSettingsUi EidolonSettingsUi;
+typedef struct EidolonEventPump EidolonEventPump;
 
 typedef struct EidolonApp {
     EidolonPresentation *presentation;
@@ -72,6 +73,7 @@ typedef struct EidolonApp {
     EidolonModelRenderer *model;
     EidolonPortraitRenderer *portrait;
     EidolonSettingsUi *settings_ui;
+    EidolonEventPump *event_pump;
     EidolonRenderMode render_mode;
     EidolonDialogueTheme dialogue_theme;
     EidolonDialogueMovement dialogue_movement;
@@ -149,7 +151,7 @@ typedef struct EidolonApp {
     EidolonBubbleBoundsMode bubble_bounds_mode;
     SDL_Rect bubble_custom_bounds;
     SDL_Rect bubble_resolved_bounds;
-    SDL_DisplayID bubble_display_id;
+    EidolonPresentationOutput bubble_output;
     char user_settings_path[EIDOLON_USER_SETTINGS_PATH_CAPACITY];
     EidolonUserSettings system_settings;
     EidolonUserSettings user_settings;
