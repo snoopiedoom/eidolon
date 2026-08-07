@@ -345,6 +345,94 @@ static void test_calibrated_contrast_peak_drives_right_arm(void) {
                  1.0F) < 0.0001F);
 }
 
+static void test_runtime_compacts_long_lived_behavior_history(void) {
+    const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
+    EidolonPerformanceRuntime runtime;
+    static const EidolonEprOperationalMode modes[] = {
+        EIDOLON_EPR_MODE_LISTENING,
+        EIDOLON_EPR_MODE_THINKING,
+        EIDOLON_EPR_MODE_RESPONDING,
+        EIDOLON_EPR_MODE_COMPLETED,
+    };
+    assert(init_fixture_runtime(&runtime, 23U, &body));
+    for (uint64_t revision = 1U; revision <= 40U; ++revision) {
+        const EidolonEprTick tick = (EidolonEprTick)(revision * 1000U);
+        EidolonPerformanceIntent value =
+            intent(revision, revision - 1U, tick, modes[(revision - 1U) % 4U]);
+        assert(eidolon_epr_runtime_accept(&runtime, &value));
+        assert(eidolon_epr_runtime_step(&runtime, tick));
+        assert(runtime.plan.behavior_count < EIDOLON_EPR_BEHAVIOR_CAPACITY);
+        assert(runtime.plan.temporal.node_count < EIDOLON_EPR_TEMPORAL_NODE_CAPACITY);
+        assert(runtime.behavior_state_count < EIDOLON_EPR_BEHAVIOR_CAPACITY);
+        assert(runtime.programs.count < EIDOLON_EPR_PROGRAM_CAPACITY);
+    }
+    assert(runtime.plan.behavior_count <= 5U);
+    assert(runtime.behavior_state_count <= 5U);
+}
+
+static void test_revised_interruption_does_not_retime_settle(void) {
+    const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceIntent value;
+    const EidolonEprOpaqueId settle =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, UINT64_C(0xc017a57));
+    assert(init_fixture_runtime(&runtime, 29U, &body));
+    value = intent(1U, 0U, 3000, EIDOLON_EPR_MODE_RESPONDING);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_step(&runtime, 3510));
+
+    value = intent(2U, 1U, 3600, EIDOLON_EPR_MODE_INTERRUPTED);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    const EidolonEprBehaviorUnit *behavior = eidolon_epr_plan_find(&runtime.plan, settle);
+    assert(behavior != NULL);
+    assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT] == 3600);
+    assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_SETTLE] == 3920);
+    assert(eidolon_epr_runtime_step(&runtime, 3700));
+
+    value = intent(3U, 2U, 3750, EIDOLON_EPR_MODE_INTERRUPTED);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    behavior = eidolon_epr_plan_find(&runtime.plan, settle);
+    assert(behavior != NULL);
+    assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT] == 3600);
+    assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_SETTLE] == 3920);
+    assert(eidolon_epr_runtime_step(&runtime, 3920));
+    behavior = eidolon_epr_plan_find(&runtime.plan, settle);
+    assert(behavior != NULL && behavior->retired);
+}
+
+static void test_completed_gesture_tombstone_prevents_replay_until_evidence_leaves(void) {
+    const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceIntent value;
+    const EidolonEprOpaqueId gesture =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT,
+                                UINT64_C(0xc017a57));
+    assert(init_fixture_runtime(&runtime, 31U, &body));
+    value = intent(1U, 0U, 3000, EIDOLON_EPR_MODE_RESPONDING);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_step(&runtime, 4010));
+    const EidolonEprBehaviorUnit *behavior = eidolon_epr_plan_find(&runtime.plan, gesture);
+    assert(behavior != NULL && behavior->retired);
+    assert(eidolon_epr_program_find(&runtime.programs, gesture) == NULL);
+
+    value = intent(2U, 1U, 4100, EIDOLON_EPR_MODE_RESPONDING);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_program_find(&runtime.programs, gesture) == NULL);
+    assert(eidolon_epr_runtime_step(&runtime, 4100));
+    behavior = eidolon_epr_plan_find(&runtime.plan, gesture);
+    assert(behavior != NULL && behavior->retired);
+
+    value = intent(3U, 2U, 4200, EIDOLON_EPR_MODE_RESPONDING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_step(&runtime, 4200));
+    assert(eidolon_epr_plan_find(&runtime.plan, gesture) == NULL);
+}
+
 static const EidolonEprBehaviorRuntimeState *
 find_runtime_state(const EidolonPerformanceRuntime *runtime, EidolonEprOpaqueId behavior) {
     for (size_t index = 0; index < runtime->behavior_state_count; ++index) {
@@ -594,6 +682,9 @@ int main(void) {
     test_calibrated_targets_drive_posture_and_missing_anchor_degrades_locally();
     test_partial_anchor_reports_only_degraded_resources();
     test_calibrated_contrast_peak_drives_right_arm();
+    test_runtime_compacts_long_lived_behavior_history();
+    test_revised_interruption_does_not_retime_settle();
+    test_completed_gesture_tombstone_prevents_replay_until_evidence_leaves();
     test_complete_scenario_and_determinism();
     test_stale_and_solve_failure_are_transactional();
     test_optional_capabilities_degrade_locally();

@@ -16,6 +16,8 @@ accepted Performance Intent
         ↓
 versioned behavior plan + temporal dispatch
         ↓
+bounded lifecycle history compaction after terminal trace
+        ↓
 explicit body-resource grants + modality Realization Programs
         ↓
 canonical composition + transactional IK/joint limits, fixed control ticks

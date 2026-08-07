@@ -82,6 +82,8 @@ typedef struct EidolonBehaviorPlan {
 void eidolon_epr_plan_init(EidolonBehaviorPlan *plan);
 bool eidolon_epr_plan_apply(const EidolonBehaviorPlan *previous,
                             const EidolonPerformanceIntent *intent, EidolonBehaviorPlan *candidate);
+bool eidolon_epr_plan_compact(EidolonBehaviorPlan *plan,
+                              const EidolonPerformanceIntent *intent);
 const EidolonEprBehaviorUnit *eidolon_epr_plan_find(const EidolonBehaviorPlan *plan,
                                                     EidolonEprOpaqueId behavior);
 EidolonEprOpaqueId eidolon_epr_behavior_id(EidolonEprBehaviorKind kind, EidolonEprOpaqueId cause);

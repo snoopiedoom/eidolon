@@ -326,7 +326,7 @@ static EidolonEprTraceReason terminal_trace_reason(EidolonEprTerminalReason term
 
 static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonEprTick tick) {
     for (size_t index = 0; index < runtime->plan.behavior_count; ++index) {
-        const EidolonEprBehaviorUnit *behavior = &runtime->plan.behaviors[index];
+        EidolonEprBehaviorUnit *behavior = &runtime->plan.behaviors[index];
         EidolonEprBehaviorRuntimeState *state = runtime_state(runtime, behavior->id);
         EidolonEprTerminalReason terminal = EIDOLON_EPR_TERMINAL_NONE;
         const EidolonEprBehaviorState desired = desired_state(behavior, tick, &terminal);
@@ -345,6 +345,10 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
                 record.value = (uint64_t)desired;
                 emit(runtime, record);
             }
+        }
+        if (desired == EIDOLON_EPR_BEHAVIOR_RETIRED && !behavior->retired) {
+            behavior->retired = true;
+            behavior->terminal_reason = terminal;
         }
         if (desired == EIDOLON_EPR_BEHAVIOR_RETIRED && terminal != EIDOLON_EPR_TERMINAL_COMPLETED) {
             continue;
@@ -366,6 +370,40 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
             }
         }
     }
+}
+
+static bool compact_runtime_history(EidolonPerformanceRuntime *runtime) {
+    size_t write = 0U;
+    if (!eidolon_epr_plan_compact(&runtime->plan,
+                                  runtime->has_intent ? &runtime->intent : NULL)) {
+        return false;
+    }
+    for (size_t index = 0U; index < runtime->programs.count; ++index) {
+        const EidolonRealizationProgram *program = &runtime->programs.programs[index];
+        const EidolonEprBehaviorUnit *behavior =
+            eidolon_epr_plan_find(&runtime->plan, program->behavior);
+        if (behavior != NULL && !behavior->retired) {
+            runtime->programs.programs[write] = *program;
+            write += 1U;
+        }
+    }
+    memset(&runtime->programs.programs[write], 0,
+           (EIDOLON_EPR_PROGRAM_CAPACITY - write) * sizeof(runtime->programs.programs[0]));
+    runtime->programs.count = write;
+
+    write = 0U;
+    for (size_t index = 0U; index < runtime->behavior_state_count; ++index) {
+        const EidolonEprBehaviorRuntimeState *state = &runtime->behavior_states[index];
+        if (state->state != EIDOLON_EPR_BEHAVIOR_RETIRED ||
+            eidolon_epr_plan_find(&runtime->plan, state->behavior) != NULL) {
+            runtime->behavior_states[write] = *state;
+            write += 1U;
+        }
+    }
+    memset(&runtime->behavior_states[write], 0,
+           (EIDOLON_EPR_BEHAVIOR_CAPACITY - write) * sizeof(runtime->behavior_states[0]));
+    runtime->behavior_state_count = write;
+    return true;
 }
 
 static bool grant_equal(const EidolonEprResourceGrant *left, const EidolonEprResourceGrant *right) {
@@ -685,7 +723,7 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
         emit(runtime, published);
         runtime->projection_pending_after_revision = candidate.revision;
     }
-    return true;
+    return compact_runtime_history(runtime);
 }
 
 void eidolon_epr_runtime_inject_solve_failure(EidolonPerformanceRuntime *runtime) {

@@ -255,7 +255,21 @@ static bool add_gesture(EidolonBehaviorPlan *plan, const EidolonEprSemanticBeat 
 
 static bool add_settle(EidolonBehaviorPlan *plan, EidolonEprOpaqueId cause, EidolonEprTick start) {
     EidolonEprBehaviorUnit *settle =
-        add_behavior(plan, EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, cause, 900U, 1000U);
+        find_active(plan, EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, cause);
+    if (settle != NULL) {
+        if (!settle->has_phase[EIDOLON_EPR_PHASE_INTERRUPT] ||
+            !settle->has_phase[EIDOLON_EPR_PHASE_SETTLE]) {
+            return false;
+        }
+        return add_claim(plan, settle, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN,
+                         EIDOLON_EPR_CLAIM_OVERRIDE,
+                         settle->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT],
+                         settle->phase_ticks[EIDOLON_EPR_PHASE_SETTLE], 0U, 4U);
+    }
+    if (has_retired(plan, EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, cause)) {
+        return true;
+    }
+    settle = add_behavior(plan, EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, cause, 900U, 1000U);
     if (settle == NULL || !set_phase(plan, settle, EIDOLON_EPR_PHASE_INTERRUPT, start, true) ||
         !set_phase(plan, settle, EIDOLON_EPR_PHASE_SETTLE, start + 320, false) ||
         !constrain(plan, settle, EIDOLON_EPR_PHASE_INTERRUPT, EIDOLON_EPR_PHASE_SETTLE, 320, 320)) {
@@ -411,6 +425,95 @@ bool eidolon_epr_plan_apply(const EidolonBehaviorPlan *previous,
         !eidolon_epr_temporal_validate(&candidate->temporal)) {
         return false;
     }
+    return true;
+}
+
+static bool intent_retains_tombstone(const EidolonPerformanceIntent *intent,
+                                     const EidolonEprBehaviorUnit *behavior) {
+    if (intent == NULL || behavior == NULL ||
+        (behavior->kind != EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT &&
+         behavior->kind != EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM)) {
+        return false;
+    }
+    for (size_t index = 0U; index < intent->beat_count; ++index) {
+        const EidolonEprSemanticBeat *beat = &intent->beats[index];
+        if (beat->id == behavior->cause && beat->kind == EIDOLON_EPR_BEAT_CONTRAST &&
+            beat->stability >= EIDOLON_EPR_EVIDENCE_STABLE_PREFIX) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool temporal_anchor_is_active(const EidolonBehaviorPlan *plan, EidolonEprAnchorId anchor) {
+    for (size_t index = 0U; index < plan->behavior_count; ++index) {
+        const EidolonEprBehaviorUnit *behavior = &plan->behaviors[index];
+        if (behavior->retired) {
+            continue;
+        }
+        for (size_t phase = 0U; phase < EIDOLON_EPR_BEHAVIOR_PHASE_COUNT; ++phase) {
+            if (behavior->has_phase[phase] &&
+                eidolon_epr_behavior_anchor_id(behavior->id, (EidolonEprBehaviorPhase)phase) ==
+                    anchor) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool eidolon_epr_plan_compact(EidolonBehaviorPlan *plan,
+                              const EidolonPerformanceIntent *intent) {
+    EidolonBehaviorPlan candidate;
+    if (plan == NULL || plan->behavior_count > EIDOLON_EPR_BEHAVIOR_CAPACITY ||
+        plan->claim_count > EIDOLON_EPR_RESOURCE_CLAIM_CAPACITY ||
+        plan->temporal.node_count > EIDOLON_EPR_TEMPORAL_NODE_CAPACITY ||
+        plan->temporal.constraint_count > EIDOLON_EPR_TEMPORAL_CONSTRAINT_CAPACITY ||
+        (intent != NULL && intent->beat_count > EIDOLON_EPR_BEAT_CAPACITY)) {
+        return false;
+    }
+    candidate = *plan;
+    candidate.behavior_count = 0U;
+    memset(candidate.behaviors, 0, sizeof(candidate.behaviors));
+    for (size_t index = 0U; index < plan->behavior_count; ++index) {
+        const EidolonEprBehaviorUnit *behavior = &plan->behaviors[index];
+        if (!behavior->retired || intent_retains_tombstone(intent, behavior)) {
+            candidate.behaviors[candidate.behavior_count] = *behavior;
+            candidate.behavior_count += 1U;
+        }
+    }
+
+    candidate.claim_count = 0U;
+    memset(candidate.claims, 0, sizeof(candidate.claims));
+    for (size_t index = 0U; index < plan->claim_count; ++index) {
+        const EidolonEprBehaviorUnit *behavior =
+            eidolon_epr_plan_find(&candidate, plan->claims[index].behavior);
+        if (behavior != NULL && !behavior->retired) {
+            candidate.claims[candidate.claim_count] = plan->claims[index];
+            candidate.claim_count += 1U;
+        }
+    }
+
+    eidolon_epr_temporal_init(&candidate.temporal);
+    for (size_t index = 0U; index < plan->temporal.node_count; ++index) {
+        const EidolonEprTemporalNode *node = &plan->temporal.nodes[index];
+        if (temporal_anchor_is_active(&candidate, node->id)) {
+            candidate.temporal.nodes[candidate.temporal.node_count] = *node;
+            candidate.temporal.node_count += 1U;
+        }
+    }
+    for (size_t index = 0U; index < plan->temporal.constraint_count; ++index) {
+        const EidolonEprTemporalConstraint *constraint = &plan->temporal.constraints[index];
+        if (eidolon_epr_temporal_find(&candidate.temporal, constraint->from) != NULL &&
+            eidolon_epr_temporal_find(&candidate.temporal, constraint->to) != NULL) {
+            candidate.temporal.constraints[candidate.temporal.constraint_count] = *constraint;
+            candidate.temporal.constraint_count += 1U;
+        }
+    }
+    if (!eidolon_epr_temporal_validate(&candidate.temporal)) {
+        return false;
+    }
+    *plan = candidate;
     return true;
 }
 

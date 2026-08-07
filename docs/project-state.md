@@ -105,6 +105,9 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   expression, eye-first/head-follow gaze, a restrained right-arm contrast gesture, interruption,
   current-state resource transfer and cleanup, guarded settling, and prevention of interrupted
   phase replay;
+- terminal EPR behaviors are traced before retired plan nodes, temporal anchors, programs, and
+  runtime states are compacted; an active stable semantic beat retains only the tombstones needed
+  to prevent gesture/settle replay, keeping long-lived sessions within fixed capacities;
 - one experimental reference-avatar path validates authoritative humanoid hierarchy/scale, rejects
   unsupported matrix nodes, reports optional capabilities through absent/declared/parsed/executable
   states, maps an independently parsed `relaxed` position morph over the bind-face baseline, and
@@ -194,8 +197,6 @@ interaction after both injected recovery branches.
   the EPR/VRM calibration profile;
 - the first EPR ingress is a deterministic synthetic fixture behind the future A2 boundary; live
   A2 source/session provenance is not duplicated here;
-- retired-plan compaction is not needed by the bounded first fixture but must land before
-  long-running live A2 evidence can produce unbounded performance episodes;
 - the VRM path is limited to the selected reference-avatar experiment and must not be exposed as an
   unrestricted "load a VRM" capability;
 - MToon is detected and version-checked per material, but the renderer still provides only its
