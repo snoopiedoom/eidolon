@@ -1050,3 +1050,9 @@ const char *eidolon_vrm_calibration_anchor_name(EidolonVrmCalibrationAnchorId id
     }
     return ANCHOR_NAMES[id];
 }
+
+const char *eidolon_vrm_calibration_bone_name(EidolonVrmHumanBone bone) {
+    return bone >= EIDOLON_VRM_BONE_HIPS && bone < EIDOLON_VRM_BONE_COUNT
+               ? BONE_NAMES[(size_t)bone]
+               : "unknown";
+}

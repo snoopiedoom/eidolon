@@ -249,6 +249,55 @@ static void draw_calibration_vector(EidolonApp *app, const char *prefix, bool po
     }
 }
 
+static void draw_calibration_residual(EidolonApp *app) {
+    EidolonVrmCalibrationSession *session = &app->vrm_calibration_session;
+    const EidolonVrmHumanBone selected = session->selected_residual_bone;
+    const char *preview = eidolon_vrm_calibration_bone_name(selected);
+    ImGui_SeparatorText("model-local correction");
+    ImGui_TextWrapped("Use this only after the task-space controls are close. The three values form "
+                      "one local rotation vector, capped at 45 degrees total.");
+    if (ImGui_BeginCombo("residual bone", preview, 0)) {
+        for (size_t value = 0U; value < EIDOLON_VRM_BONE_COUNT; ++value) {
+            const EidolonVrmHumanBone bone = (EidolonVrmHumanBone)value;
+            if (!eidolon_vrm_calibration_session_residual_bone_editable(session, bone)) {
+                continue;
+            }
+            const bool is_selected = bone == selected;
+            if (ImGui_SelectableEx(eidolon_vrm_calibration_bone_name(bone), is_selected, 0,
+                                   (ImVec2){0.0F, 0.0F})) {
+                (void)eidolon_app_select_vrm_calibration_residual_bone(app, bone);
+            }
+            if (is_selected) {
+                ImGui_SetItemDefaultFocus();
+            }
+        }
+        ImGui_EndCombo();
+    }
+    float vector[3];
+    if (!eidolon_vrm_calibration_session_residual_vector(session,
+                                                         session->selected_residual_bone,
+                                                         vector)) {
+        ImGui_TextDisabled("No residual-capable bone is available for this anchor.");
+        return;
+    }
+    static const char *axes[3] = {"local X", "local Y", "local Z"};
+    for (size_t component = 0U; component < 3U; ++component) {
+        float degrees = vector[component] * 180.0F / SDL_PI_F;
+        if (ImGui_SliderFloatEx(axes[component], &degrees, -45.0F, 45.0F, "%.1f deg", 0)) {
+            (void)eidolon_app_set_vrm_calibration_residual_component(
+                app, component, degrees * SDL_PI_F / 180.0F);
+        }
+    }
+    const bool authored =
+        (session->draft.residual_bone_mask &
+         (UINT32_C(1) << (uint32_t)session->selected_residual_bone)) != 0U;
+    ImGui_BeginDisabled(!authored);
+    if (ImGui_Button("clear bone correction")) {
+        (void)eidolon_app_clear_vrm_calibration_residual(app);
+    }
+    ImGui_EndDisabled();
+}
+
 static void draw_vrm_calibration(EidolonApp *app) {
     EidolonVrmCalibrationSession *session = &app->vrm_calibration_session;
     EidolonVrmCalibrationAnchor *draft = &session->draft;
@@ -323,9 +372,9 @@ static void draw_vrm_calibration(EidolonApp *app) {
         (void)eidolon_app_set_vrm_calibration_arm_weight(app, weight);
     }
     ImGui_EndDisabled();
-    ImGui_TextWrapped("The current editor owns only the right arm. Left-arm and per-bone residual "
-                      "authoring remain unavailable; saved residuals already compose in scratch "
-                      "projection.");
+    ImGui_TextWrapped("The current task-space editor owns only the right arm; left-arm authoring "
+                      "remains a later slice.");
+    draw_calibration_residual(app);
 
     ImGui_BeginDisabled(!session->dirty && session->source_was_calibrated);
     if (ImGui_Button("revert draft")) {

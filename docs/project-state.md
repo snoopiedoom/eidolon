@@ -213,8 +213,8 @@ interaction after both injected recovery branches.
   constraints/physics ordered afterward;
 - the calibration sidecar measures, fingerprints, parses, captures, edits, atomically saves, and
   compiles torso/head/right-arm anchors; partial anchors now trace the exact resources that fall
-  back. Left-arm and residual editing remain later authoring controls even though saved residuals
-  already compose transactionally in projection;
+  back. A bounded 45-degree rotation-vector editor live-previews model-local residuals for present
+  torso/head/right-arm bones; left-arm task-space editing remains a later authoring control;
 - matrix nodes are rejected for the supported slice, and humanoid nearest-ancestor plus positive
   scale validation now run before profile publication;
 - the renderer remains a narrow embedded-PNG, global-clamp-sampler, shared-skin-palette,

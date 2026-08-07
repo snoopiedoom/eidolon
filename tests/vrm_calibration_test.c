@@ -340,11 +340,32 @@ static void test_calibration_session_is_model_relative_and_transactional(void) {
     assert(fabsf(projected.right_hand_target[0] - source.right_hand_target[0]) < 0.0001F);
     session.draft.arms[EIDOLON_VRM_CALIBRATION_RIGHT].hand_target[1] += 0.1F;
     session.dirty = true;
+    assert(eidolon_vrm_calibration_session_select_residual_bone(&session,
+                                                                EIDOLON_VRM_BONE_NECK));
+    const float residual[3] = {0.10F, -0.20F, 0.05F};
+    assert(eidolon_vrm_calibration_session_set_residual_vector(
+        &session, EIDOLON_VRM_BONE_NECK, residual));
+    float recovered[3];
+    assert(eidolon_vrm_calibration_session_residual_vector(&session, EIDOLON_VRM_BONE_NECK,
+                                                           recovered));
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        assert(fabsf(recovered[axis] - residual[axis]) < 0.0001F);
+    }
+    assert((session.draft.residual_bone_mask &
+            (UINT32_C(1) << EIDOLON_VRM_BONE_NECK)) != 0U);
+    const EidolonVrmCalibrationAnchor accepted_draft = session.draft;
+    const float excessive[3] = {
+        EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS + 0.01F, 0.0F, 0.0F};
+    assert(!eidolon_vrm_calibration_session_set_residual_vector(
+        &session, EIDOLON_VRM_BONE_NECK, excessive));
+    assert(memcmp(&session.draft, &accepted_draft, sizeof(accepted_draft)) == 0);
     assert(eidolon_vrm_calibration_session_make_control(&session, &projected));
     assert(projected.right_hand_target[1] > source.right_hand_target[1]);
     assert(eidolon_vrm_calibration_session_commit(&session));
     assert((session.working.anchor_mask & (UINT32_C(1) << EIDOLON_VRM_CALIBRATION_ATTENTIVE)) !=
            0U);
+    assert((session.working.anchors[EIDOLON_VRM_CALIBRATION_ATTENTIVE].residual_bone_mask &
+            (UINT32_C(1) << EIDOLON_VRM_BONE_NECK)) != 0U);
     assert(!session.dirty);
 
     const EidolonCanonicalControl contrast = source_control(
@@ -352,6 +373,18 @@ static void test_calibration_session_is_model_relative_and_transactional(void) {
     assert(eidolon_vrm_calibration_session_select(&session, EIDOLON_VRM_CALIBRATION_CONTRAST_PEAK,
                                                   &contrast));
     assert(session.draft.resource_mask == (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+    assert(!eidolon_vrm_calibration_session_residual_bone_editable(&session,
+                                                                   EIDOLON_VRM_BONE_NECK));
+    assert(eidolon_vrm_calibration_session_select_residual_bone(
+        &session, EIDOLON_VRM_BONE_RIGHT_UPPER_ARM));
+    assert(eidolon_vrm_calibration_session_set_residual_vector(
+        &session, EIDOLON_VRM_BONE_RIGHT_UPPER_ARM, residual));
+    assert(eidolon_vrm_calibration_session_clear_residual(
+        &session, EIDOLON_VRM_BONE_RIGHT_UPPER_ARM));
+    assert((session.draft.residual_bone_mask &
+            (UINT32_C(1) << EIDOLON_VRM_BONE_RIGHT_UPPER_ARM)) == 0U);
+    assert(strcmp(eidolon_vrm_calibration_bone_name(EIDOLON_VRM_BONE_RIGHT_UPPER_ARM),
+                  "rightUpperArm") == 0);
     eidolon_vrm_calibration_session_revert(&session);
     assert(!session.dirty);
 }

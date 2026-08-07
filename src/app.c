@@ -2143,12 +2143,19 @@ static bool calibration_source_control(const EidolonApp *app,
 
 bool eidolon_app_apply_vrm_calibration_draft(EidolonApp *app) {
     EidolonCanonicalControl control;
+    EidolonVrmCalibration preview;
     if (app == NULL || !app->vrm_calibration_ready ||
-        !eidolon_vrm_calibration_session_make_control(&app->vrm_calibration_session, &control) ||
-        !eidolon_model_apply_control(app->model, &control)) {
+        !eidolon_vrm_calibration_session_make_control(&app->vrm_calibration_session, &control)) {
         return false;
     }
-    return true;
+    preview = app->vrm_calibration_session.working;
+    if (!eidolon_vrm_calibration_set_anchor(
+            &preview, app->vrm_calibration_session.selected_anchor,
+            &app->vrm_calibration_session.draft, app->vrm_calibration_session.error,
+            sizeof(app->vrm_calibration_session.error))) {
+        return false;
+    }
+    return eidolon_model_apply_control_calibrated(app->model, &control, &preview);
 }
 
 bool eidolon_app_select_vrm_calibration_anchor(EidolonApp *app,
@@ -2255,6 +2262,50 @@ bool eidolon_app_set_vrm_calibration_arm_weight(EidolonApp *app, float weight) {
     app->vrm_calibration_session.draft.arms[EIDOLON_VRM_CALIBRATION_RIGHT].weight =
         SDL_clamp(weight, 0.0F, 1.0F);
     return touch_vrm_calibration(app);
+}
+
+bool eidolon_app_select_vrm_calibration_residual_bone(EidolonApp *app,
+                                                      EidolonVrmHumanBone bone) {
+    return app != NULL && app->vrm_calibration_ready &&
+           eidolon_vrm_calibration_session_select_residual_bone(
+               &app->vrm_calibration_session, bone);
+}
+
+bool eidolon_app_set_vrm_calibration_residual_component(EidolonApp *app, size_t component,
+                                                        float radians) {
+    float vector[3];
+    if (app == NULL || !app->vrm_calibration_ready || component >= 3U || !isfinite(radians) ||
+        !eidolon_vrm_calibration_session_residual_vector(
+            &app->vrm_calibration_session,
+            app->vrm_calibration_session.selected_residual_bone, vector)) {
+        return false;
+    }
+    vector[component] = SDL_clamp(radians, -EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS,
+                                  EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS);
+    const float magnitude =
+        sqrtf(vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]);
+    if (magnitude > EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS) {
+        const float scale = EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS / magnitude;
+        for (size_t axis = 0U; axis < 3U; ++axis) {
+            vector[axis] *= scale;
+        }
+    }
+    if (!eidolon_vrm_calibration_session_set_residual_vector(
+            &app->vrm_calibration_session,
+            app->vrm_calibration_session.selected_residual_bone, vector)) {
+        return false;
+    }
+    return eidolon_app_apply_vrm_calibration_draft(app);
+}
+
+bool eidolon_app_clear_vrm_calibration_residual(EidolonApp *app) {
+    if (app == NULL || !app->vrm_calibration_ready ||
+        !eidolon_vrm_calibration_session_clear_residual(
+            &app->vrm_calibration_session,
+            app->vrm_calibration_session.selected_residual_bone)) {
+        return false;
+    }
+    return eidolon_app_apply_vrm_calibration_draft(app);
 }
 
 bool eidolon_app_revert_vrm_calibration_anchor(EidolonApp *app) {

@@ -171,8 +171,9 @@ The numbers above demonstrate syntax only; they are not an approved DECAGRAMMATO
 1. load the user's VRM and measure its semantic skeleton;
 2. load a matching partial sidecar, or begin an empty calibration session;
 3. run the real EPR scenario and freeze it at one named semantic anchor;
-4. let the user adjust normalized right-hand/elbow/head/torso/wrist handles (bounded residual and
-   left-arm editors are later slices);
+4. let the user adjust normalized right-hand/elbow/head/torso/wrist handles, then use the bounded
+   model-local rotation-vector editor only for corrections the generic solve cannot express
+   (left-arm task-space editing remains a later slice);
 5. validate and atomically save that anchor without recompiling Eidolon;
 6. replay the complete behavior family and revise only the rejected anchor;
 7. derive transitions and intensities from approved endpoints;

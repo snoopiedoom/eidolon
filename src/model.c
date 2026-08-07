@@ -2612,6 +2612,27 @@ bool eidolon_model_apply_control(EidolonModelRenderer *model,
     return true;
 }
 
+bool eidolon_model_apply_control_calibrated(EidolonModelRenderer *model,
+                                            const EidolonCanonicalControl *control,
+                                            const EidolonVrmCalibration *calibration) {
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    if (model == NULL || control == NULL || calibration == NULL || !model->vrm_ready ||
+        model->failed) {
+        return SDL_SetError("calibrated VRM control projection is unavailable");
+    }
+    if (!eidolon_vrm_calibration_validate(calibration, &model->vrm_measurements, error,
+                                          sizeof(error))) {
+        return SDL_SetError("calibrated VRM control projection is invalid: %s", error);
+    }
+    if (!eidolon_vrm_projection_apply_calibrated(&model->vrm_projection, &model->motion, control,
+                                                  calibration)) {
+        return SDL_SetError("calibrated VRM control revision %llu was stale or invalid",
+                            (unsigned long long)control->revision);
+    }
+    model->transform_revision += 1U;
+    return true;
+}
+
 bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
                                       EidolonVrmRuntimeReport *report) {
     bool ready;

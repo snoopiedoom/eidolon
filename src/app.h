@@ -44,6 +44,11 @@ bool eidolon_app_set_vrm_calibration_arm_component(EidolonApp *app, bool pole, s
                                                    float value);
 bool eidolon_app_set_vrm_calibration_wrist(EidolonApp *app, size_t component, float radians);
 bool eidolon_app_set_vrm_calibration_arm_weight(EidolonApp *app, float weight);
+bool eidolon_app_select_vrm_calibration_residual_bone(EidolonApp *app,
+                                                      EidolonVrmHumanBone bone);
+bool eidolon_app_set_vrm_calibration_residual_component(EidolonApp *app, size_t component,
+                                                        float radians);
+bool eidolon_app_clear_vrm_calibration_residual(EidolonApp *app);
 bool eidolon_app_revert_vrm_calibration_anchor(EidolonApp *app);
 bool eidolon_app_commit_vrm_calibration_anchor(EidolonApp *app);
 bool eidolon_app_save_vrm_calibration(EidolonApp *app);

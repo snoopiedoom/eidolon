@@ -60,6 +60,9 @@ bool eidolon_model_set_vrm_calibration(EidolonModelRenderer *model,
                                        const EidolonVrmCalibration *calibration);
 bool eidolon_model_apply_control(EidolonModelRenderer *model,
                                  const EidolonCanonicalControl *control);
+bool eidolon_model_apply_control_calibrated(EidolonModelRenderer *model,
+                                            const EidolonCanonicalControl *control,
+                                            const EidolonVrmCalibration *calibration);
 bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
                                       EidolonVrmRuntimeReport *report);
 uint64_t eidolon_model_vrm_projection_revision(const EidolonModelRenderer *model);

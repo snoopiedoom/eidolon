@@ -213,9 +213,11 @@ live task-space edits through the same scratch projection, and writes determinis
 same-directory atomic replacement. It also compiles accepted torso/head/right-arm anchors into
 bounded body-relative Realization Programs, samples posture and contrast-gesture transitions with
 minimum-jerk curves, and applies model-local residual rotations inside the same scratch-pose
-transaction. Residual targets join projection ownership dynamically: both the previous and current
-target sets are restored from the captured base before solving, ownership changes only after a
-successful commit, and dropping a residual weight or calibration releases the bone without drift.
+transaction. The calibration surface can author and live-preview residuals for present
+torso/head/right-arm bones as a model-local rotation vector capped at 45 degrees. Residual targets
+join projection ownership dynamically: both the previous and current target sets are restored from
+the captured base before solving, ownership changes only after a successful commit, and dropping a
+residual weight or calibration releases the bone without drift.
 It looks for
 `<model-path>.epr-calibration` unless `EIDOLON_VRM_CALIBRATION_PATH` explicitly selects another
 file. Run `make vrm-calibrate VRM_PATH=...` to author one. Ordinary playback requires a matching

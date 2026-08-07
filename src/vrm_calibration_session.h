@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #define EIDOLON_VRM_CALIBRATION_PATH_CAPACITY 1024U
+#define EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS 0.78539816339F
 
 typedef struct EidolonVrmCalibrationSession {
     EidolonVrmMeasurements measurements;
@@ -19,6 +20,7 @@ typedef struct EidolonVrmCalibrationSession {
     EidolonVrmCalibrationAnchor source_draft;
     EidolonCanonicalControl source_control;
     EidolonVrmCalibrationAnchorId selected_anchor;
+    EidolonVrmHumanBone selected_residual_bone;
     uint64_t next_projection_revision;
     char path[EIDOLON_VRM_CALIBRATION_PATH_CAPACITY];
     char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
@@ -42,5 +44,16 @@ bool eidolon_vrm_calibration_session_commit(EidolonVrmCalibrationSession *sessio
 bool eidolon_vrm_calibration_session_save(EidolonVrmCalibrationSession *session);
 bool eidolon_vrm_calibration_session_make_control(EidolonVrmCalibrationSession *session,
                                                   EidolonCanonicalControl *control);
+bool eidolon_vrm_calibration_session_residual_bone_editable(
+    const EidolonVrmCalibrationSession *session, EidolonVrmHumanBone bone);
+bool eidolon_vrm_calibration_session_select_residual_bone(EidolonVrmCalibrationSession *session,
+                                                          EidolonVrmHumanBone bone);
+bool eidolon_vrm_calibration_session_residual_vector(
+    const EidolonVrmCalibrationSession *session, EidolonVrmHumanBone bone, float vector[3]);
+bool eidolon_vrm_calibration_session_set_residual_vector(EidolonVrmCalibrationSession *session,
+                                                         EidolonVrmHumanBone bone,
+                                                         const float vector[3]);
+bool eidolon_vrm_calibration_session_clear_residual(EidolonVrmCalibrationSession *session,
+                                                    EidolonVrmHumanBone bone);
 
 #endif

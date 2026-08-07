@@ -13,6 +13,8 @@ static uint32_t resource_bit(EidolonEprBodyResource resource) {
     return UINT32_C(1) << (unsigned int)resource;
 }
 
+static bool finite3(const float value[3]);
+
 static uint32_t anchor_resources(EidolonVrmCalibrationAnchorId anchor) {
     if (anchor == EIDOLON_VRM_CALIBRATION_CONTRAST_PREPARATION ||
         anchor == EIDOLON_VRM_CALIBRATION_CONTRAST_PEAK ||
@@ -21,6 +23,144 @@ static uint32_t anchor_resources(EidolonVrmCalibrationAnchorId anchor) {
     }
     return resource_bit(EIDOLON_EPR_RESOURCE_TORSO) | resource_bit(EIDOLON_EPR_RESOURCE_HEAD) |
            resource_bit(EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+}
+
+static int residual_resource(EidolonVrmHumanBone bone) {
+    switch (bone) {
+    case EIDOLON_VRM_BONE_HIPS:
+    case EIDOLON_VRM_BONE_SPINE:
+    case EIDOLON_VRM_BONE_CHEST:
+    case EIDOLON_VRM_BONE_UPPER_CHEST:
+        return EIDOLON_EPR_RESOURCE_TORSO;
+    case EIDOLON_VRM_BONE_NECK:
+    case EIDOLON_VRM_BONE_HEAD:
+        return EIDOLON_EPR_RESOURCE_HEAD;
+    case EIDOLON_VRM_BONE_RIGHT_SHOULDER:
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_ARM:
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_ARM:
+    case EIDOLON_VRM_BONE_RIGHT_HAND:
+        return EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    case EIDOLON_VRM_BONE_LEFT_EYE:
+    case EIDOLON_VRM_BONE_RIGHT_EYE:
+    case EIDOLON_VRM_BONE_LEFT_UPPER_LEG:
+    case EIDOLON_VRM_BONE_LEFT_LOWER_LEG:
+    case EIDOLON_VRM_BONE_LEFT_FOOT:
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_LEG:
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_LEG:
+    case EIDOLON_VRM_BONE_RIGHT_FOOT:
+    case EIDOLON_VRM_BONE_LEFT_SHOULDER:
+    case EIDOLON_VRM_BONE_LEFT_UPPER_ARM:
+    case EIDOLON_VRM_BONE_LEFT_LOWER_ARM:
+    case EIDOLON_VRM_BONE_LEFT_HAND:
+    case EIDOLON_VRM_BONE_COUNT:
+        return -1;
+    }
+    return -1;
+}
+
+bool eidolon_vrm_calibration_session_residual_bone_editable(
+    const EidolonVrmCalibrationSession *session, EidolonVrmHumanBone bone) {
+    const int resource = residual_resource(bone);
+    return session != NULL && session->active && resource >= 0 &&
+           bone >= EIDOLON_VRM_BONE_HIPS && bone < EIDOLON_VRM_BONE_COUNT &&
+           session->measurements.bones[(size_t)bone].present &&
+           (session->draft.resource_mask & resource_bit((EidolonEprBodyResource)resource)) != 0U;
+}
+
+bool eidolon_vrm_calibration_session_select_residual_bone(EidolonVrmCalibrationSession *session,
+                                                          EidolonVrmHumanBone bone) {
+    if (!eidolon_vrm_calibration_session_residual_bone_editable(session, bone)) {
+        return false;
+    }
+    session->selected_residual_bone = bone;
+    return true;
+}
+
+static void select_default_residual_bone(EidolonVrmCalibrationSession *session) {
+    if (eidolon_vrm_calibration_session_residual_bone_editable(
+            session, session->selected_residual_bone)) {
+        return;
+    }
+    session->selected_residual_bone = EIDOLON_VRM_BONE_COUNT;
+    for (size_t bone = 0U; bone < EIDOLON_VRM_BONE_COUNT; ++bone) {
+        if (eidolon_vrm_calibration_session_residual_bone_editable(
+                session, (EidolonVrmHumanBone)bone)) {
+            session->selected_residual_bone = (EidolonVrmHumanBone)bone;
+            return;
+        }
+    }
+}
+
+bool eidolon_vrm_calibration_session_residual_vector(
+    const EidolonVrmCalibrationSession *session, EidolonVrmHumanBone bone, float vector[3]) {
+    if (vector == NULL ||
+        !eidolon_vrm_calibration_session_residual_bone_editable(session, bone)) {
+        return false;
+    }
+    if ((session->draft.residual_bone_mask & (UINT32_C(1) << (uint32_t)bone)) == 0U) {
+        memset(vector, 0, sizeof(float) * 3U);
+        return true;
+    }
+    const float *source = session->draft.residual_rotation[(size_t)bone];
+    const float norm = sqrtf(source[0] * source[0] + source[1] * source[1] +
+                             source[2] * source[2] + source[3] * source[3]);
+    if (!isfinite(norm) || norm <= SESSION_EPSILON) {
+        return false;
+    }
+    const float sign = source[3] < 0.0F ? -1.0F : 1.0F;
+    const float x = source[0] * sign / norm;
+    const float y = source[1] * sign / norm;
+    const float z = source[2] * sign / norm;
+    const float w = source[3] * sign / norm;
+    const float sine = sqrtf(x * x + y * y + z * z);
+    if (sine <= SESSION_EPSILON) {
+        vector[0] = 2.0F * x;
+        vector[1] = 2.0F * y;
+        vector[2] = 2.0F * z;
+        return true;
+    }
+    const float scale = 2.0F * atan2f(sine, w) / sine;
+    vector[0] = x * scale;
+    vector[1] = y * scale;
+    vector[2] = z * scale;
+    return finite3(vector);
+}
+
+bool eidolon_vrm_calibration_session_set_residual_vector(EidolonVrmCalibrationSession *session,
+                                                         EidolonVrmHumanBone bone,
+                                                         const float vector[3]) {
+    if (vector == NULL || !finite3(vector) ||
+        !eidolon_vrm_calibration_session_residual_bone_editable(session, bone)) {
+        return false;
+    }
+    const float angle = sqrtf(vector[0] * vector[0] + vector[1] * vector[1] +
+                              vector[2] * vector[2]);
+    if (!isfinite(angle) || angle > EIDOLON_VRM_CALIBRATION_RESIDUAL_LIMIT_RADIANS +
+                                      SESSION_EPSILON) {
+        return false;
+    }
+    float *rotation = session->draft.residual_rotation[(size_t)bone];
+    if (angle <= SESSION_EPSILON) {
+        memset(rotation, 0, sizeof(float) * 4U);
+        rotation[3] = 1.0F;
+        session->draft.residual_bone_mask &= ~(UINT32_C(1) << (uint32_t)bone);
+    } else {
+        const float scale = sinf(angle * 0.5F) / angle;
+        rotation[0] = vector[0] * scale;
+        rotation[1] = vector[1] * scale;
+        rotation[2] = vector[2] * scale;
+        rotation[3] = cosf(angle * 0.5F);
+        session->draft.residual_bone_mask |= UINT32_C(1) << (uint32_t)bone;
+    }
+    session->dirty = true;
+    session->saved = false;
+    return true;
+}
+
+bool eidolon_vrm_calibration_session_clear_residual(EidolonVrmCalibrationSession *session,
+                                                    EidolonVrmHumanBone bone) {
+    static const float zero[3] = {0.0F, 0.0F, 0.0F};
+    return eidolon_vrm_calibration_session_set_residual_vector(session, bone, zero);
 }
 
 EidolonEprTick eidolon_vrm_calibration_anchor_tick(EidolonVrmCalibrationAnchorId anchor) {
@@ -119,6 +259,7 @@ bool eidolon_vrm_calibration_session_init(EidolonVrmCalibrationSession *session,
         return SDL_SetError("VRM calibration input is invalid: %s", error);
     }
     SDL_zero(*session);
+    session->selected_residual_bone = EIDOLON_VRM_BONE_COUNT;
     session->measurements = *measurements;
     session->body = *body;
     session->baseline = *calibration;
@@ -147,6 +288,7 @@ bool eidolon_vrm_calibration_session_select(EidolonVrmCalibrationSession *sessio
     session->source_draft =
         stored != NULL ? *stored : capture_anchor(session, anchor, source_control);
     session->draft = session->source_draft;
+    select_default_residual_bone(session);
     session->dirty = false;
     session->error[0] = '\0';
     return true;

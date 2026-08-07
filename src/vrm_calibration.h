@@ -115,5 +115,6 @@ const EidolonVrmCalibrationAnchor *
 eidolon_vrm_calibration_anchor(const EidolonVrmCalibration *calibration,
                                EidolonVrmCalibrationAnchorId id);
 const char *eidolon_vrm_calibration_anchor_name(EidolonVrmCalibrationAnchorId id);
+const char *eidolon_vrm_calibration_bone_name(EidolonVrmHumanBone bone);
 
 #endif
