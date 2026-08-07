@@ -200,7 +200,8 @@ authoring format.
 2. add calibration-session state and anchor capture to the running EPR review harness — done;
 3. add first-slice task-space editing controls and transactional sidecar save — done;
 4. compile posture/gesture Realization Programs from approved anchors with minimum-jerk transition
-   curves and resource-local fallback — done;
+   curves, exact resource-local fallback traces, and non-accumulating transactional residuals —
+   done;
 5. calibrate the selected local reference body and repeat the complete owner performance review;
 6. derive mesh/skinning clearance volumes, joint comfort ranges, wrist orientation, and arm twist;
 7. add planted-foot stance and lower-body IK;
@@ -217,6 +218,8 @@ authoring format.
 - neutral plus one calibrated semantic anchor can generate weaker/stronger and interrupted
   transitions without another hand-authored frame sequence;
 - transitions do not snap, overshoot anatomical limits, or accumulate drift;
+- failed projection does not change the live rig or residual ownership, and removing a residual
+  weight/calibration restores its target from the captured base pose;
 - idle motion is non-repeating over short observation without looking restless;
 - manual model rotation does not alter the authored pose state;
 - secondary motion settles after an impulse;

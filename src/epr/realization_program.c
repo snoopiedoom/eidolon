@@ -75,6 +75,19 @@ static uint32_t resource_mask(const EidolonBehaviorPlan *plan, EidolonEprOpaqueI
     return mask;
 }
 
+static void record_anchor_gaps(EidolonRealizationProgram *program,
+                               EidolonEprPoseAnchorId anchor_id,
+                               const EidolonEprPoseAnchor *anchor) {
+    uint32_t missing = program->resource_mask;
+    if (anchor != NULL) {
+        missing &= ~anchor->resource_mask;
+    }
+    if (missing != 0U) {
+        program->missing_anchor_mask |= anchor_bit(anchor_id);
+        program->missing_resource_mask |= missing;
+    }
+}
+
 static bool configure_posture(const EidolonEprRealizationProfile *profile,
                               EidolonEprPoseAnchorId target,
                               EidolonRealizationProgram *program) {
@@ -91,9 +104,8 @@ static bool configure_posture(const EidolonEprRealizationProfile *profile,
     program->pose_ids[1] = selected != NULL ? target : EIDOLON_EPR_POSE_NEUTRAL;
     program->pose_count = 2U;
     program->values[0] = 240.0F;
-    if (selected == NULL) {
-        program->missing_anchor_mask = anchor_bit(target);
-    }
+    record_anchor_gaps(program, EIDOLON_EPR_POSE_NEUTRAL, neutral);
+    record_anchor_gaps(program, target, selected);
     return true;
 }
 
@@ -108,8 +120,8 @@ static bool configure_gesture(const EidolonEprRealizationProfile *profile,
     for (size_t index = 0U; index < EIDOLON_EPR_PROGRAM_POSE_CAPACITY; ++index) {
         const EidolonEprPoseAnchor *anchor = eidolon_epr_realization_anchor(profile, anchors[index]);
         const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+        record_anchor_gaps(program, anchors[index], anchor);
         if (anchor == NULL || (anchor->resource_mask & right_arm) == 0U) {
-            program->missing_anchor_mask |= anchor_bit(anchors[index]);
             continue;
         }
         program->poses[index] = *anchor;

@@ -206,11 +206,14 @@ interaction after both injected recovery branches.
 - authored look-at type, offset, and range maps are parsed, but authored bone/expression look-at is
   deliberately parsed/not executable and degrades to head-only gaze;
 - projection preserves the unowned left arm and unrelated TRS, transforms canonical angular control
-  through authored bind frames, and commits from scratch; future imported animation must publish its
-  fresh base through the capture seam before EPR, with constraints/physics ordered afterward;
+  through authored bind frames, and commits from scratch; dynamically owned calibration residuals
+  cannot accumulate, survive removal, or leak through a rejected transaction. Future imported
+  animation must publish its fresh base through the capture seam before EPR, with
+  constraints/physics ordered afterward;
 - the calibration sidecar measures, fingerprints, parses, captures, edits, atomically saves, and
-  compiles torso/head/right-arm anchors; left-arm and residual editing remain later authoring
-  controls even though saved residuals already compose in projection;
+  compiles torso/head/right-arm anchors; partial anchors now trace the exact resources that fall
+  back. Left-arm and residual editing remain later authoring controls even though saved residuals
+  already compose transactionally in projection;
 - matrix nodes are rejected for the supported slice, and humanoid nearest-ancestor plus positive
   scale validation now run before profile publication;
 - the renderer remains a narrow embedded-PNG, global-clamp-sampler, shared-skin-palette,

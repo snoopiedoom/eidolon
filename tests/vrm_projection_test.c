@@ -99,6 +99,14 @@ static void multiply_quaternion(const float left[4], const float right[4], float
                 left[2] * right[2];
 }
 
+static float quaternion_agreement(const float left[4], const float right[4]) {
+    float agreement = 0.0F;
+    for (size_t component = 0U; component < 4U; ++component) {
+        agreement += left[component] * right[component];
+    }
+    return fabsf(agreement);
+}
+
 static void test_projection_is_monotonic_and_transactional(void) {
     EidolonMotionRig rig;
     EidolonVrmBody body;
@@ -348,6 +356,75 @@ static void test_calibrated_residual_composes_after_canonical_control(void) {
     eidolon_motion_destroy(&calibrated_rig);
 }
 
+static void test_dynamic_residual_ownership_is_transactional(void) {
+    EidolonMotionRig rig;
+    EidolonVrmBody body;
+    EidolonVrmProjection projection;
+    const EidolonEprBodyProfile profile = body_profile();
+    EidolonCanonicalControl value;
+    EidolonVrmCalibration calibration;
+    EidolonVrmCalibration invalid_calibration;
+    EidolonMotionNode accepted_nodes[18];
+    float first_rotation[4];
+    const float residual[4] = {0.0F, 0.0F, 0.25881904F, 0.96592583F};
+
+    build_rig(&rig, &body);
+    body.node_by_bone[EIDOLON_VRM_BONE_NECK] = 17;
+    memset(&calibration, 0, sizeof(calibration));
+    calibration.version = EIDOLON_VRM_CALIBRATION_VERSION;
+    calibration.anchor_mask = UINT32_C(1) << EIDOLON_VRM_CALIBRATION_NEUTRAL;
+    calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL].resource_mask =
+        UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD;
+    calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL].residual_bone_mask =
+        UINT32_C(1) << EIDOLON_VRM_BONE_NECK;
+    memcpy(calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL]
+                               .residual_rotation[EIDOLON_VRM_BONE_NECK],
+           residual, sizeof(residual));
+
+    assert(eidolon_vrm_projection_init(&projection, &body, &profile, &rig));
+    value = control(1U);
+    value.pose_anchor_resource_weights[EIDOLON_EPR_POSE_NEUTRAL]
+                                               [EIDOLON_EPR_RESOURCE_HEAD] = 1.0F;
+    assert(eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value, &calibration));
+    memcpy(first_rotation, rig.nodes[17].rotation, sizeof(first_rotation));
+    assert(quaternion_agreement(first_rotation, residual) > 0.999F);
+
+    value.revision = 2U;
+    assert(eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value, &calibration));
+    assert(quaternion_agreement(rig.nodes[17].rotation, first_rotation) > 0.99999F);
+
+    memcpy(accepted_nodes, rig.nodes, sizeof(accepted_nodes));
+    invalid_calibration = calibration;
+    memset(invalid_calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL]
+                                   .residual_rotation[EIDOLON_VRM_BONE_NECK],
+           0, sizeof(invalid_calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL]
+                         .residual_rotation[EIDOLON_VRM_BONE_NECK]));
+    value.revision = 3U;
+    assert(!eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value,
+                                                     &invalid_calibration));
+    assert(projection.control_revision == 2U);
+    assert(memcmp(accepted_nodes, rig.nodes, sizeof(accepted_nodes)) == 0);
+
+    value.revision = 3U;
+    value.pose_anchor_resource_weights[EIDOLON_EPR_POSE_NEUTRAL]
+                                               [EIDOLON_EPR_RESOURCE_HEAD] = 0.0F;
+    assert(eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value, &calibration));
+    assert(quaternion_agreement(rig.nodes[17].rotation, IDENTITY) > 0.99999F);
+
+    value.revision = 4U;
+    value.pose_anchor_resource_weights[EIDOLON_EPR_POSE_NEUTRAL]
+                                               [EIDOLON_EPR_RESOURCE_HEAD] = 1.0F;
+    assert(eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value, &calibration));
+    assert(quaternion_agreement(rig.nodes[17].rotation, residual) > 0.999F);
+
+    value.revision = 5U;
+    assert(eidolon_vrm_projection_apply_calibrated(&projection, &rig, &value, NULL));
+    assert(quaternion_agreement(rig.nodes[17].rotation, IDENTITY) > 0.99999F);
+
+    eidolon_vrm_projection_destroy(&projection);
+    eidolon_motion_destroy(&rig);
+}
+
 int main(void) {
     test_projection_is_monotonic_and_transactional();
     test_expression_mapping_is_explicit_and_binary_aware();
@@ -355,6 +432,7 @@ int main(void) {
     test_wrist_bind_space_correction_uses_authored_frame();
     test_captured_base_pose_composes_without_accumulation();
     test_calibrated_residual_composes_after_canonical_control();
+    test_dynamic_residual_ownership_is_transactional();
     puts("vrm projection tests passed");
     return 0;
 }

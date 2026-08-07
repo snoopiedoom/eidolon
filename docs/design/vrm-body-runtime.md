@@ -203,7 +203,8 @@ needed: skeletal measurement provides mechanics, while user approval provides in
 
 The first anchor registry covers neutral, attentive, thinking, responding, contrast preparation /
 peak / recovery, and interrupted/guarded. The format supports partial progress. Missing anchors
-disable or locally degrade only their behavior family; they do not authorize hard-coded fallback
+disable or locally degrade only their behavior family; incomplete anchors fall back per claimed
+resource and emit the exact degraded resource mask. They do not authorize hard-coded fallback
 postures or whole-rig resets.
 
 The implemented calibration path measures and fingerprints the skeleton, parses and validates
@@ -212,7 +213,10 @@ live task-space edits through the same scratch projection, and writes determinis
 same-directory atomic replacement. It also compiles accepted torso/head/right-arm anchors into
 bounded body-relative Realization Programs, samples posture and contrast-gesture transitions with
 minimum-jerk curves, and applies model-local residual rotations inside the same scratch-pose
-transaction. It looks for
+transaction. Residual targets join projection ownership dynamically: both the previous and current
+target sets are restored from the captured base before solving, ownership changes only after a
+successful commit, and dropping a residual weight or calibration releases the bone without drift.
+It looks for
 `<model-path>.epr-calibration` unless `EIDOLON_VRM_CALIBRATION_PATH` explicitly selects another
 file. Run `make vrm-calibrate VRM_PATH=...` to author one. Ordinary playback requires a matching
 neutral right-arm anchor; absent state anchors fall back to calibrated neutral, while an incomplete

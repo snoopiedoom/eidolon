@@ -285,6 +285,39 @@ static void test_calibrated_targets_drive_posture_and_missing_anchor_degrades_lo
                      program->resource_mask));
 }
 
+static void test_partial_anchor_reports_only_degraded_resources(void) {
+    const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
+    EidolonEprRealizationProfile realization;
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceIntent value;
+    const uint32_t head = UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD;
+    const uint32_t attentive = UINT32_C(1) << EIDOLON_EPR_POSE_ATTENTIVE;
+    assert(eidolon_performance_fixture_make_realization_profile(&body, &realization));
+    realization.anchors[EIDOLON_EPR_POSE_NEUTRAL].head_euler[1] = 0.04F;
+    realization.anchors[EIDOLON_EPR_POSE_ATTENTIVE].torso_euler[0] = 0.20F;
+    realization.anchors[EIDOLON_EPR_POSE_ATTENTIVE].head_euler[1] = -0.16F;
+    realization.anchors[EIDOLON_EPR_POSE_ATTENTIVE].resource_mask &= ~head;
+    assert(eidolon_epr_runtime_init(&runtime, 18U, &body, &realization));
+
+    value = intent(1U, 0U, 0, EIDOLON_EPR_MODE_ABSENT);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_step(&runtime, 0));
+    value = intent(2U, 1U, 400, EIDOLON_EPR_MODE_LISTENING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    const EidolonEprOpaqueId behavior =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE, 1U);
+    const EidolonRealizationProgram *program =
+        eidolon_epr_program_find(&runtime.programs, behavior);
+    assert(program != NULL);
+    assert(program->missing_anchor_mask == attentive);
+    assert(program->missing_resource_mask == head);
+    assert(eidolon_epr_runtime_step(&runtime, 640));
+    assert(fabsf(runtime.posture_base.torso_pitch - 0.20F) < 0.0001F);
+    assert(fabsf(runtime.posture_base.head_yaw - 0.04F) < 0.0001F);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_REALIZER_FALLBACK, behavior,
+                     EIDOLON_EPR_REASON_CALIBRATION_MISSING, attentive, head));
+}
+
 static void test_calibrated_contrast_peak_drives_right_arm(void) {
     const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
     EidolonEprRealizationProfile realization;
@@ -559,6 +592,7 @@ int main(void) {
     test_temporal_transaction();
     test_resource_order_independence();
     test_calibrated_targets_drive_posture_and_missing_anchor_degrades_locally();
+    test_partial_anchor_reports_only_degraded_resources();
     test_calibrated_contrast_peak_drives_right_arm();
     test_complete_scenario_and_determinism();
     test_stale_and_solve_failure_are_transactional();

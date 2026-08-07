@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define EIDOLON_EPR_PROGRAM_VERSION 2U
+#define EIDOLON_EPR_PROGRAM_VERSION 3U
 #define EIDOLON_EPR_PROGRAM_CAPACITY EIDOLON_EPR_BEHAVIOR_CAPACITY
 #define EIDOLON_EPR_REALIZATION_PROFILE_VERSION 1U
 #define EIDOLON_EPR_PROGRAM_POSE_CAPACITY 3U
@@ -65,7 +65,10 @@ typedef struct EidolonRealizationProgram {
     EidolonEprPoseAnchor poses[EIDOLON_EPR_PROGRAM_POSE_CAPACITY];
     EidolonEprPoseAnchorId pose_ids[EIDOLON_EPR_PROGRAM_POSE_CAPACITY];
     size_t pose_count;
+    /* An anchor bit is set when the anchor is absent or incomplete for this behavior. */
     uint32_t missing_anchor_mask;
+    /* Union of the claimed resources that fall back because of those anchor gaps. */
+    uint32_t missing_resource_mask;
     float targets[3][3];
     float values[8];
 } EidolonRealizationProgram;

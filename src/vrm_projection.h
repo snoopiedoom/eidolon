@@ -22,6 +22,10 @@ typedef struct EidolonVrmProjection {
     float up[3];
     float forward[3];
     bool *owned_nodes;
+    /* Dynamic ownership prevents calibrated residuals from accumulating or persisting on nodes
+       outside the fixed canonical projection set. */
+    bool *residual_owned_nodes;
+    bool *candidate_residual_owned_nodes;
     size_t node_count;
     uint64_t control_revision;
     float focused_expression_weight;

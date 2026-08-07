@@ -311,10 +311,13 @@ static void copy_local_pose(EidolonMotionRig *destination, const EidolonMotionRi
     }
 }
 
+static int residual_resource(EidolonVrmHumanBone bone);
+
 static void stage_base_pose(EidolonVrmProjection *projection, const EidolonMotionRig *rig) {
     copy_local_pose(&projection->scratch, rig);
     for (size_t index = 0U; index < projection->node_count; ++index) {
-        if (!projection->owned_nodes[index]) {
+        if (!projection->owned_nodes[index] && !projection->residual_owned_nodes[index] &&
+            !projection->candidate_residual_owned_nodes[index]) {
             continue;
         }
         memcpy(projection->scratch.nodes[index].translation, projection->base_translations[index],
@@ -359,6 +362,38 @@ static int residual_resource(EidolonVrmHumanBone bone) {
         return -1;
     }
     return -1;
+}
+
+static bool prepare_residual_ownership(EidolonVrmProjection *projection,
+                                       const EidolonCanonicalControl *control,
+                                       const EidolonVrmCalibration *calibration) {
+    memset(projection->candidate_residual_owned_nodes, 0,
+           projection->node_count * sizeof(*projection->candidate_residual_owned_nodes));
+    if (calibration == NULL) {
+        return true;
+    }
+    if (calibration->version != EIDOLON_VRM_CALIBRATION_VERSION) {
+        return false;
+    }
+    for (size_t anchor = 0U; anchor < EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++anchor) {
+        if ((calibration->anchor_mask & (UINT32_C(1) << (uint32_t)anchor)) == 0U) {
+            continue;
+        }
+        const EidolonVrmCalibrationAnchor *source = &calibration->anchors[anchor];
+        for (size_t bone = 0U; bone < EIDOLON_VRM_BONE_COUNT; ++bone) {
+            const int resource = residual_resource((EidolonVrmHumanBone)bone);
+            const int node = projection->nodes[bone];
+            if (resource < 0 || node < 0 || (size_t)node >= projection->node_count ||
+                (source->resource_mask & (UINT32_C(1) << (uint32_t)resource)) == 0U ||
+                (source->residual_bone_mask & (UINT32_C(1) << (uint32_t)bone)) == 0U ||
+                control->pose_anchor_resource_weights[anchor][(size_t)resource] <=
+                    VRM_PROJECTION_EPSILON) {
+                continue;
+            }
+            projection->candidate_residual_owned_nodes[(size_t)node] = true;
+        }
+    }
+    return true;
 }
 
 static bool apply_calibration_residuals(EidolonMotionRig *rig,
@@ -515,9 +550,15 @@ bool eidolon_vrm_projection_init(EidolonVrmProjection *projection, const Eidolon
     projection->base_rotations = SDL_calloc(rig->node_count, sizeof(*projection->base_rotations));
     projection->base_scales = SDL_calloc(rig->node_count, sizeof(*projection->base_scales));
     projection->owned_nodes = SDL_calloc(rig->node_count, sizeof(*projection->owned_nodes));
+    projection->residual_owned_nodes =
+        SDL_calloc(rig->node_count, sizeof(*projection->residual_owned_nodes));
+    projection->candidate_residual_owned_nodes =
+        SDL_calloc(rig->node_count, sizeof(*projection->candidate_residual_owned_nodes));
     scratch_nodes = SDL_calloc(rig->node_count, sizeof(*scratch_nodes));
     if (projection->base_translations == NULL || projection->base_rotations == NULL ||
         projection->base_scales == NULL || projection->owned_nodes == NULL ||
+        projection->residual_owned_nodes == NULL ||
+        projection->candidate_residual_owned_nodes == NULL ||
         scratch_nodes == NULL) {
         SDL_free(scratch_nodes);
         eidolon_vrm_projection_destroy(projection);
@@ -586,6 +627,9 @@ bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
         control->revision <= projection->control_revision) {
         return false;
     }
+    if (!prepare_residual_ownership(projection, control, calibration)) {
+        return false;
+    }
     stage_base_pose(projection, rig);
     if (!eidolon_motion_rebuild_world(&projection->scratch) ||
         !apply_control(projection, &projection->scratch, control, &expression_weight) ||
@@ -601,6 +645,8 @@ bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
     }
     projection->focused_expression_weight = expression_weight;
     projection->control_revision = control->revision;
+    memcpy(projection->residual_owned_nodes, projection->candidate_residual_owned_nodes,
+           projection->node_count * sizeof(*projection->residual_owned_nodes));
     return true;
 }
 
@@ -613,5 +659,7 @@ void eidolon_vrm_projection_destroy(EidolonVrmProjection *projection) {
     SDL_free(projection->base_rotations);
     SDL_free(projection->base_scales);
     SDL_free(projection->owned_nodes);
+    SDL_free(projection->residual_owned_nodes);
+    SDL_free(projection->candidate_residual_owned_nodes);
     memset(projection, 0, sizeof(*projection));
 }

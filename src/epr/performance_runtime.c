@@ -136,7 +136,9 @@ static void trace_new_realizers(EidolonPerformanceRuntime *runtime,
                                  EIDOLON_EPR_REASON_CALIBRATION_MISSING);
                 fallback.behavior = behavior->id;
                 fallback.cause = behavior->cause;
-                fallback.resource = program->resource_mask;
+                fallback.resource = program->missing_resource_mask != 0U
+                                        ? program->missing_resource_mask
+                                        : program->resource_mask;
                 fallback.value = program->missing_anchor_mask;
                 emit(runtime, fallback);
             }
