@@ -8,8 +8,10 @@
 #include <stdint.h>
 
 void eidolon_epr_realize_posture(const EidolonEprBodyProfile *body,
-                                 const EidolonRealizationProgram *program, EidolonEprTick tick,
-                                 EidolonCanonicalControl *candidate, float right_arm_target[3]);
+                                 const EidolonEprRealizationProfile *profile,
+                                 const EidolonRealizationProgram *program,
+                                 const EidolonCanonicalControl *transition_start,
+                                 EidolonEprTick tick, EidolonCanonicalControl *candidate);
 void eidolon_epr_realize_idle(uint64_t seed, const EidolonRealizationProgram *program,
                               EidolonEprTick tick, EidolonCanonicalControl *candidate);
 bool eidolon_epr_realize_gaze(const EidolonEprBodyProfile *body,
@@ -18,7 +20,6 @@ bool eidolon_epr_realize_gaze(const EidolonEprBodyProfile *body,
 void eidolon_epr_realize_right_arm(const EidolonEprBodyProfile *body,
                                    const EidolonRealizationProgram *program, EidolonEprTick tick,
                                    const EidolonCanonicalControl *settle_start,
-                                   const float posture_target[3],
                                    EidolonCanonicalControl *candidate);
 bool eidolon_epr_realize_expression(const EidolonEprBodyProfile *body,
                                     const EidolonRealizationProgram *program,

@@ -56,6 +56,8 @@ bool eidolon_model_vrm_measurements(const EidolonModelRenderer *model,
                                     EidolonVrmMeasurements *measurements);
 bool eidolon_model_vrm_calibration(const EidolonModelRenderer *model,
                                    EidolonVrmCalibration *calibration);
+bool eidolon_model_set_vrm_calibration(EidolonModelRenderer *model,
+                                       const EidolonVrmCalibration *calibration);
 bool eidolon_model_apply_control(EidolonModelRenderer *model,
                                  const EidolonCanonicalControl *control);
 bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,

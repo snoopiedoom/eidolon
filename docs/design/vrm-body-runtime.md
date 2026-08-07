@@ -206,13 +206,17 @@ peak / recovery, and interrupted/guarded. The format supports partial progress. 
 disable or locally degrade only their behavior family; they do not authorize hard-coded fallback
 postures or whole-rig resets.
 
-The implemented authoring slice measures and fingerprints the skeleton, parses and validates
+The implemented calibration path measures and fingerprints the skeleton, parses and validates
 versioned partial sidecars transactionally, freezes named controls from the actual fixture, applies
 live task-space edits through the same scratch projection, and writes deterministic sidecars with
-same-directory atomic replacement. It looks for
+same-directory atomic replacement. It also compiles accepted torso/head/right-arm anchors into
+bounded body-relative Realization Programs, samples posture and contrast-gesture transitions with
+minimum-jerk curves, and applies model-local residual rotations inside the same scratch-pose
+transaction. It looks for
 `<model-path>.epr-calibration` unless `EIDOLON_VRM_CALIBRATION_PATH` explicitly selects another
-file. Run `make vrm-calibrate VRM_PATH=...` to author one. Loading currently does not alter ordinary
-playback; program generation from approved anchors is the next implementation slice.
+file. Run `make vrm-calibrate VRM_PATH=...` to author one. Ordinary playback requires a matching
+neutral right-arm anchor; absent state anchors fall back to calibrated neutral, while an incomplete
+gesture family is a traced no-op. Neither path substitutes guessed model-specific constants.
 
 VRMA remains an optional later realization generator for authored nuclei, hand shapes, showcase
 motion, or genuinely new motion families. It is not required for calibration-derived posture,
@@ -274,9 +278,10 @@ Before landing the experiment as a supported-reference-avatar slice:
 
 The implementation gates through the hidden run are closed for DECAGRAMMATON. The first visible
 review rejected the provisional pose authorship while accepting the camera, rig, and harness. The
-measurement, versioned profile, interactive capture/application, and atomic-save slices are now
-implemented; calibrated program generation and a new owner review remain. Broad compatibility
-stays outside this claim.
+measurement, versioned profile, interactive capture/application, atomic-save, calibrated program
+generation, local fallback, residual composition, and ordinary-playback slices are now
+implemented; calibration and a new owner review on Vampire Cat remain. Broad compatibility stays
+outside this claim.
 
 The visible calibration/review harness uses the shared borderless transparent DirectComposition
 body target and remains distinct from headless snapshot mode. Wheel scaling resizes the overlay

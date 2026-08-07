@@ -212,8 +212,9 @@ make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"
 ```
 
 The command freezes named anchors, applies task-space edits immediately through scratch projection,
-and atomically saves accepted anchors. Loading a sidecar does not yet drive ordinary EPR playback;
-the calibrated-program compiler is the next slice. See
+and atomically saves accepted anchors. A matching sidecar with a neutral right-arm anchor enables
+ordinary EPR playback. Present state/gesture anchors compile into body-relative programs; missing
+anchors degrade only their behavior family and never select the synthetic fixture poses. See
 [Procedural motion](design/procedural-motion.md) for the format and anchor vocabulary.
 
 An unavailable or invalid configured path emits the acquisition page and validation command and

@@ -1,13 +1,25 @@
 #ifndef EIDOLON_EPR_CANONICAL_CONTROL_H
 #define EIDOLON_EPR_CANONICAL_CONTROL_H
 
-#include "epr/performance_intent.h"
+#include "epr/body_resources.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #define EIDOLON_EPR_BODY_PROFILE_VERSION 1U
-#define EIDOLON_EPR_CONTROL_VERSION 1U
+#define EIDOLON_EPR_CONTROL_VERSION 2U
+
+typedef enum EidolonEprPoseAnchorId {
+    EIDOLON_EPR_POSE_NEUTRAL = 0,
+    EIDOLON_EPR_POSE_ATTENTIVE,
+    EIDOLON_EPR_POSE_THINKING,
+    EIDOLON_EPR_POSE_RESPONDING,
+    EIDOLON_EPR_POSE_CONTRAST_PREPARATION,
+    EIDOLON_EPR_POSE_CONTRAST_PEAK,
+    EIDOLON_EPR_POSE_CONTRAST_RECOVERY,
+    EIDOLON_EPR_POSE_INTERRUPTED_GUARDED,
+    EIDOLON_EPR_POSE_ANCHOR_COUNT,
+} EidolonEprPoseAnchorId;
 
 typedef struct EidolonEprBodyProfile {
     uint32_t version;
@@ -51,6 +63,8 @@ typedef struct EidolonCanonicalControl {
     float right_wrist_euler[3];
     float right_arm_velocity[3];
     float focused_expression_weight;
+    float pose_anchor_resource_weights[EIDOLON_EPR_POSE_ANCHOR_COUNT]
+                                      [EIDOLON_EPR_RESOURCE_COUNT];
     uint64_t hash;
     bool valid;
     bool eyes_degraded;

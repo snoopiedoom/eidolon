@@ -147,7 +147,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
 - Use the in-runtime calibration surface to approve the selected local body's neutral, attentive,
   thinking, responding, contrast, and interrupted/guarded anchors, then judge the derived complete
   sequence. The first review accepted camera/rig/harness correctness and rejected the provisional
-  hard-coded poses; EPR trace and control verification remains automated.
+  hard-coded poses; calibrated compilation, EPR trace, control, projection, and fallback
+  verification are automated.
 
 The owner accepted ordinary no-environment DirectComposition portrait/dialogue startup, transparent
 per-pixel click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
@@ -206,9 +207,9 @@ interaction after both injected recovery branches.
 - projection preserves the unowned left arm and unrelated TRS, transforms canonical angular control
   through authored bind frames, and commits from scratch; future imported animation must publish its
   fresh base through the capture seam before EPR, with constraints/physics ordered afterward;
-- the calibration sidecar measures, fingerprints, parses, captures, edits, and atomically saves
-  partial anchors; left-arm/residual editing and compiling EPR programs from accepted anchors are
-  not implemented yet;
+- the calibration sidecar measures, fingerprints, parses, captures, edits, atomically saves, and
+  compiles torso/head/right-arm anchors; left-arm and residual editing remain later authoring
+  controls even though saved residuals already compose in projection;
 - matrix nodes are rejected for the supported slice, and humanoid nearest-ancestor plus positive
   scale validation now run before profile publication;
 - the renderer remains a narrow embedded-PNG, global-clamp-sampler, shared-skin-palette,
@@ -238,7 +239,8 @@ fallback with its accepted modal-drag limitation.
 
 The separate EPR/VRM workstream has closed its corrective implementation/runtime gates. Its first
 owner-feel review accepted the camera, rig, and harness but rejected the provisional pose
-authorship, so the workstream is now implementing calibration-derived realization. It now shares
+authorship. Calibration-derived realization is now implemented and awaiting Vampire Cat anchor
+authoring plus the complete owner-visible performance review. It shares
 the native scene/presentation path without sharing the portrait performance system; making 3D the
 default remains downstream and does not alter A2 or portrait ownership.
 

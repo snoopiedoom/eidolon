@@ -158,13 +158,14 @@ support. Its owning contract is the
 
 Landing order:
 
-Items 1-5 are implemented for the supported DECAGRAMMATON reference path. Item 6 is active: its
-measurement/profile, interactive task-space calibration/save, and shared native-presentation
-slices are implemented and owner-accepted; calibrated program generation and ordinary-playback
-application remain. Vampire Cat (`2349235869624830263.vrm`) is the current
+Items 1-6 are implemented for the supported reference-body path. Item 6 now includes measured-body
+profile binding, interactive task-space calibration/save, calibrated Realization Program
+compilation, minimum-jerk sampling, resource-local fallback, residual composition, ordinary
+playback, and shared native presentation. Vampire Cat (`2349235869624830263.vrm`) is the current
 owner-selected private development default after separately passing both gates; its restrictive
 embedded permissions prevent treating that local selection as a public reference recommendation.
-Item 7 is the subsequent owner-controlled gate. None of these results broadens the compatibility
+Item 7 is active and requires its complete calibrated sidecar plus the subsequent owner-controlled
+performance review. None of these results broadens the compatibility
 claim.
 
 1. **Truthful experiment boundary:** use experimental/reference-avatar language in configuration,

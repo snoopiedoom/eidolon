@@ -135,7 +135,9 @@ measure the loaded humanoid, freeze the live EPR sequence at named semantic anch
 adjust task-space handles, and save a matching `<model>.epr-calibration` sidecar. The measurement
 and sidecar parser, frozen-anchor session, live task-space editor, deterministic serializer, and
 atomic save are implemented. Run `make vrm-calibrate VRM_PATH=...`. The calibrated-program compiler
-is next; loading or authoring a sidecar does not yet replace the provisional fixture endpoints.
+and ordinary-playback application are also implemented: a matching neutral anchor enables playback,
+approved state/gesture anchors replace the synthetic fixture endpoints, and missing anchors emit a
+typed resource-local fallback without inventing a model-specific posture.
 The calibration body runs in a visible authoring mode on the same borderless transparent
 DirectComposition target as the desktop 3D path. It retains middle-drag/Shift+middle camera rotation;
 the wheel resizes the overlay and its model together so zoom cannot crop against a fixed host.

@@ -4,6 +4,7 @@
 #include "epr/performance_runtime.h"
 #include "motion.h"
 #include "vrm_body.h"
+#include "vrm_calibration.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -37,6 +38,10 @@ bool eidolon_vrm_projection_capture_base(EidolonVrmProjection *projection,
                                          const EidolonMotionRig *rig);
 bool eidolon_vrm_projection_apply(EidolonVrmProjection *projection, EidolonMotionRig *rig,
                                   const EidolonCanonicalControl *control);
+bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
+                                             EidolonMotionRig *rig,
+                                             const EidolonCanonicalControl *control,
+                                             const EidolonVrmCalibration *calibration);
 void eidolon_vrm_projection_destroy(EidolonVrmProjection *projection);
 
 #endif

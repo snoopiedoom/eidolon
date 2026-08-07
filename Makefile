@@ -751,7 +751,7 @@ $(VRM_BODY_TEST): tests/vrm_body_test.c src/vrm_body.c src/cgltf_impl.c | $(TEST
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(VRM_CALIBRATION_TEST): tests/vrm_calibration_test.c src/vrm_calibration.c \
-		src/vrm_calibration_session.c src/ik.c src/cgltf_impl.c | \
+		src/vrm_calibration_session.c src/epr/realization_program.c src/ik.c src/cgltf_impl.c | \
 		$(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@

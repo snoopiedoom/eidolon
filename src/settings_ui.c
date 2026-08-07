@@ -273,7 +273,8 @@ static void draw_vrm_calibration(EidolonApp *app) {
     }
     ImGui_Text("fixture tick: %lld ms  |  source: %s",
                (long long)eidolon_vrm_calibration_anchor_tick(session->selected_anchor),
-               session->source_was_calibrated ? "accepted calibration" : "EPR seed");
+               session->source_was_calibrated ? "accepted anchor"
+                                              : "measured/calibrated seed");
     ImGui_Text("anatomy: %016llx  |  accepted mask: 0x%02x",
                (unsigned long long)session->measurements.anatomy_fingerprint,
                session->working.anchor_mask);
@@ -317,8 +318,9 @@ static void draw_vrm_calibration(EidolonApp *app) {
         (void)eidolon_app_set_vrm_calibration_arm_weight(app, weight);
     }
     ImGui_EndDisabled();
-    ImGui_TextWrapped("The current slice owns only the right arm. Left-arm and per-bone residual "
-                      "editors remain intentionally unavailable until projection consumes them.");
+    ImGui_TextWrapped("The current editor owns only the right arm. Left-arm and per-bone residual "
+                      "authoring remain unavailable; saved residuals already compose in scratch "
+                      "projection.");
 
     ImGui_BeginDisabled(!session->dirty && session->source_was_calibrated);
     if (ImGui_Button("revert draft")) {

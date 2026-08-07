@@ -84,9 +84,9 @@ const char *eidolon_epr_trace_event_name(EidolonEprTraceEvent event) {
     static const char *const names[] = {
         "intent.accepted",      "intent.rejected",     "plan.published",      "plan.rejected",
         "behavior.transition",  "anchor.observed",     "resource.granted",    "resource.denied",
-        "resource.transferred", "resource.released",   "realizer.selected",   "realizer.failed",
-        "solve.committed",      "solve.rejected",      "capability.degraded", "control.published",
-        "projection.committed", "projection.rejected",
+        "resource.transferred", "resource.released",   "realizer.selected",   "realizer.fallback",
+        "realizer.failed",      "solve.committed",     "solve.rejected",      "capability.degraded",
+        "control.published",    "projection.committed", "projection.rejected",
     };
     if (event < EIDOLON_EPR_TRACE_INTENT_ACCEPTED ||
         event > EIDOLON_EPR_TRACE_PROJECTION_REJECTED) {

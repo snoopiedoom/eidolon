@@ -5,6 +5,7 @@
 #include "draw.h"
 #include "event_pump.h"
 #include "frame_clock.h"
+#include "ik.h"
 #include "log.h"
 #include "pose.h"
 #include "presentation_sdl_legacy.h"
@@ -655,6 +656,54 @@ static bool ensure_portrait(EidolonApp *app) {
     return true;
 }
 
+static bool configure_calibrated_performance_runtime(
+    EidolonApp *app, const EidolonVrmCalibration *calibration_override) {
+    EidolonEprBodyProfile body;
+    EidolonVrmMeasurements measurements;
+    EidolonVrmCalibration stored;
+    EidolonEprRealizationProfile realization;
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    const EidolonVrmCalibration *calibration = calibration_override;
+    app->performance_runtime_ready = false;
+    app->performance_control_attempted_revision = 0U;
+    if (app->model == NULL || !eidolon_model_body_profile(app->model, &body) ||
+        !eidolon_model_vrm_measurements(app->model, &measurements)) {
+        return false;
+    }
+    if (calibration == NULL) {
+        if (!eidolon_model_vrm_calibration(app->model, &stored)) {
+            return false;
+        }
+        calibration = &stored;
+    }
+    if (!eidolon_vrm_calibration_compile_realization(calibration, &measurements, &body,
+                                                     &realization, error, sizeof(error))) {
+        eidolon_log_write("performance", "calibrated EPR playback unavailable body=%s reason=%s",
+                          eidolon_model_body_name(app->model), error);
+        return false;
+    }
+    if (!eidolon_epr_runtime_init(&app->performance_runtime, app->motion_config.seed, &body,
+                                  &realization)) {
+        eidolon_log_write("performance",
+                          "calibrated EPR initialization failed; preserving model base pose");
+        return false;
+    }
+    const uint64_t projection_revision = eidolon_model_vrm_projection_revision(app->model);
+    if (projection_revision > app->performance_runtime.control.revision) {
+        app->performance_runtime.control.revision = projection_revision;
+        (void)eidolon_epr_control_hash(&app->performance_runtime.control);
+    }
+    eidolon_performance_fixture_init(&app->performance_fixture);
+    app->performance_runtime_ready = true;
+    app->performance_control_attempted_revision = projection_revision;
+    eidolon_log_write("performance",
+                      "calibrated EPR ready body=%s seed=%llu profile=%016llx anchors=0x%02x",
+                      eidolon_model_body_name(app->model),
+                      (unsigned long long)app->motion_config.seed,
+                      (unsigned long long)body.fingerprint, realization.anchor_mask);
+    return true;
+}
+
 static bool ensure_model(EidolonApp *app) {
     const char *model_path;
     bool vrm_path_configured = false;
@@ -692,27 +741,7 @@ static bool ensure_model(EidolonApp *app) {
         SDL_ClearError();
         app->model_render_resolution = eidolon_model_render_resolution(app->model);
     }
-    {
-        EidolonEprBodyProfile profile;
-        if (eidolon_model_body_profile(app->model, &profile)) {
-            if (eidolon_epr_runtime_init(&app->performance_runtime, app->motion_config.seed,
-                                         &profile)) {
-                eidolon_performance_fixture_init(&app->performance_fixture);
-                app->performance_runtime_ready = true;
-                app->performance_control_attempted_revision = 0U;
-                eidolon_log_write(
-                    "performance",
-                    "EPR synthetic vertical slice ready body=%s seed=%llu profile=%016llx",
-                    eidolon_model_body_name(app->model),
-                    (unsigned long long)app->motion_config.seed,
-                    (unsigned long long)profile.fingerprint);
-            } else {
-                eidolon_log_write(
-                    "performance",
-                    "EPR initialization failed; VRM remains in last valid bind state");
-            }
-        }
-    }
+    (void)configure_calibrated_performance_runtime(app, NULL);
     return true;
 }
 
@@ -1988,16 +2017,75 @@ bool eidolon_app_restart_performance_fixture(EidolonApp *app, uint64_t now_ms) {
     return true;
 }
 
+static bool calibration_bind_control(const EidolonEprBodyProfile *body,
+                                     const EidolonVrmMeasurements *measurements,
+                                     EidolonEprTick tick, EidolonCanonicalControl *control) {
+    const EidolonVrmBoneMeasurement *elbow =
+        &measurements->bones[EIDOLON_VRM_BONE_RIGHT_LOWER_ARM];
+    const EidolonVrmBoneMeasurement *hand =
+        &measurements->bones[EIDOLON_VRM_BONE_RIGHT_HAND];
+    EidolonIkTwoBoneInput input;
+    EidolonIkTwoBoneSolution solution;
+    if (!elbow->present || !hand->present) {
+        return false;
+    }
+    SDL_zero(*control);
+    control->version = EIDOLON_EPR_CONTROL_VERSION;
+    control->revision = 1U;
+    control->tick = tick;
+    control->valid = true;
+    SDL_memcpy(control->right_hand_target, hand->bind_position,
+               sizeof(control->right_hand_target));
+    SDL_memcpy(control->right_elbow_pole, elbow->bind_position,
+               sizeof(control->right_elbow_pole));
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        control->gaze_target[axis] = body->head[axis] + body->forward[axis];
+    }
+    SDL_zero(input);
+    SDL_memcpy(input.root, body->shoulder, sizeof(input.root));
+    SDL_memcpy(input.target, control->right_hand_target, sizeof(input.target));
+    SDL_memcpy(input.pole, control->right_elbow_pole, sizeof(input.pole));
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        input.fallback_direction[axis] = 0.4F * body->right[axis] - 0.8F * body->up[axis] +
+                                         0.1F * body->forward[axis];
+    }
+    input.upper_length = body->right_upper_arm_length;
+    input.lower_length = body->right_lower_arm_length;
+    input.soften_ratio = body->maximum_reach_ratio;
+    if (!eidolon_ik_solve_two_bone(&input, &solution)) {
+        return false;
+    }
+    SDL_memcpy(control->right_elbow_position, solution.mid,
+               sizeof(control->right_elbow_position));
+    SDL_memcpy(control->right_hand_position, solution.end,
+               sizeof(control->right_hand_position));
+    (void)eidolon_epr_control_hash(control);
+    return true;
+}
+
 static bool calibration_source_control(const EidolonApp *app,
                                        EidolonVrmCalibrationAnchorId anchor,
                                        EidolonCanonicalControl *control) {
     EidolonEprBodyProfile body;
+    EidolonVrmMeasurements measurements;
+    EidolonEprRealizationProfile realization;
     EidolonPerformanceRuntime runtime;
     EidolonPerformanceFixture fixture;
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
     const EidolonEprTick target = eidolon_vrm_calibration_anchor_tick(anchor);
     if (app == NULL || control == NULL || target < 0 ||
         !eidolon_model_body_profile(app->model, &body) ||
-        !eidolon_epr_runtime_init(&runtime, app->motion_config.seed, &body)) {
+        !eidolon_model_vrm_measurements(app->model, &measurements)) {
+        return false;
+    }
+    if ((app->vrm_calibration_session.working.anchor_mask &
+         (UINT32_C(1) << EIDOLON_VRM_CALIBRATION_NEUTRAL)) == 0U) {
+        return calibration_bind_control(&body, &measurements, target, control);
+    }
+    if (!eidolon_vrm_calibration_compile_realization(
+            &app->vrm_calibration_session.working, &measurements, &body, &realization, error,
+            sizeof(error)) ||
+        !eidolon_epr_runtime_init(&runtime, app->motion_config.seed, &body, &realization)) {
         return false;
     }
     eidolon_performance_fixture_init(&fixture);
@@ -2015,6 +2103,23 @@ static bool calibration_source_control(const EidolonApp *app,
         return false;
     }
     *control = *source;
+    if (runtime.has_posture_base) {
+        control->torso_pitch = runtime.posture_base.torso_pitch;
+        control->torso_yaw = runtime.posture_base.torso_yaw;
+        control->torso_roll = runtime.posture_base.torso_roll;
+        control->head_pitch = runtime.posture_base.head_pitch;
+        control->head_yaw = runtime.posture_base.head_yaw;
+        control->head_roll = runtime.posture_base.head_roll;
+        for (size_t anchor_index = 0U; anchor_index < EIDOLON_EPR_POSE_ANCHOR_COUNT;
+             ++anchor_index) {
+            control->pose_anchor_resource_weights[anchor_index][EIDOLON_EPR_RESOURCE_TORSO] =
+                runtime.posture_base.pose_anchor_resource_weights[anchor_index]
+                                                                 [EIDOLON_EPR_RESOURCE_TORSO];
+            control->pose_anchor_resource_weights[anchor_index][EIDOLON_EPR_RESOURCE_HEAD] =
+                runtime.posture_base.pose_anchor_resource_weights[anchor_index]
+                                                                 [EIDOLON_EPR_RESOURCE_HEAD];
+        }
+    }
     return true;
 }
 
@@ -2155,6 +2260,12 @@ bool eidolon_app_save_vrm_calibration(EidolonApp *app) {
     eidolon_log_write("calibration", "saved VRM calibration path=%s anchors=0x%08x",
                       app->vrm_calibration_session.path,
                       app->vrm_calibration_session.working.anchor_mask);
+    if (!eidolon_model_set_vrm_calibration(app->model,
+                                           &app->vrm_calibration_session.working)) {
+        return false;
+    }
+    (void)configure_calibrated_performance_runtime(app,
+                                                   &app->vrm_calibration_session.working);
     return true;
 }
 

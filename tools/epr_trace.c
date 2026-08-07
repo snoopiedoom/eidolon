@@ -8,7 +8,8 @@ static const char *reason_name(EidolonEprTraceReason reason) {
     static const char *const names[] = {
         "none",     "stale_revision",   "invalid_intent",    "temporal_conflict", "capacity",
         "selected", "preempted",        "interrupted",       "revised",           "completed",
-        "settled",  "optional_missing", "invalid_candidate", "injected_failure",
+        "settled",  "optional_missing", "calibration_missing", "invalid_candidate",
+        "injected_failure",
     };
     if (reason < EIDOLON_EPR_REASON_NONE || reason > EIDOLON_EPR_REASON_INJECTED_FAILURE) {
         return "unknown";
@@ -136,7 +137,9 @@ int main(void) {
     EidolonPerformanceRuntime runtime;
     EidolonPerformanceFixture fixture;
     const EidolonEprBodyProfile profile = eidolon_epr_default_body_profile();
-    if (!eidolon_epr_runtime_init(&runtime, UINT64_C(0x51eed), &profile)) {
+    EidolonEprRealizationProfile realization;
+    if (!eidolon_performance_fixture_make_realization_profile(&profile, &realization) ||
+        !eidolon_epr_runtime_init(&runtime, UINT64_C(0x51eed), &profile, &realization)) {
         fputs("could not initialize EPR trace fixture\n", stderr);
         return 1;
     }

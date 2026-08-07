@@ -97,15 +97,13 @@ sine-wave bouncing is not physics.
 - strict transactional `config/motion.cfg` reload;
 - yaw/pitch/roll inspection controls.
 
-The current hard-coded EPR posture/gesture endpoints are test stimuli, not accepted character
-acting. They remain in place only to keep deterministic control/projection coverage while the
-interactive calibration path is built. They must not be tuned into a growing model-specific table
-or presented as the final DECAGRAMMATON performance.
-
-The measurement/profile and interactive authoring slices are implemented. `make vrm-calibrate
+The old hard-coded EPR posture/gesture endpoints remain only in the explicit deterministic test
+fixture. Ordinary VRM playback cannot select them. The measurement/profile, interactive authoring,
+calibrated-program compilation, and ordinary-playback slices are implemented. `make vrm-calibrate
 VRM_PATH=...` freezes the actual fixture at each named tick and projects every draft edit through
-the normal scratch transaction. Applying accepted anchors to generated Realization Programs is the
-next slice; loading a valid sidecar currently changes no ordinary playback pose by itself.
+the normal scratch transaction. A matching `neutral` right-arm anchor enables calibrated playback;
+approved state and gesture anchors then drive the corresponding programs. Missing anchors degrade
+only their resource/behavior family and emit typed trace evidence.
 
 ## Calibration model
 
@@ -202,7 +200,7 @@ authoring format.
 2. add calibration-session state and anchor capture to the running EPR review harness — done;
 3. add first-slice task-space editing controls and transactional sidecar save — done;
 4. compile posture/gesture Realization Programs from approved anchors with minimum-jerk transition
-   curves and resource-local fallback;
+   curves and resource-local fallback — done;
 5. calibrate the selected local reference body and repeat the complete owner performance review;
 6. derive mesh/skinning clearance volumes, joint comfort ranges, wrist orientation, and arm twist;
 7. add planted-foot stance and lower-body IK;

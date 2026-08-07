@@ -17,6 +17,8 @@ typedef struct EidolonPerformanceFixture {
 } EidolonPerformanceFixture;
 
 void eidolon_performance_fixture_init(EidolonPerformanceFixture *fixture);
+bool eidolon_performance_fixture_make_realization_profile(
+    const EidolonEprBodyProfile *body, EidolonEprRealizationProfile *profile);
 bool eidolon_performance_fixture_restart(EidolonPerformanceFixture *fixture,
                                          const EidolonPerformanceRuntime *runtime,
                                          uint64_t now_ms);

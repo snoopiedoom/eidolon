@@ -2,6 +2,7 @@
 #define EIDOLON_VRM_CALIBRATION_H
 
 #include "epr/body_resources.h"
+#include "epr/realization_program.h"
 #include "vrm_body.h"
 
 #include <stdbool.h>
@@ -101,6 +102,10 @@ bool eidolon_vrm_calibration_serialize(const EidolonVrmCalibration *calibration,
 bool eidolon_vrm_calibration_save(const EidolonVrmCalibration *calibration,
                                   const EidolonVrmMeasurements *measurements, const char *path,
                                   char *error, size_t error_capacity);
+bool eidolon_vrm_calibration_compile_realization(
+    const EidolonVrmCalibration *calibration, const EidolonVrmMeasurements *measurements,
+    const EidolonEprBodyProfile *body, EidolonEprRealizationProfile *profile, char *error,
+    size_t error_capacity);
 const EidolonVrmCalibrationAnchor *
 eidolon_vrm_calibration_anchor(const EidolonVrmCalibration *calibration,
                                EidolonVrmCalibrationAnchorId id);

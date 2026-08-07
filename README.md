@@ -119,9 +119,11 @@ opens the native desktop 3D path for owner judgement. It repeats a one-second id
 five-second performance, and a one-second settled hold until the command is stopped with Ctrl+C.
 `make vrm-calibrate` freezes the same deterministic fixture at eight named semantic
 anchors. Adjust the task-space torso, head, hand, elbow-pole, and wrist controls, accept each anchor,
-and use **save sidecar**; stop the command with Ctrl+C when finished. The
-current hard-coded performance poses remain provisional test stimuli until the next compiler slice
-derives the complete performance from the approved sidecar. The remaining compatibility gates stay in the
+and use **save sidecar**; stop the command with Ctrl+C when finished. Ordinary VRM playback now
+requires a matching sidecar with at least a calibrated `neutral` right-arm anchor. EPR compiles
+approved anchors into body-relative posture and gesture programs, uses minimum-jerk transitions,
+and degrades only the behavior family whose anchor is absent; it never substitutes the synthetic
+fixture poses. The remaining compatibility gates stay in the
 [VRM reference-body contract](docs/design/vrm-body-runtime.md).
 
 The bundled Bunny Asuna manifest expects ten transparent portraits under

@@ -213,6 +213,66 @@ static EidolonEprBodyProfile body_profile(const EidolonVrmMeasurements *measurem
     return body;
 }
 
+static EidolonVrmCalibrationAnchor test_anchor(uint32_t resources, float torso_pitch,
+                                               float head_yaw, float hand_outward) {
+    EidolonVrmCalibrationAnchor anchor;
+    memset(&anchor, 0, sizeof(anchor));
+    anchor.resource_mask = resources;
+    anchor.torso_euler[0] = torso_pitch;
+    anchor.head_euler[1] = head_yaw;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].hand_target[0] = hand_outward;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].hand_target[1] = -0.70F;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].hand_target[2] = 0.10F;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].elbow_pole[0] = 0.50F;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].elbow_pole[1] = 0.05F;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].elbow_pole[2] = -0.45F;
+    anchor.arms[EIDOLON_VRM_CALIBRATION_RIGHT].weight = 1.0F;
+    anchor.calibrated = true;
+    return anchor;
+}
+
+static void test_calibration_compiles_transactionally_to_epr_profile(void) {
+    const EidolonVrmMeasurements measurements = measured_fixture();
+    EidolonEprBodyProfile body = body_profile(&measurements);
+    EidolonVrmCalibration calibration;
+    EidolonEprRealizationProfile realization;
+    EidolonEprRealizationProfile unchanged;
+    char error[256];
+    const uint32_t resources = (UINT32_C(1) << EIDOLON_EPR_RESOURCE_TORSO) |
+                               (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) |
+                               (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+    eidolon_vrm_calibration_init(&calibration, measurements.anatomy_fingerprint);
+    memset(&realization, 0x5a, sizeof(realization));
+    unchanged = realization;
+    assert(!eidolon_vrm_calibration_compile_realization(
+        &calibration, &measurements, &body, &realization, error, sizeof(error)));
+    assert(memcmp(&realization, &unchanged, sizeof(realization)) == 0);
+
+    EidolonVrmCalibrationAnchor neutral = test_anchor(resources, 0.01F, -0.02F, 0.40F);
+    EidolonVrmCalibrationAnchor attentive = test_anchor(resources, 0.08F, 0.12F, 0.55F);
+    assert(eidolon_vrm_calibration_set_anchor(&calibration, EIDOLON_VRM_CALIBRATION_NEUTRAL,
+                                              &neutral, error, sizeof(error)));
+    assert(eidolon_vrm_calibration_set_anchor(&calibration, EIDOLON_VRM_CALIBRATION_ATTENTIVE,
+                                              &attentive, error, sizeof(error)));
+    assert(eidolon_vrm_calibration_compile_realization(
+        &calibration, &measurements, &body, &realization, error, sizeof(error)));
+    assert(realization.version == EIDOLON_EPR_REALIZATION_PROFILE_VERSION);
+    assert(realization.body_fingerprint == measurements.anatomy_fingerprint);
+    assert(realization.anchor_mask ==
+           ((UINT32_C(1) << EIDOLON_EPR_POSE_NEUTRAL) |
+            (UINT32_C(1) << EIDOLON_EPR_POSE_ATTENTIVE)));
+    assert(fabsf(realization.anchors[EIDOLON_EPR_POSE_ATTENTIVE].torso_euler[0] - 0.08F) <
+           0.0001F);
+    assert(fabsf(realization.anchors[EIDOLON_EPR_POSE_ATTENTIVE].right_arm.hand_target[0] -
+                 0.55F) < 0.0001F);
+
+    unchanged = realization;
+    body.fingerprint += 1U;
+    assert(!eidolon_vrm_calibration_compile_realization(
+        &calibration, &measurements, &body, &realization, error, sizeof(error)));
+    assert(memcmp(&realization, &unchanged, sizeof(realization)) == 0);
+}
+
 static EidolonCanonicalControl source_control(const EidolonEprBodyProfile *body,
                                               EidolonEprTick tick) {
     EidolonCanonicalControl control;
@@ -270,6 +330,7 @@ int main(void) {
     test_measurements_fingerprint_anatomy();
     test_partial_sidecar_is_transactional();
     test_invalid_anchor_does_not_commit();
+    test_calibration_compiles_transactionally_to_epr_profile();
     test_calibration_session_is_model_relative_and_transactional();
     puts("vrm calibration tests passed");
     return 0;

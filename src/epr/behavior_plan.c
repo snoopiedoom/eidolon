@@ -176,8 +176,6 @@ static bool add_posture(EidolonBehaviorPlan *plan, EidolonEprBehaviorKind kind,
                      EIDOLON_EPR_FOREVER, 0U, 2U) &&
            add_claim(plan, posture, EIDOLON_EPR_RESOURCE_HEAD, EIDOLON_EPR_CLAIM_BASE, start,
                      EIDOLON_EPR_FOREVER, 0U, 2U) &&
-           add_claim(plan, posture, EIDOLON_EPR_RESOURCE_LEFT_ARM_CHAIN, EIDOLON_EPR_CLAIM_BASE,
-                     start, EIDOLON_EPR_FOREVER, 0U, 2U) &&
            add_claim(plan, posture, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN, EIDOLON_EPR_CLAIM_BASE,
                      start, EIDOLON_EPR_FOREVER, 0U, 2U);
 }

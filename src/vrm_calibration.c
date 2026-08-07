@@ -454,6 +454,60 @@ bool eidolon_vrm_calibration_validate(const EidolonVrmCalibration *calibration,
     return true;
 }
 
+_Static_assert(EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT == EIDOLON_EPR_POSE_ANCHOR_COUNT,
+               "VRM and EPR calibration anchor registries must remain aligned");
+
+bool eidolon_vrm_calibration_compile_realization(
+    const EidolonVrmCalibration *calibration, const EidolonVrmMeasurements *measurements,
+    const EidolonEprBodyProfile *body, EidolonEprRealizationProfile *profile, char *error,
+    size_t error_capacity) {
+    EidolonEprRealizationProfile candidate;
+    if (profile == NULL || body == NULL ||
+        !eidolon_vrm_calibration_validate(calibration, measurements, error, error_capacity) ||
+        body->fingerprint != measurements->anatomy_fingerprint) {
+        if (body != NULL && measurements != NULL &&
+            body->fingerprint != measurements->anatomy_fingerprint) {
+            set_error(error, error_capacity,
+                      "EPR body profile does not match measured calibration anatomy");
+        }
+        return false;
+    }
+    SDL_zero(candidate);
+    candidate.version = EIDOLON_EPR_REALIZATION_PROFILE_VERSION;
+    candidate.body_fingerprint = calibration->anatomy_fingerprint;
+    for (size_t index = 0U; index < EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++index) {
+        if ((calibration->anchor_mask & (UINT32_C(1) << (uint32_t)index)) == 0U) {
+            continue;
+        }
+        const EidolonVrmCalibrationAnchor *source = &calibration->anchors[index];
+        EidolonEprPoseAnchor *target = &candidate.anchors[index];
+        target->resource_mask = source->resource_mask;
+        SDL_memcpy(target->torso_euler, source->torso_euler, sizeof(target->torso_euler));
+        SDL_memcpy(target->head_euler, source->head_euler, sizeof(target->head_euler));
+        SDL_memcpy(target->right_arm.hand_target,
+                   source->arms[EIDOLON_VRM_CALIBRATION_RIGHT].hand_target,
+                   sizeof(target->right_arm.hand_target));
+        SDL_memcpy(target->right_arm.elbow_pole,
+                   source->arms[EIDOLON_VRM_CALIBRATION_RIGHT].elbow_pole,
+                   sizeof(target->right_arm.elbow_pole));
+        SDL_memcpy(target->right_arm.wrist_euler,
+                   source->arms[EIDOLON_VRM_CALIBRATION_RIGHT].wrist_euler,
+                   sizeof(target->right_arm.wrist_euler));
+        target->right_arm.weight = source->arms[EIDOLON_VRM_CALIBRATION_RIGHT].weight;
+        candidate.anchor_mask |= UINT32_C(1) << (uint32_t)index;
+    }
+    if (!eidolon_epr_realization_profile_validate(&candidate, body)) {
+        set_error(error, error_capacity,
+                  "calibrated EPR playback requires a matching neutral right-arm anchor");
+        return false;
+    }
+    *profile = candidate;
+    if (error != NULL && error_capacity > 0U) {
+        error[0] = '\0';
+    }
+    return true;
+}
+
 static char *trim(char *text) {
     while (*text != '\0' && isspace((unsigned char)*text)) {
         ++text;

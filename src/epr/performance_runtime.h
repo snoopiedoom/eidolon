@@ -27,7 +27,10 @@ typedef struct EidolonPerformanceRuntime {
     bool has_plan;
     EidolonRealizationProgramSet programs;
     EidolonEprBodyProfile body;
+    EidolonEprRealizationProfile realization;
     EidolonCanonicalControl control;
+    EidolonCanonicalControl posture_start;
+    EidolonCanonicalControl posture_base;
     EidolonCanonicalControl settle_start;
     EidolonEprBehaviorRuntimeState behavior_states[EIDOLON_EPR_BEHAVIOR_CAPACITY];
     size_t behavior_state_count;
@@ -36,6 +39,7 @@ typedef struct EidolonPerformanceRuntime {
     EidolonEprTrace trace;
     EidolonEprTick last_tick;
     bool has_tick;
+    bool has_posture_base;
     bool eyes_degradation_traced;
     bool expression_degradation_traced;
     bool inject_next_solve_failure;
@@ -44,7 +48,8 @@ typedef struct EidolonPerformanceRuntime {
 
 EidolonEprBodyProfile eidolon_epr_default_body_profile(void);
 bool eidolon_epr_runtime_init(EidolonPerformanceRuntime *runtime, uint64_t seed,
-                              const EidolonEprBodyProfile *body);
+                              const EidolonEprBodyProfile *body,
+                              const EidolonEprRealizationProfile *realization);
 bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
                                 const EidolonPerformanceIntent *intent);
 bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick tick);

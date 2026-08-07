@@ -63,6 +63,7 @@ The first-slice canonical state owns:
 - a right-hand task-space target, elbow pole, solved elbow/hand positions, and wrist orientation;
 - right-arm velocity used for interruption continuity;
 - focused-expression weight;
+- resource-local semantic-anchor weights used only to select calibrated model-local residuals;
 - validity and capability-degradation flags.
 
 It does not contain left-arm pose, model-local bone orientations, matrices, or GPU palette data.
@@ -104,3 +105,14 @@ channels. Missing required humanoid structure rejects the body profile before co
 Typed realizer, composition, solve, and capability feedback is attached to the current plan
 generation and trace. It may select a declared deterministic fallback. It cannot mutate source
 truth, resurrect stale behavior, or start an unbounded replan inside the control tick.
+
+## Implemented calibration compiler
+
+The reference-body path validates a realization profile against the measured anatomy fingerprint,
+requires a neutral right-arm anchor, and compiles every present semantic anchor into bounded
+body-relative program data. Posture transitions begin from the current validated posture base and
+use a quintic minimum-jerk curve. Contrast gesture preparation, peak, and recovery are compiled as
+one complete family; an incomplete family becomes a typed no-op on the right-arm resource. Missing
+posture anchors select calibrated neutral and emit a `calibration_missing` trace record. Synthetic
+pose constants remain only in the deterministic test fixture and are not an ordinary-playback
+fallback.

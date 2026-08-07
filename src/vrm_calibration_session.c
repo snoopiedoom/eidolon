@@ -199,15 +199,24 @@ bool eidolon_vrm_calibration_session_make_control(EidolonVrmCalibrationSession *
     }
     EidolonCanonicalControl candidate = session->source_control;
     const EidolonVrmCalibrationAnchor *anchor = &session->draft;
+    const size_t selected = (size_t)session->selected_anchor;
     if ((anchor->resource_mask & resource_bit(EIDOLON_EPR_RESOURCE_TORSO)) != 0U) {
         candidate.torso_pitch = anchor->torso_euler[0];
         candidate.torso_yaw = anchor->torso_euler[1];
         candidate.torso_roll = anchor->torso_euler[2];
+        for (size_t index = 0U; index < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++index) {
+            candidate.pose_anchor_resource_weights[index][EIDOLON_EPR_RESOURCE_TORSO] = 0.0F;
+        }
+        candidate.pose_anchor_resource_weights[selected][EIDOLON_EPR_RESOURCE_TORSO] = 1.0F;
     }
     if ((anchor->resource_mask & resource_bit(EIDOLON_EPR_RESOURCE_HEAD)) != 0U) {
         candidate.head_pitch = anchor->head_euler[0];
         candidate.head_yaw = anchor->head_euler[1];
         candidate.head_roll = anchor->head_euler[2];
+        for (size_t index = 0U; index < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++index) {
+            candidate.pose_anchor_resource_weights[index][EIDOLON_EPR_RESOURCE_HEAD] = 0.0F;
+        }
+        candidate.pose_anchor_resource_weights[selected][EIDOLON_EPR_RESOURCE_HEAD] = 1.0F;
     }
     if ((anchor->resource_mask & resource_bit(EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN)) != 0U) {
         const EidolonVrmCalibrationArm *arm = &anchor->arms[EIDOLON_VRM_CALIBRATION_RIGHT];
@@ -216,6 +225,13 @@ bool eidolon_vrm_calibration_session_make_control(EidolonVrmCalibrationSession *
         anatomical_to_point(session, arm->hand_target, target);
         anatomical_to_point(session, arm->elbow_pole, pole);
         const float weight = SDL_clamp(arm->weight, 0.0F, 1.0F);
+        for (size_t index = 0U; index < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++index) {
+            candidate.pose_anchor_resource_weights[index]
+                                                  [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] *=
+                1.0F - weight;
+        }
+        candidate.pose_anchor_resource_weights[selected]
+                                              [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] += weight;
         for (size_t axis = 0U; axis < 3U; ++axis) {
             candidate.right_hand_target[axis] =
                 candidate.right_hand_target[axis] * (1.0F - weight) + target[axis] * weight;

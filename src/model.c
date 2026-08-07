@@ -2582,12 +2582,29 @@ bool eidolon_model_vrm_calibration(const EidolonModelRenderer *model,
     return true;
 }
 
+bool eidolon_model_set_vrm_calibration(EidolonModelRenderer *model,
+                                       const EidolonVrmCalibration *calibration) {
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    if (model == NULL || calibration == NULL || !model->vrm_ready || model->failed) {
+        return SDL_SetError("could not install VRM calibration: invalid model or input");
+    }
+    if (!eidolon_vrm_calibration_validate(calibration, &model->vrm_measurements, error,
+                                          sizeof(error))) {
+        return SDL_SetError("could not install VRM calibration: %s", error);
+    }
+    model->vrm_calibration = *calibration;
+    model->vrm_calibration_loaded = calibration->anchor_mask != 0U;
+    return true;
+}
+
 bool eidolon_model_apply_control(EidolonModelRenderer *model,
                                  const EidolonCanonicalControl *control) {
     if (model == NULL || control == NULL || !model->vrm_ready || model->failed) {
         return SDL_SetError("VRM control projection is unavailable");
     }
-    if (!eidolon_vrm_projection_apply(&model->vrm_projection, &model->motion, control)) {
+    if (!eidolon_vrm_projection_apply_calibrated(
+            &model->vrm_projection, &model->motion, control,
+            model->vrm_calibration_loaded ? &model->vrm_calibration : NULL)) {
         return SDL_SetError("VRM control revision %llu was stale or invalid",
                             (unsigned long long)control->revision);
     }

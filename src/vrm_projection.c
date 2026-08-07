@@ -261,6 +261,14 @@ static bool control_finite(const EidolonCanonicalControl *control) {
             }
         }
     }
+    for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
+        for (size_t resource = 0U; resource < EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
+            const float weight = control->pose_anchor_resource_weights[anchor][resource];
+            if (!isfinite(weight) || weight < 0.0F || weight > 1.0F) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -316,6 +324,90 @@ static void stage_base_pose(EidolonVrmProjection *projection, const EidolonMotio
         memcpy(projection->scratch.nodes[index].scale, projection->base_scales[index],
                sizeof(projection->scratch.nodes[index].scale));
     }
+}
+
+static int residual_resource(EidolonVrmHumanBone bone) {
+    switch (bone) {
+    case EIDOLON_VRM_BONE_HIPS:
+    case EIDOLON_VRM_BONE_SPINE:
+    case EIDOLON_VRM_BONE_CHEST:
+    case EIDOLON_VRM_BONE_UPPER_CHEST:
+        return EIDOLON_EPR_RESOURCE_TORSO;
+    case EIDOLON_VRM_BONE_NECK:
+    case EIDOLON_VRM_BONE_HEAD:
+        return EIDOLON_EPR_RESOURCE_HEAD;
+    case EIDOLON_VRM_BONE_LEFT_EYE:
+    case EIDOLON_VRM_BONE_RIGHT_EYE:
+        return EIDOLON_EPR_RESOURCE_EYES;
+    case EIDOLON_VRM_BONE_LEFT_SHOULDER:
+    case EIDOLON_VRM_BONE_LEFT_UPPER_ARM:
+    case EIDOLON_VRM_BONE_LEFT_LOWER_ARM:
+    case EIDOLON_VRM_BONE_LEFT_HAND:
+        return EIDOLON_EPR_RESOURCE_LEFT_ARM_CHAIN;
+    case EIDOLON_VRM_BONE_RIGHT_SHOULDER:
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_ARM:
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_ARM:
+    case EIDOLON_VRM_BONE_RIGHT_HAND:
+        return EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    case EIDOLON_VRM_BONE_LEFT_UPPER_LEG:
+    case EIDOLON_VRM_BONE_LEFT_LOWER_LEG:
+    case EIDOLON_VRM_BONE_LEFT_FOOT:
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_LEG:
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_LEG:
+    case EIDOLON_VRM_BONE_RIGHT_FOOT:
+    case EIDOLON_VRM_BONE_COUNT:
+        return -1;
+    }
+    return -1;
+}
+
+static bool apply_calibration_residuals(EidolonMotionRig *rig,
+                                        const EidolonVrmProjection *projection,
+                                        const EidolonCanonicalControl *control,
+                                        const EidolonVrmCalibration *calibration) {
+    if (calibration == NULL) {
+        return true;
+    }
+    if (calibration->version != EIDOLON_VRM_CALIBRATION_VERSION) {
+        return false;
+    }
+    for (size_t anchor = 0U; anchor < EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++anchor) {
+        if ((calibration->anchor_mask & (UINT32_C(1) << (uint32_t)anchor)) == 0U) {
+            continue;
+        }
+        const EidolonVrmCalibrationAnchor *source = &calibration->anchors[anchor];
+        for (size_t bone = 0U; bone < EIDOLON_VRM_BONE_COUNT; ++bone) {
+            const int resource = residual_resource((EidolonVrmHumanBone)bone);
+            const int node = projection->nodes[bone];
+            if (resource < 0 || node < 0 ||
+                (source->resource_mask & (UINT32_C(1) << (uint32_t)resource)) == 0U ||
+                (source->residual_bone_mask & (UINT32_C(1) << (uint32_t)bone)) == 0U) {
+                continue;
+            }
+            const float weight = control->pose_anchor_resource_weights[anchor][(size_t)resource];
+            if (weight <= VRM_PROJECTION_EPSILON) {
+                continue;
+            }
+            const float *authored = source->residual_rotation[bone];
+            const float sign = authored[3] < 0.0F ? -1.0F : 1.0F;
+            float weighted[4] = {
+                authored[0] * sign * weight,
+                authored[1] * sign * weight,
+                authored[2] * sign * weight,
+                1.0F + (authored[3] * sign - 1.0F) * weight,
+            };
+            float composed[4];
+            if (!quaternion_normalize(weighted)) {
+                return false;
+            }
+            quaternion_multiply(rig->nodes[(size_t)node].rotation, weighted, composed);
+            if (!quaternion_normalize(composed)) {
+                return false;
+            }
+            memcpy(rig->nodes[(size_t)node].rotation, composed, sizeof(composed));
+        }
+    }
+    return eidolon_motion_rebuild_world(rig);
 }
 
 static bool apply_control(const EidolonVrmProjection *projection, EidolonMotionRig *rig,
@@ -480,6 +572,13 @@ bool eidolon_vrm_projection_capture_base(EidolonVrmProjection *projection,
 
 bool eidolon_vrm_projection_apply(EidolonVrmProjection *projection, EidolonMotionRig *rig,
                                   const EidolonCanonicalControl *control) {
+    return eidolon_vrm_projection_apply_calibrated(projection, rig, control, NULL);
+}
+
+bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
+                                             EidolonMotionRig *rig,
+                                             const EidolonCanonicalControl *control,
+                                             const EidolonVrmCalibration *calibration) {
     float expression_weight = 0.0F;
     if (projection == NULL || rig == NULL || control == NULL || !projection->ready ||
         !control->valid || control->version != EIDOLON_EPR_CONTROL_VERSION ||
@@ -490,6 +589,7 @@ bool eidolon_vrm_projection_apply(EidolonVrmProjection *projection, EidolonMotio
     stage_base_pose(projection, rig);
     if (!eidolon_motion_rebuild_world(&projection->scratch) ||
         !apply_control(projection, &projection->scratch, control, &expression_weight) ||
+        !apply_calibration_residuals(&projection->scratch, projection, control, calibration) ||
         !pose_finite(&projection->scratch)) {
         return false;
     }

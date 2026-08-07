@@ -1,6 +1,68 @@
 #include "epr/realization_program.h"
 
+#include <math.h>
 #include <string.h>
+
+#define EIDOLON_EPR_REALIZATION_TARGET_LIMIT 2.0F
+#define EIDOLON_EPR_REALIZATION_ANGLE_LIMIT 3.141593F
+
+static uint32_t anchor_bit(EidolonEprPoseAnchorId anchor) {
+    return UINT32_C(1) << (uint32_t)anchor;
+}
+
+static bool finite3(const float values[3]) {
+    return isfinite(values[0]) && isfinite(values[1]) && isfinite(values[2]);
+}
+
+static bool bounded3(const float values[3], float limit) {
+    return finite3(values) && fabsf(values[0]) <= limit && fabsf(values[1]) <= limit &&
+           fabsf(values[2]) <= limit;
+}
+
+static bool anchor_valid(const EidolonEprPoseAnchor *anchor) {
+    const uint32_t valid_resources = (UINT32_C(1) << EIDOLON_EPR_RESOURCE_COUNT) - 1U;
+    return anchor != NULL && anchor->resource_mask != 0U &&
+           (anchor->resource_mask & ~valid_resources) == 0U &&
+           bounded3(anchor->torso_euler, EIDOLON_EPR_REALIZATION_ANGLE_LIMIT) &&
+           bounded3(anchor->head_euler, EIDOLON_EPR_REALIZATION_ANGLE_LIMIT) &&
+           bounded3(anchor->right_arm.hand_target, EIDOLON_EPR_REALIZATION_TARGET_LIMIT) &&
+           bounded3(anchor->right_arm.elbow_pole, EIDOLON_EPR_REALIZATION_TARGET_LIMIT) &&
+           bounded3(anchor->right_arm.wrist_euler, EIDOLON_EPR_REALIZATION_ANGLE_LIMIT) &&
+           isfinite(anchor->right_arm.weight) && anchor->right_arm.weight >= 0.0F &&
+           anchor->right_arm.weight <= 1.0F;
+}
+
+bool eidolon_epr_realization_profile_validate(const EidolonEprRealizationProfile *profile,
+                                              const EidolonEprBodyProfile *body) {
+    const uint32_t valid_anchors =
+        (UINT32_C(1) << (uint32_t)EIDOLON_EPR_POSE_ANCHOR_COUNT) - 1U;
+    if (profile == NULL || body == NULL ||
+        profile->version != EIDOLON_EPR_REALIZATION_PROFILE_VERSION ||
+        profile->body_fingerprint == 0U || profile->body_fingerprint != body->fingerprint ||
+        (profile->anchor_mask & ~valid_anchors) != 0U ||
+        (profile->anchor_mask & anchor_bit(EIDOLON_EPR_POSE_NEUTRAL)) == 0U) {
+        return false;
+    }
+    for (size_t index = 0U; index < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++index) {
+        if ((profile->anchor_mask & (UINT32_C(1) << (uint32_t)index)) != 0U &&
+            !anchor_valid(&profile->anchors[index])) {
+            return false;
+        }
+    }
+    return (profile->anchors[EIDOLON_EPR_POSE_NEUTRAL].resource_mask &
+            (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN)) != 0U;
+}
+
+const EidolonEprPoseAnchor *
+eidolon_epr_realization_anchor(const EidolonEprRealizationProfile *profile,
+                               EidolonEprPoseAnchorId anchor) {
+    if (profile == NULL || anchor < EIDOLON_EPR_POSE_NEUTRAL ||
+        anchor >= EIDOLON_EPR_POSE_ANCHOR_COUNT ||
+        (profile->anchor_mask & anchor_bit(anchor)) == 0U) {
+        return NULL;
+    }
+    return &profile->anchors[(size_t)anchor];
+}
 
 static uint32_t resource_mask(const EidolonBehaviorPlan *plan, EidolonEprOpaqueId behavior) {
     uint32_t mask = 0U;
@@ -13,8 +75,55 @@ static uint32_t resource_mask(const EidolonBehaviorPlan *plan, EidolonEprOpaqueI
     return mask;
 }
 
+static bool configure_posture(const EidolonEprRealizationProfile *profile,
+                              EidolonEprPoseAnchorId target,
+                              EidolonRealizationProgram *program) {
+    const EidolonEprPoseAnchor *neutral =
+        eidolon_epr_realization_anchor(profile, EIDOLON_EPR_POSE_NEUTRAL);
+    const EidolonEprPoseAnchor *selected = eidolon_epr_realization_anchor(profile, target);
+    if (neutral == NULL) {
+        return false;
+    }
+    program->modality = EIDOLON_EPR_MODALITY_POSTURE;
+    program->poses[0] = *neutral;
+    program->poses[1] = selected != NULL ? *selected : *neutral;
+    program->pose_ids[0] = EIDOLON_EPR_POSE_NEUTRAL;
+    program->pose_ids[1] = selected != NULL ? target : EIDOLON_EPR_POSE_NEUTRAL;
+    program->pose_count = 2U;
+    program->values[0] = 240.0F;
+    if (selected == NULL) {
+        program->missing_anchor_mask = anchor_bit(target);
+    }
+    return true;
+}
+
+static bool configure_gesture(const EidolonEprRealizationProfile *profile,
+                              EidolonRealizationProgram *program) {
+    static const EidolonEprPoseAnchorId anchors[EIDOLON_EPR_PROGRAM_POSE_CAPACITY] = {
+        EIDOLON_EPR_POSE_CONTRAST_PREPARATION,
+        EIDOLON_EPR_POSE_CONTRAST_PEAK,
+        EIDOLON_EPR_POSE_CONTRAST_RECOVERY,
+    };
+    program->modality = EIDOLON_EPR_MODALITY_GESTURE;
+    for (size_t index = 0U; index < EIDOLON_EPR_PROGRAM_POSE_CAPACITY; ++index) {
+        const EidolonEprPoseAnchor *anchor = eidolon_epr_realization_anchor(profile, anchors[index]);
+        const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+        if (anchor == NULL || (anchor->resource_mask & right_arm) == 0U) {
+            program->missing_anchor_mask |= anchor_bit(anchors[index]);
+            continue;
+        }
+        program->poses[index] = *anchor;
+        program->pose_ids[index] = anchors[index];
+    }
+    if (program->missing_anchor_mask == 0U) {
+        program->pose_count = EIDOLON_EPR_PROGRAM_POSE_CAPACITY;
+    }
+    return true;
+}
+
 static bool configure_program(const EidolonBehaviorPlan *plan,
                               const EidolonEprBehaviorUnit *behavior,
+                              const EidolonEprRealizationProfile *profile,
                               EidolonRealizationProgram *program) {
     memset(program, 0, sizeof(*program));
     program->version = EIDOLON_EPR_PROGRAM_VERSION;
@@ -40,41 +149,13 @@ static bool configure_program(const EidolonBehaviorPlan *plan,
         program->values[4] = 0.45F;
         return true;
     case EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE:
-        program->modality = EIDOLON_EPR_MODALITY_POSTURE;
-        program->targets[0][0] = 0.40F;
-        program->targets[0][1] = -0.70F;
-        program->targets[0][2] = 0.08F;
-        program->values[0] = 0.035F;
-        program->values[1] = -0.025F;
-        program->values[2] = 240.0F;
-        return true;
+        return configure_posture(profile, EIDOLON_EPR_POSE_ATTENTIVE, program);
     case EIDOLON_EPR_BEHAVIOR_POSTURE_THINKING:
-        program->modality = EIDOLON_EPR_MODALITY_POSTURE;
-        program->targets[0][0] = 0.25F;
-        program->targets[0][1] = -0.55F;
-        program->targets[0][2] = 0.30F;
-        program->values[0] = 0.075F;
-        program->values[1] = 0.11F;
-        program->values[2] = 240.0F;
-        return true;
+        return configure_posture(profile, EIDOLON_EPR_POSE_THINKING, program);
     case EIDOLON_EPR_BEHAVIOR_POSTURE_RESPONDING:
-        program->modality = EIDOLON_EPR_MODALITY_POSTURE;
-        program->targets[0][0] = 0.50F;
-        program->targets[0][1] = -0.65F;
-        program->targets[0][2] = 0.12F;
-        program->values[0] = -0.025F;
-        program->values[1] = -0.015F;
-        program->values[2] = 240.0F;
-        return true;
+        return configure_posture(profile, EIDOLON_EPR_POSE_RESPONDING, program);
     case EIDOLON_EPR_BEHAVIOR_POSTURE_GUARDED:
-        program->modality = EIDOLON_EPR_MODALITY_POSTURE;
-        program->targets[0][0] = 0.18F;
-        program->targets[0][1] = -0.45F;
-        program->targets[0][2] = 0.32F;
-        program->values[0] = 0.055F;
-        program->values[1] = 0.015F;
-        program->values[2] = 240.0F;
-        return true;
+        return configure_posture(profile, EIDOLON_EPR_POSE_INTERRUPTED_GUARDED, program);
     case EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION:
         program->modality = EIDOLON_EPR_MODALITY_GAZE;
         program->capability_mask = EIDOLON_EPR_CAPABILITY_EYES;
@@ -122,19 +203,7 @@ static bool configure_program(const EidolonBehaviorPlan *plan,
         program->values[0] = 0.45F;
         return true;
     case EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT:
-        program->modality = EIDOLON_EPR_MODALITY_GESTURE;
-        program->targets[0][0] = 0.35F;
-        program->targets[0][1] = -0.42F;
-        program->targets[0][2] = 0.35F;
-        program->targets[1][0] = 0.70F;
-        program->targets[1][1] = -0.20F;
-        program->targets[1][2] = 0.45F;
-        program->targets[2][0] = 0.40F;
-        program->targets[2][1] = -0.42F;
-        program->targets[2][2] = 0.28F;
-        program->values[0] = -0.12F;
-        program->values[1] = 0.18F;
-        return true;
+        return configure_gesture(profile, program);
     case EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM:
         program->modality = EIDOLON_EPR_MODALITY_SETTLE;
         return true;
@@ -143,9 +212,11 @@ static bool configure_program(const EidolonBehaviorPlan *plan,
 }
 
 bool eidolon_epr_program_set_compile(const EidolonBehaviorPlan *plan,
+                                     const EidolonEprRealizationProfile *profile,
                                      EidolonRealizationProgramSet *programs) {
     EidolonRealizationProgramSet candidate;
-    if (plan == NULL || programs == NULL || plan->behavior_count > EIDOLON_EPR_PROGRAM_CAPACITY) {
+    if (plan == NULL || profile == NULL || programs == NULL ||
+        plan->behavior_count > EIDOLON_EPR_PROGRAM_CAPACITY) {
         return false;
     }
     memset(&candidate, 0, sizeof(candidate));
@@ -156,7 +227,7 @@ bool eidolon_epr_program_set_compile(const EidolonBehaviorPlan *plan,
             continue;
         }
         if (candidate.count >= EIDOLON_EPR_PROGRAM_CAPACITY ||
-            !configure_program(plan, behavior, &candidate.programs[candidate.count])) {
+            !configure_program(plan, behavior, profile, &candidate.programs[candidate.count])) {
             return false;
         }
         candidate.count += 1U;

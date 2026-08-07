@@ -88,6 +88,17 @@ static EidolonCanonicalControl control(uint64_t revision) {
     return value;
 }
 
+static void multiply_quaternion(const float left[4], const float right[4], float result[4]) {
+    result[0] = left[3] * right[0] + left[0] * right[3] + left[1] * right[2] -
+                left[2] * right[1];
+    result[1] = left[3] * right[1] - left[0] * right[2] + left[1] * right[3] +
+                left[2] * right[0];
+    result[2] = left[3] * right[2] + left[0] * right[1] - left[1] * right[0] +
+                left[2] * right[3];
+    result[3] = left[3] * right[3] - left[0] * right[0] - left[1] * right[1] -
+                left[2] * right[2];
+}
+
 static void test_projection_is_monotonic_and_transactional(void) {
     EidolonMotionRig rig;
     EidolonVrmBody body;
@@ -287,12 +298,63 @@ static void test_captured_base_pose_composes_without_accumulation(void) {
     eidolon_motion_destroy(&rig);
 }
 
+static void test_calibrated_residual_composes_after_canonical_control(void) {
+    EidolonMotionRig uncalibrated_rig;
+    EidolonMotionRig calibrated_rig;
+    EidolonVrmBody uncalibrated_body;
+    EidolonVrmBody calibrated_body;
+    EidolonVrmProjection uncalibrated_projection;
+    EidolonVrmProjection calibrated_projection;
+    const EidolonEprBodyProfile profile = body_profile();
+    EidolonCanonicalControl uncalibrated = control(1U);
+    EidolonCanonicalControl calibrated = control(1U);
+    EidolonVrmCalibration calibration;
+    const float residual[4] = {0.0F, 0.0F, 0.25881904F, 0.96592583F};
+    float expected[4];
+    float agreement = 0.0F;
+    memset(&calibration, 0, sizeof(calibration));
+    calibration.version = EIDOLON_VRM_CALIBRATION_VERSION;
+    calibration.anchor_mask = UINT32_C(1) << EIDOLON_VRM_CALIBRATION_NEUTRAL;
+    calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL].resource_mask =
+        UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL].residual_bone_mask =
+        UINT32_C(1) << EIDOLON_VRM_BONE_RIGHT_HAND;
+    memcpy(calibration.anchors[EIDOLON_VRM_CALIBRATION_NEUTRAL]
+                               .residual_rotation[EIDOLON_VRM_BONE_RIGHT_HAND],
+           residual, sizeof(residual));
+    calibrated.pose_anchor_resource_weights[EIDOLON_EPR_POSE_NEUTRAL]
+                                               [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] = 1.0F;
+
+    build_rig(&uncalibrated_rig, &uncalibrated_body);
+    build_rig(&calibrated_rig, &calibrated_body);
+    assert(eidolon_vrm_projection_init(&uncalibrated_projection, &uncalibrated_body, &profile,
+                                       &uncalibrated_rig));
+    assert(eidolon_vrm_projection_init(&calibrated_projection, &calibrated_body, &profile,
+                                       &calibrated_rig));
+    assert(eidolon_vrm_projection_apply_calibrated(
+        &uncalibrated_projection, &uncalibrated_rig, &uncalibrated, &calibration));
+    assert(eidolon_vrm_projection_apply_calibrated(
+        &calibrated_projection, &calibrated_rig, &calibrated, &calibration));
+    multiply_quaternion(uncalibrated_rig.nodes[16].rotation, residual, expected);
+    for (size_t component = 0U; component < 4U; ++component) {
+        agreement += calibrated_rig.nodes[16].rotation[component] * expected[component];
+    }
+    assert(fabsf(agreement) > 0.999F);
+    assert(memcmp(uncalibrated_rig.nodes[16].rotation, calibrated_rig.nodes[16].rotation,
+                  sizeof(uncalibrated_rig.nodes[16].rotation)) != 0);
+    eidolon_vrm_projection_destroy(&uncalibrated_projection);
+    eidolon_vrm_projection_destroy(&calibrated_projection);
+    eidolon_motion_destroy(&uncalibrated_rig);
+    eidolon_motion_destroy(&calibrated_rig);
+}
+
 int main(void) {
     test_projection_is_monotonic_and_transactional();
     test_expression_mapping_is_explicit_and_binary_aware();
     test_bind_space_correction_uses_authored_frame();
     test_wrist_bind_space_correction_uses_authored_frame();
     test_captured_base_pose_composes_without_accumulation();
+    test_calibrated_residual_composes_after_canonical_control();
     puts("vrm projection tests passed");
     return 0;
 }

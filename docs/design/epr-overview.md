@@ -110,8 +110,10 @@ eye-first/head-follow gaze, one restrained right-arm contrast gesture, interrupt
 resource transfer, current-state cleanup, settling, deterministic trace, and the supported VRM 1.0
 reference body through the shared 3D body renderer. The current calibration-first extension measures
 the complete mapped semantic skeleton and transactionally loads partial user-approved anchor
-profiles; interactive capture and live projection are implemented, while calibrated program
-compilation and ordinary-playback application are the active next slice.
+profiles. Interactive capture, live projection, calibrated program compilation, minimum-jerk
+posture/gesture sampling, resource-local fallback, model-local residual composition, and
+ordinary-playback application are implemented. Owner calibration and performance approval of the
+selected reference body are the remaining gate.
 
 DirectComposition target submission is now presentation integration around this slice, not EPR
 ownership. The EPR slice still excludes default-3D selection, locomotion, balance/contact planning,
