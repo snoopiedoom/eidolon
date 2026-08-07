@@ -115,11 +115,11 @@ stores Pixiv credentials.
 alias. `make vrm-runtime-check` drives the complete five-second fixture through buffer loading,
 geometry, textures, skinning, projection, shaders, and a hidden GPU frame. Passing both proves the
 selected reference path on that machine, not arbitrary VRM compatibility. The visible review target
-opens the same SDL 3D path for owner judgement. It repeats a one-second idle pre-roll, the complete
-five-second performance, and a one-second settled hold until the window is closed or Escape is
-pressed. `make vrm-calibrate` freezes the same deterministic fixture at eight named semantic
+opens the native desktop 3D path for owner judgement. It repeats a one-second idle pre-roll, the complete
+five-second performance, and a one-second settled hold until the command is stopped with Ctrl+C.
+`make vrm-calibrate` freezes the same deterministic fixture at eight named semantic
 anchors. Adjust the task-space torso, head, hand, elbow-pole, and wrist controls, accept each anchor,
-and use **save sidecar**; F1 reopens the settings panel and Escape in the body window exits. The
+and use **save sidecar**; stop the command with Ctrl+C when finished. The
 current hard-coded performance poses remain provisional test stimuli until the next compiler slice
 derives the complete performance from the approved sidecar. The remaining compatibility gates stay in the
 [VRM reference-body contract](docs/design/vrm-body-runtime.md).
@@ -144,13 +144,15 @@ fallback sprite path.
 - press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
   host deliberately does not capture global keyboard shortcuts.
 
-On Windows, portrait bodies normally use `win32_dcomp`. Sprite and 3D bodies, explicit compatibility
+On Windows, portrait and 3D bodies normally use `win32_dcomp`. Sprite bodies, explicit compatibility
 selection, and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
 backend delegates dragging to the native top-level move loop, which can pause animation and dialogue
 presentation until the mouse button is released; presentation resumes after the drag.
-The visible VRM calibration and performance-review commands use a borderless transparent SDL
-authoring overlay rather than the headless snapshot host. DirectComposition submission for 3D
-targets remains a presentation-backend gap; it is not implied by the D3D11 model renderer.
+The visible VRM calibration and performance-review commands use the same borderless, transparent
+DirectComposition body target as the desktop runtime. The VRM renderer submits directly into that
+target, publishes a projected animated-mesh input mask without GPU readback, and receives wheel and
+captured middle-drag input through the shared presentation event boundary. Snapshots and explicit
+compatibility selection retain the SDL backend.
 
 Settings persist as sparse per-user overrides. Every field can return to its shipped or
 character-defined default without freezing a copy of that default into the user file. Presentation
@@ -175,7 +177,7 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-native-preferred win32_dcomp portrait | explicit/capability sdl_window_legacy fallback
+native-preferred win32_dcomp portrait/3D | explicit/capability sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```

@@ -62,8 +62,8 @@ returns the complete policy to its inherited default.
 ## Presentation selection
 
 The shipped `native` preference selects the best supported platform presentation at startup. On
-Windows, a portrait body normally selects `win32_dcomp`. Sprite and 3D bodies select
-`sdl_window_legacy` until native targets exist. Native host, graphics, or environment-bootstrap
+Windows, portrait and 3D bodies normally select `win32_dcomp`. Sprite bodies select
+`sdl_window_legacy`. Native host, graphics, or environment-bootstrap
 failure also selects `sdl_window_legacy` and records the exact reason. Explicit
 `sdl_window_legacy` preference skips the native attempt. Snapshots always use the legacy backend.
 
@@ -83,12 +83,13 @@ Invalid values are logged and ignored. An override cannot make an unsupported bo
 body-capability decision still falls back explicitly. The preference UI continues to show the
 persisted choice rather than rewriting it from a temporary environment override.
 
-The DirectComposition backend supports portrait and dialogue layers, generation-bound CPU alpha
-masks, transformed per-pixel hit testing, dialogue activation, body-context settings, Win32-owned
-body dragging, revisioned output/DPI state, deterministic active-output retirement, and bounded
+The DirectComposition backend supports portrait, dialogue, and direct D3D11 rigged-3D layers;
+generation-bound CPU/projected-geometry alpha masks; transformed per-pixel hit testing; routed
+wheel and captured middle-drag input; dialogue activation; body-context settings; Win32-owned body
+dragging; revisioned output/DPI state; deterministic active-output retirement; and bounded
 host-close/graphics-reset requests. A device/backend reset stops submissions, attempts one fresh
 DirectComposition reconstruction from current product state, then logs and selects
-`sdl_window_legacy` if that candidate cannot present a complete current frame. Sprite/3D native
+`sdl_window_legacy` if that candidate cannot present a complete current frame. Sprite native
 targets, output-local host migration, and evidence from real hardware device loss or display
 disconnect remain future or optional work rather than A1 blockers.
 

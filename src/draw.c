@@ -75,7 +75,7 @@ static uint64_t body_content_token(const EidolonApp *app) {
         hash = scene_hash_u64(hash, eidolon_portrait_revision(app->portrait));
         break;
     case EIDOLON_RENDER_MODE_MODEL_3D:
-        hash = scene_hash_u64(hash, eidolon_model_presented_transform_revision(app->model));
+        hash = scene_hash_u64(hash, eidolon_model_content_revision(app->model));
         break;
     case EIDOLON_RENDER_MODE_COUNT:
         break;
@@ -154,6 +154,10 @@ static bool publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             pivot_x = portrait_transform->pivot_x;
             pivot_y = portrait_transform->pivot_y;
             (void)eidolon_portrait_content_size(app->portrait, &content_width, &content_height);
+        } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
+                   eidolon_model_ready(app->model)) {
+            content_width = (uint32_t)eidolon_model_render_resolution(app->model);
+            content_height = content_width;
         }
         layers[layer_count++] = (EidolonSceneLayerInput){
             .stable_key = SCENE_BODY_KEY,
@@ -287,6 +291,39 @@ static bool draw_portrait_target(EidolonApp *app, const EidolonPortraitTransform
         return true;
     }
     return eidolon_sdl_legacy_composite_portrait(app->presentation, update.target, transform);
+}
+
+static bool draw_model_target(EidolonApp *app) {
+    const EidolonSceneLayerSnapshot *body =
+        eidolon_scene_snapshot_layer(&app->scene_snapshot, SCENE_BODY_KEY);
+    if (body == NULL || !eidolon_model_ready(app->model)) {
+        return false;
+    }
+    EidolonPresentationTargetUpdate update;
+    if (!eidolon_presentation_begin_target_update(
+            app->presentation, body->id, body->content_width, body->content_height,
+            EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED, body->content_revision, &update)) {
+        return false;
+    }
+    if (!update.redraw_required) {
+        return true;
+    }
+    bool content_valid =
+        eidolon_model_render_presentation_target(app->model, app->presentation, &update);
+    if (content_valid) {
+        const uint8_t *alpha_mask = NULL;
+        size_t alpha_pitch = 0U;
+        content_valid = eidolon_model_target_alpha_mask(app->model, &alpha_mask, &alpha_pitch) &&
+                        eidolon_presentation_set_target_alpha_mask(
+                            app->presentation, &update, alpha_mask, alpha_pitch, 1U, 0U);
+    }
+    if (!eidolon_presentation_finish_target_update(app->presentation, &update, content_valid)) {
+        return false;
+    }
+    if (content_valid) {
+        return true;
+    }
+    return eidolon_presentation_target_for_layer(app->presentation, body->id, &update);
 }
 
 static bool draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
@@ -443,11 +480,14 @@ static bool draw_scene(EidolonApp *app) {
             }
         }
         scene_drawn = portrait_transform_ready && rendered && scene_drawn;
-    } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
-               eidolon_model_texture(app->model) != NULL) {
-        SDL_Texture *model_texture = eidolon_model_texture(app->model);
+    } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
+               eidolon_model_ready(app->model)) {
         const bool rendered =
-            eidolon_sdl_legacy_draw_model(app->presentation, model_texture, &app->body_rect);
+            native_targets
+                ? draw_model_target(app)
+                : eidolon_sdl_legacy_draw_model(app->presentation,
+                                                eidolon_model_texture(app->model),
+                                                &app->body_rect);
         static bool model_draw_reported = false;
         if (!rendered && !model_draw_reported) {
             eidolon_log_write("renderer", "model texture draw success=%s error=%s",
@@ -491,7 +531,7 @@ static void update_hit_test_if_needed(EidolonApp *app) {
     const bool portrait_active =
         app->render_mode == EIDOLON_RENDER_MODE_PORTRAIT && eidolon_portrait_ready(app->portrait);
     const bool model_active = app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
-                              eidolon_model_texture(app->model) != NULL;
+                              eidolon_model_ready(app->model);
     const bool interaction_active = app->model_rotation_dragging;
     const bool model_transform_changed =
         app->hit_test_model_transform_revision != model_transform_revision;

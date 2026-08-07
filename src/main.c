@@ -117,7 +117,7 @@ static bool run_performance_review(EidolonApp *app) {
     bool pass_complete = false;
     bool running = true;
     if (!eidolon_app_set_render_mode(app, EIDOLON_RENDER_MODE_MODEL_3D) ||
-        !SDL_ShowWindow(app->window)) {
+        (app->window != NULL && !SDL_ShowWindow(app->window))) {
         return false;
     }
     SDL_Log("EPR performance review repeats until closed; press Escape after a complete pass");
@@ -136,6 +136,8 @@ static bool run_performance_review(EidolonApp *app) {
                 running = false;
             }
         }
+        eidolon_app_pump_presentation_events(app);
+        running = running && app->running;
         while (running && next_tick <= logical_elapsed && next_tick <= duration_ms) {
             if (!eidolon_app_update_performance_fixture(app, fixture_clock_ms + next_tick)) {
                 return false;
@@ -241,7 +243,8 @@ static bool handle_calibration_camera_event(EidolonApp *app, const SDL_Event *ev
 
 static bool run_vrm_calibration(EidolonApp *app, const char *sidecar_path) {
     if (!eidolon_app_set_render_mode(app, EIDOLON_RENDER_MODE_MODEL_3D) ||
-        !eidolon_app_begin_vrm_calibration(app, sidecar_path) || !SDL_ShowWindow(app->window)) {
+        !eidolon_app_begin_vrm_calibration(app, sidecar_path) ||
+        (app->window != NULL && !SDL_ShowWindow(app->window))) {
         return false;
     }
     app->settings_ui = eidolon_settings_ui_create(EIDOLON_FONT_PATH);
@@ -276,6 +279,8 @@ static bool run_vrm_calibration(EidolonApp *app, const char *sidecar_path) {
                 }
             }
         }
+        eidolon_app_pump_presentation_events(app);
+        running = running && app->running;
         const uint64_t now = SDL_GetTicks();
         eidolon_model_update(app->model, now);
         if (running && !eidolon_draw_frame(app)) {

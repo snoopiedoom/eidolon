@@ -19,6 +19,7 @@
 #define COBJMACROS
 #include <d3d11.h>
 #include <windows.h>
+#include "platform/windows_dcomp.h"
 #endif
 
 #include <cgltf.h>
@@ -28,6 +29,8 @@
 #define MODEL_TARGET_HEIGHT 1536
 #endif
 #define MODEL_MAX_JOINTS 256
+#define MODEL_HIT_MASK_GRID 128
+#define MODEL_HIT_MASK_INTERVAL_MS 100U
 #if !defined(_WIN32)
 #define MODEL_READBACK_COUNT 3
 #endif
@@ -85,6 +88,7 @@ typedef struct EidolonCpuGeometry {
 struct EidolonModelRenderer {
 #if defined(_WIN32)
     SDL_Renderer *renderer;
+    bool native_target;
     ID3D11Device *device;
     ID3D11DeviceContext *context;
     ID3D11Buffer *vertex_buffer;
@@ -119,6 +123,17 @@ struct EidolonModelRenderer {
     SDL_Texture *renderer_texture;
     EidolonModelDraw *draws;
     size_t draw_count;
+#if defined(_WIN32)
+    EidolonModelVertex *hit_vertices;
+    Uint32 *hit_indices;
+    SDL_FPoint *hit_projected;
+    uint8_t *hit_grid;
+    uint8_t *hit_mask;
+    size_t hit_vertex_count;
+    size_t hit_index_count;
+    size_t hit_mask_size;
+    uint64_t last_hit_mask_ms;
+#endif
     EidolonMotionRig motion;
     EidolonHumanoidProfile humanoid;
     EidolonSemanticPose semantic_pose;
@@ -142,6 +157,8 @@ struct EidolonModelRenderer {
     uint64_t next_frame_sequence;
 #endif
     uint64_t last_submit_ms;
+    uint64_t content_revision;
+    uint64_t pending_frame_ms;
     uint64_t presented_frame_sequence;
     float yaw_radians;
     float pitch_radians;
@@ -778,7 +795,21 @@ static bool d3d11_succeeded(HRESULT result, const char *operation) {
     return false;
 }
 
-static bool acquire_renderer_device(EidolonModelRenderer *model, SDL_Renderer *renderer) {
+static bool acquire_renderer_device(EidolonModelRenderer *model, SDL_Renderer *renderer,
+                                    EidolonPresentation *presentation) {
+    if (renderer == NULL) {
+        model->device = eidolon_win32_dcomp_device(presentation);
+        model->context = eidolon_win32_dcomp_device_context(presentation);
+        if (model->device == NULL || model->context == NULL) {
+            SDL_SetError("native 3D rendering requires the win32_dcomp D3D11 device");
+            model->device = NULL;
+            model->context = NULL;
+            return false;
+        }
+        ID3D11DeviceContext_AddRef(model->context);
+        model->native_target = true;
+        return true;
+    }
     const char *renderer_name = SDL_GetRendererName(renderer);
     if (renderer_name == NULL || SDL_strcmp(renderer_name, "direct3d11") != 0) {
         SDL_SetError("Rio requires SDL's direct3d11 renderer on Windows (active renderer: %s)",
@@ -1077,13 +1108,17 @@ static bool create_color_target_view(EidolonModelRenderer *model, SDL_Texture *r
 }
 
 static bool replace_targets(EidolonModelRenderer *model, int side) {
-    SDL_Texture *replacement_texture = SDL_CreateTexture(model->renderer, SDL_PIXELFORMAT_ABGR8888,
-                                                         SDL_TEXTUREACCESS_TARGET, side, side);
+    SDL_Texture *replacement_texture = NULL;
     ID3D11RenderTargetView *replacement_rtv = NULL;
     ID3D11Texture2D *replacement_depth = NULL;
     ID3D11DepthStencilView *replacement_dsv = NULL;
-    bool created = replacement_texture != NULL;
-    if (created) {
+    bool created = true;
+    if (!model->native_target) {
+        replacement_texture = SDL_CreateTexture(model->renderer, SDL_PIXELFORMAT_ABGR8888,
+                                                SDL_TEXTUREACCESS_TARGET, side, side);
+        created = replacement_texture != NULL;
+    }
+    if (created && !model->native_target) {
         created = SDL_SetTextureBlendMode(replacement_texture, SDL_BLENDMODE_BLEND) &&
                   SDL_SetTextureScaleMode(replacement_texture, SDL_SCALEMODE_LINEAR) &&
                   create_color_target_view(model, replacement_texture, &replacement_rtv);
@@ -1109,7 +1144,7 @@ static bool replace_targets(EidolonModelRenderer *model, int side) {
                                                 NULL, &replacement_dsv),
             "creating D3D11 model depth view");
     }
-    if (created) {
+    if (created && !model->native_target) {
         created = SDL_FlushRenderer(model->renderer);
     }
     if (!created) {
@@ -1155,6 +1190,9 @@ static bool replace_targets(EidolonModelRenderer *model, int side) {
 }
 
 static bool refresh_color_target_view(EidolonModelRenderer *model) {
+    if (model->native_target) {
+        return true;
+    }
     ID3D11RenderTargetView *replacement = NULL;
     if (!create_color_target_view(model, model->renderer_texture, &replacement)) {
         return false;
@@ -1209,6 +1247,103 @@ static bool write_constant_buffer(EidolonModelRenderer *model, ID3D11Buffer *buf
     }
     SDL_memcpy(mapped.pData, data, bytes);
     ID3D11DeviceContext_Unmap(model->context, (ID3D11Resource *)buffer, 0);
+    return true;
+}
+
+static float hit_edge(SDL_FPoint a, SDL_FPoint b, float x, float y) {
+    return (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
+}
+
+static bool rasterize_native_hit_mask(EidolonModelRenderer *model,
+                                      const EidolonModelScene *scene) {
+    if (!model->native_target || model->hit_vertices == NULL || model->hit_indices == NULL ||
+        model->hit_projected == NULL || model->hit_grid == NULL) {
+        return SDL_SetError("native model hit-test geometry is unavailable");
+    }
+    SDL_memset(model->hit_grid, 0, MODEL_HIT_MASK_GRID * MODEL_HIT_MASK_GRID);
+    for (size_t vertex_index = 0U; vertex_index < model->hit_vertex_count; ++vertex_index) {
+        const EidolonModelVertex *vertex = &model->hit_vertices[vertex_index];
+        const float morphed[3] = {
+            vertex->position[0] +
+                vertex->neutral_delta[0] * scene->expression_weights[0] +
+                vertex->focused_delta[0] * scene->expression_weights[1],
+            vertex->position[1] +
+                vertex->neutral_delta[1] * scene->expression_weights[0] +
+                vertex->focused_delta[1] * scene->expression_weights[1],
+            vertex->position[2] +
+                vertex->neutral_delta[2] * scene->expression_weights[0] +
+                vertex->focused_delta[2] * scene->expression_weights[1],
+        };
+        float skinned[3] = {0.0F, 0.0F, 0.0F};
+        for (size_t influence = 0U; influence < 4U; ++influence) {
+            const size_t joint = (size_t)vertex->joints[influence];
+            const float weight = vertex->weights[influence];
+            if (weight == 0.0F || joint > model->joint_count) {
+                continue;
+            }
+            float transformed[3];
+            transform_position(model->joint_palette[joint], morphed, transformed);
+            for (size_t axis = 0U; axis < 3U; ++axis) {
+                skinned[axis] += transformed[axis] * weight;
+            }
+        }
+        float projected[3];
+        transform_position(scene->model_view_projection, skinned, projected);
+        model->hit_projected[vertex_index] = (SDL_FPoint){
+            (projected[0] * 0.5F + 0.5F) * (float)(MODEL_HIT_MASK_GRID - 1),
+            (0.5F - projected[1] * 0.5F) * (float)(MODEL_HIT_MASK_GRID - 1),
+        };
+    }
+
+    for (size_t index = 0U; index + 2U < model->hit_index_count; index += 3U) {
+        const Uint32 ia = model->hit_indices[index];
+        const Uint32 ib = model->hit_indices[index + 1U];
+        const Uint32 ic = model->hit_indices[index + 2U];
+        if ((size_t)ia >= model->hit_vertex_count || (size_t)ib >= model->hit_vertex_count ||
+            (size_t)ic >= model->hit_vertex_count) {
+            continue;
+        }
+        const SDL_FPoint a = model->hit_projected[ia];
+        const SDL_FPoint b = model->hit_projected[ib];
+        const SDL_FPoint c = model->hit_projected[ic];
+        const int minimum_x = SDL_max(0, (int)SDL_floorf(SDL_min(a.x, SDL_min(b.x, c.x))));
+        const int minimum_y = SDL_max(0, (int)SDL_floorf(SDL_min(a.y, SDL_min(b.y, c.y))));
+        const int maximum_x = SDL_min(MODEL_HIT_MASK_GRID - 1,
+                                      (int)SDL_ceilf(SDL_max(a.x, SDL_max(b.x, c.x))));
+        const int maximum_y = SDL_min(MODEL_HIT_MASK_GRID - 1,
+                                      (int)SDL_ceilf(SDL_max(a.y, SDL_max(b.y, c.y))));
+        for (int y = minimum_y; y <= maximum_y; ++y) {
+            for (int x = minimum_x; x <= maximum_x; ++x) {
+                const float sample_x = (float)x + 0.5F;
+                const float sample_y = (float)y + 0.5F;
+                const float ab = hit_edge(a, b, sample_x, sample_y);
+                const float bc = hit_edge(b, c, sample_x, sample_y);
+                const float ca = hit_edge(c, a, sample_x, sample_y);
+                if (!((ab < 0.0F || bc < 0.0F || ca < 0.0F) &&
+                      (ab > 0.0F || bc > 0.0F || ca > 0.0F))) {
+                    model->hit_grid[(size_t)y * MODEL_HIT_MASK_GRID + (size_t)x] = 255U;
+                }
+            }
+        }
+    }
+
+    const size_t mask_size = (size_t)model->target_width * (size_t)model->target_height;
+    if (mask_size != model->hit_mask_size) {
+        uint8_t *replacement = SDL_realloc(model->hit_mask, mask_size);
+        if (replacement == NULL) {
+            return false;
+        }
+        model->hit_mask = replacement;
+        model->hit_mask_size = mask_size;
+    }
+    for (int y = 0; y < model->target_height; ++y) {
+        const size_t grid_y = (size_t)y * MODEL_HIT_MASK_GRID / (size_t)model->target_height;
+        for (int x = 0; x < model->target_width; ++x) {
+            const size_t grid_x = (size_t)x * MODEL_HIT_MASK_GRID / (size_t)model->target_width;
+            model->hit_mask[(size_t)y * (size_t)model->target_width + (size_t)x] =
+                model->hit_grid[grid_y * MODEL_HIT_MASK_GRID + grid_x];
+        }
+    }
     return true;
 }
 
@@ -1328,7 +1463,8 @@ static void restore_d3d11_state(ID3D11DeviceContext *context, EidolonD3D11State 
     }
 }
 
-static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
+static bool submit_model_frame_to(EidolonModelRenderer *model, uint64_t now_ms,
+                                  ID3D11RenderTargetView *color_rtv) {
     float projection[16];
     float yaw_rotation[16];
     float pitch_rotation[16];
@@ -1370,7 +1506,8 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
             eidolon_motion_update_idle(&model->motion, now_ms);
         }
     }
-    if (!update_joint_palette(model) || !SDL_FlushRenderer(model->renderer) ||
+    if (!update_joint_palette(model) ||
+        (model->renderer != NULL && !SDL_FlushRenderer(model->renderer)) ||
         !write_constant_buffer(model, model->scene_buffer, &scene, sizeof(scene)) ||
         !write_constant_buffer(model, model->bones_buffer, model->joint_palette,
                                sizeof(model->joint_palette))) {
@@ -1383,8 +1520,8 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     static const FLOAT clear_color[4] = {0.0F, 0.0F, 0.0F, 0.0F};
     ID3D11ShaderResourceView *null_view = NULL;
     ID3D11DeviceContext_PSSetShaderResources(model->context, 0, 1, &null_view);
-    ID3D11DeviceContext_OMSetRenderTargets(model->context, 1, &model->color_rtv, model->depth_dsv);
-    ID3D11DeviceContext_ClearRenderTargetView(model->context, model->color_rtv, clear_color);
+    ID3D11DeviceContext_OMSetRenderTargets(model->context, 1, &color_rtv, model->depth_dsv);
+    ID3D11DeviceContext_ClearRenderTargetView(model->context, color_rtv, clear_color);
     ID3D11DeviceContext_ClearDepthStencilView(model->context, model->depth_dsv, D3D11_CLEAR_DEPTH,
                                               1.0F, 0);
 
@@ -1438,10 +1575,27 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     if (!rendered) {
         return false;
     }
+    if (model->native_target &&
+        (model->hit_mask == NULL ||
+         model->hit_mask_size !=
+             (size_t)model->target_width * (size_t)model->target_height ||
+         now_ms - model->last_hit_mask_ms >= MODEL_HIT_MASK_INTERVAL_MS)) {
+        if (!rasterize_native_hit_mask(model, &scene)) {
+            return false;
+        }
+        model->last_hit_mask_ms = now_ms;
+    }
     model->last_submit_ms = now_ms;
     model->presented_frame_sequence += 1U;
     model->presented_transform_revision = model->transform_revision;
     return true;
+}
+
+static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
+    if (model->native_target || model->color_rtv == NULL) {
+        return SDL_SetError("native model frames require a presentation target");
+    }
+    return submit_model_frame_to(model, now_ms, model->color_rtv);
 }
 
 #else
@@ -2157,6 +2311,7 @@ bool eidolon_model_set_render_resolution(EidolonModelRenderer *model, int side) 
     }
     model->last_submit_ms = 0;
     model->transform_revision += 1U;
+    model->content_revision += 1U;
     eidolon_log_write("model", "render target resized to %dx%d", side, side);
     return true;
 #else
@@ -2182,7 +2337,9 @@ uint64_t eidolon_model_presented_frame_sequence(const EidolonModelRenderer *mode
     return model->presented_frame_sequence;
 }
 
-EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *model_path,
+EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
+                                           EidolonPresentation *presentation,
+                                           const char *model_path,
                                            const char *shader_directory,
                                            EidolonNeutralPose neutral_pose,
                                            EidolonIdleTuning idle_tuning) {
@@ -2194,7 +2351,7 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
 #if defined(_WIN32)
     model->target_width = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
     model->target_height = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
-    if (!acquire_renderer_device(model, renderer)) {
+    if (!acquire_renderer_device(model, renderer, presentation)) {
         eidolon_model_destroy(model);
         return NULL;
     }
@@ -2292,14 +2449,36 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
         model->draws = geometry.draws;
         model->draw_count = geometry.draw_count;
         geometry.draws = NULL;
+#if defined(_WIN32)
+        if (model->native_target) {
+            model->hit_vertices = geometry.vertices;
+            model->hit_indices = geometry.indices;
+            model->hit_vertex_count = geometry.vertex_count;
+            model->hit_index_count = geometry.index_count;
+            geometry.vertices = NULL;
+            geometry.indices = NULL;
+            model->hit_projected =
+                SDL_calloc(model->hit_vertex_count, sizeof(*model->hit_projected));
+            model->hit_grid = SDL_calloc(MODEL_HIT_MASK_GRID * MODEL_HIT_MASK_GRID,
+                                         sizeof(*model->hit_grid));
+            if (model->hit_projected == NULL || model->hit_grid == NULL) {
+                cpu_geometry_destroy(&geometry);
+                cgltf_free(data);
+                eidolon_model_destroy(model);
+                return NULL;
+            }
+        }
+#endif
     }
     cpu_geometry_destroy(&geometry);
     cgltf_free(data);
     if (!uploaded || !create_sampler(model) || !create_pipeline(model, shader_directory) ||
-        !create_targets(model, renderer) || !submit_model_frame(model, 0)) {
+        !create_targets(model, renderer) ||
+        (!model->native_target && !submit_model_frame(model, 0))) {
         eidolon_model_destroy(model);
         return NULL;
     }
+    model->content_revision = 1U;
 #if !defined(_WIN32)
     for (size_t readback_index = 0; readback_index < MODEL_READBACK_COUNT; ++readback_index) {
         if (!consume_readback(model, &model->readbacks[readback_index], true)) {
@@ -2310,8 +2489,9 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
 #endif
 
 #if defined(_WIN32)
-    const char *gpu_driver = SDL_GetRendererName(renderer);
-    const char *frame_transfer = "shared-texture";
+    const char *gpu_driver = renderer != NULL ? SDL_GetRendererName(renderer) : "direct3d11";
+    const char *frame_transfer = model->native_target ? "direct-composition-target"
+                                                     : "shared-texture";
 #else
     const char *gpu_driver = SDL_GetGPUDeviceDriver(model->device);
     const char *frame_transfer = "asynchronous-readback";
@@ -2489,6 +2669,14 @@ void eidolon_model_update(EidolonModelRenderer *model, uint64_t now_ms) {
     if (now_ms - model->last_submit_ms < MODEL_FRAME_INTERVAL_MS) {
         return;
     }
+#if defined(_WIN32)
+    if (model->native_target) {
+        model->pending_frame_ms = now_ms;
+        model->last_submit_ms = now_ms;
+        model->content_revision += 1U;
+        return;
+    }
+#endif
     if (!submit_model_frame(model, now_ms)) {
         disable_failed_model(model, "animated frame submission");
     }
@@ -2504,7 +2692,82 @@ void eidolon_model_request_redraw(EidolonModelRenderer *model) {
 #endif
         model->last_submit_ms = 0;
         model->transform_revision += 1U;
+        model->content_revision += 1U;
     }
+}
+
+bool eidolon_model_ready(const EidolonModelRenderer *model) {
+    if (model == NULL || model->failed || model->draws == NULL || model->draw_count == 0U) {
+        return false;
+    }
+#if defined(_WIN32)
+    return model->native_target ? model->device != NULL && model->context != NULL &&
+                                      model->depth_dsv != NULL
+                                : model->renderer_texture != NULL && model->color_rtv != NULL;
+#else
+    return model->renderer_texture != NULL;
+#endif
+}
+
+uint64_t eidolon_model_content_revision(const EidolonModelRenderer *model) {
+    if (model == NULL || model->failed) {
+        return 0U;
+    }
+#if defined(_WIN32)
+    if (model->native_target) {
+        return model->content_revision;
+    }
+#endif
+    return model->presented_transform_revision;
+}
+
+bool eidolon_model_render_presentation_target(
+    EidolonModelRenderer *model, EidolonPresentation *presentation,
+    const EidolonPresentationTargetUpdate *update) {
+#if defined(_WIN32)
+    if (model == NULL || presentation == NULL || update == NULL || model->failed ||
+        !model->native_target || update->width != (uint32_t)model->target_width ||
+        update->height != (uint32_t)model->target_height) {
+        return SDL_SetError("invalid native model presentation target");
+    }
+    ID3D11Texture2D *texture = eidolon_win32_dcomp_target_texture(
+        presentation, update->target, update->generation);
+    if (texture == NULL) {
+        return false;
+    }
+    ID3D11RenderTargetView *render_target = NULL;
+    if (!d3d11_succeeded(ID3D11Device_CreateRenderTargetView(
+                             model->device, (ID3D11Resource *)texture, NULL, &render_target),
+                         "creating native model presentation view")) {
+        return false;
+    }
+    const bool rendered = submit_model_frame_to(model, model->pending_frame_ms, render_target);
+    ID3D11RenderTargetView_Release(render_target);
+    return rendered;
+#else
+    (void)model;
+    (void)presentation;
+    (void)update;
+    return SDL_SetError("native model presentation targets are only supported on Windows");
+#endif
+}
+
+bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model,
+                                     const uint8_t **pixels, size_t *pitch) {
+    if (model == NULL || pixels == NULL || pitch == NULL || model->failed) {
+        return false;
+    }
+#if defined(_WIN32)
+    if (!model->native_target || model->hit_mask == NULL ||
+        model->hit_mask_size != (size_t)model->target_width * (size_t)model->target_height) {
+        return false;
+    }
+    *pixels = model->hit_mask;
+    *pitch = (size_t)model->target_width;
+    return true;
+#else
+    return false;
+#endif
 }
 
 void eidolon_model_destroy(EidolonModelRenderer *model) {
@@ -2624,6 +2887,13 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
 #endif
     SDL_free(model->textures);
     SDL_free(model->draws);
+#if defined(_WIN32)
+    SDL_free(model->hit_mask);
+    SDL_free(model->hit_grid);
+    SDL_free(model->hit_projected);
+    SDL_free(model->hit_indices);
+    SDL_free(model->hit_vertices);
+#endif
     eidolon_vrm_projection_destroy(&model->vrm_projection);
     eidolon_vrm_body_destroy(&model->vrm_body);
     eidolon_motion_destroy(&model->motion);

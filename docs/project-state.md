@@ -82,10 +82,11 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   cannot consume the renderer's frame budget;
 - VSync and the independent FPS ceiling are persisted settings; the shipped default follows the
   active monitor, while VSync-off with a zero ceiling is uncapped;
-- Windows 3D and SDL composition share one D3D11 device and GPU-resident texture;
+- Windows 3D shares the selected presentation backend's D3D11 device: legacy composition samples an
+  SDL-owned GPU texture, while native composition renders directly into its body swapchain;
 - pixel alpha drives click-through while coarse Win32 regions keep DWM region cost bounded;
-- the shipped `native` presentation preference selects the portrait-only `win32_dcomp` backend on
-  Windows; an explicit legacy preference, sprite/3D body, or native startup failure selects
+- the shipped `native` presentation preference selects `win32_dcomp` for portrait and 3D bodies on
+  Windows; an explicit legacy preference, sprite body, or native startup failure selects
   `sdl_window_legacy` with a logged reason;
 - `win32_dcomp` owns a no-redirection host, independent body/dialogue targets, premultiplied D3D11
   submission, DirectComposition transforms/opacity/z-order, cached-alpha hit testing, native body
@@ -123,11 +124,14 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   transactionally loads partial semantic-anchor sidecars without changing visible poses;
 - `make vrm-calibrate VRM_PATH=...` now rebuilds the actual EPR fixture at eight frozen semantic
   anchors, projects live task-space edits, and deterministically/atomically saves partial sidecars;
-- calibration and visible performance review now use an explicit transparent/borderless authoring
-  mode instead of accidentally showing the opaque snapshot host; wheel scaling grows the overlay
-  with the body, and rotation-safe depth fitting prevents orbit inspection from clipping the rig;
-- deterministic performance snapshots, the hidden runtime gate, and the visible five-second SDL 3D
-  review command complete with the portrait default and native-presentation selection unchanged;
+- calibration and visible performance review now use the shared transparent/borderless native body
+  target instead of a private SDL authoring host; wheel scaling grows the overlay with the body,
+  rotation-safe depth fitting prevents orbit inspection from clipping the rig, and Win32 capture
+  keeps middle-drag routing alive beyond the host bounds;
+- native VRM frames submit directly into the DirectComposition swapchain with no animated
+  framebuffer readback; a CPU-projected skinned-mesh mask preserves transparent click-through;
+- deterministic performance snapshots, the hidden runtime gate, the five-second native 3D review
+  command, and extended wheel/out-of-host native smoke pass with the portrait default unchanged;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
 
@@ -225,14 +229,14 @@ The active roadmap gate is
 [A2: make Codex session truth dependable](product-roadmap.md#a2-make-codex-session-truth-dependable).
 [A1: finish the native presentation foundation](product-roadmap.md#a1-finish-the-native-presentation-foundation)
 is complete and owner-accepted for the Windows 2D daily-driver path. DirectComposition is the
-normal portrait selection; `sdl_window_legacy` remains the explicit, capability, and failure
+normal portrait/3D selection; `sdl_window_legacy` remains the explicit, sprite-capability, and failure
 fallback with its accepted modal-drag limitation.
 
 The separate EPR/VRM workstream has closed its corrective implementation/runtime gates. Its first
 owner-feel review accepted the camera, rig, and harness but rejected the provisional pose
-authorship, so the workstream is now implementing calibration-derived realization. It stays on
-`sdl_window_legacy`; native DirectComposition 3D and making 3D the default remain downstream and do
-not alter A2 or portrait ownership.
+authorship, so the workstream is now implementing calibration-derived realization. It now shares
+the native scene/presentation path without sharing the portrait performance system; making 3D the
+default remains downstream and does not alter A2 or portrait ownership.
 
 Primary daily-driver priorities:
 
@@ -263,8 +267,8 @@ Parallel EPR/VRM reference-body priorities:
 
 ## Deferred by the active roadmap
 
-- native DirectComposition 3D, production-path EPR tuning, and making 3D the default body remain
-  downstream of owner acceptance of the calibrated SDL EPR performance;
+- visible acceptance of native DirectComposition 3D, production-path EPR tuning, and making 3D the
+  default body remain downstream of owner acceptance of the calibrated EPR performance;
 - the EPR/VRM workstream's correctness gates are not deferred by the 2D roadmap; they are required
   before the experimental reference body is treated as landed;
 - portrait-catalog expression annotation remains downstream of current Expression Director tuning

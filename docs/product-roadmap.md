@@ -200,6 +200,11 @@ subsequent scoped milestones. Compatibility broadening must keep the other body 
 
 **Status: complete and owner-accepted on Windows for the 2D daily-driver path (2026-07-24).**
 
+**3D extension checkpoint (2026-08-07):** the experimental rigged-3D body now uses the same
+`win32_dcomp` scene/presentation path, direct D3D11 target submission, projected click-through mask,
+and captured pointer routing. Automated and hidden live checks pass; visible owner acceptance and
+the legacy-only sprite target remain outside the already-closed 2D gate.
+
 Complete the current presentation migration for the 2D daily-driver path:
 
 - preserve the backend-neutral scene, event, and environment contracts;

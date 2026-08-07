@@ -182,8 +182,18 @@ int main() {
             std::fprintf(stderr, "native host lookup failed\n");
             goto cleanup;
         }
-        SendMessageW(window, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(10, 10));
+        POINT wheel = {10, 10};
+        ClientToScreen(window, &wheel);
+        SendMessageW(window, WM_MOUSEWHEEL, MAKEWPARAM(0U, WHEEL_DELTA),
+                     MAKELPARAM(wheel.x, wheel.y));
         EidolonPresentationEvent event = {};
+        if (!eidolon_presentation_poll_event(presentation, &event) ||
+            event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_WHEEL ||
+            event.data.pointer.layer.value != layer.value || event.data.pointer.wheel_y != 1.0F) {
+            std::fprintf(stderr, "native routed pointer wheel failed: %s\n", SDL_GetError());
+            goto cleanup;
+        }
+        SendMessageW(window, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(10, 10));
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_DOWN ||
             event.data.pointer.layer.value != layer.value ||
@@ -191,15 +201,15 @@ int main() {
             std::fprintf(stderr, "native routed pointer down failed: %s\n", SDL_GetError());
             goto cleanup;
         }
-        SendMessageW(window, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(15, 12));
+        SendMessageW(window, WM_MOUSEMOVE, MK_MBUTTON, MAKELPARAM(400, 250));
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_MOTION ||
-            event.data.pointer.layer_x_relative != 5.0F ||
-            event.data.pointer.layer_y_relative != 2.0F) {
-            std::fprintf(stderr, "native routed pointer motion failed: %s\n", SDL_GetError());
+            event.data.pointer.layer_x_relative != 390.0F ||
+            event.data.pointer.layer_y_relative != 240.0F) {
+            std::fprintf(stderr, "native routed out-of-host motion failed: %s\n", SDL_GetError());
             goto cleanup;
         }
-        SendMessageW(window, WM_MBUTTONUP, 0U, MAKELPARAM(15, 12));
+        SendMessageW(window, WM_MBUTTONUP, 0U, MAKELPARAM(400, 250));
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_UP) {
             std::fprintf(stderr, "native routed pointer up failed: %s\n", SDL_GetError());

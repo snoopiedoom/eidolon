@@ -166,11 +166,11 @@ exposes a public external-resource contract that removes the animated CPU bridge
 - [x] enable the Win32 DirectComposition backend as a normal/default path after its snapshots,
   interaction, environment handling, and recovery are accepted and fallback is explicit.
 
-This gate is the production migration, not another graphics experiment. Windows portrait startup
+This gate is the production migration, not another graphics experiment. Windows portrait/3D startup
 normally uses the DirectComposition backend. Body, portrait, dialogue, and snapshot renderers still
 borrow the SDL renderer explicitly where the legacy backend is selected; the presentation object
 owns and destroys that renderer and its host. Persisted `native` preference resolves by body
-capability: portrait uses DirectComposition, while sprite/3D bodies and native failure select
+capability: portrait and 3D use DirectComposition, while sprite bodies and native failure select
 `sdl_window_legacy` with a logged reason. Snapshots and explicit compatibility selection also use
 the legacy backend.
 
@@ -286,15 +286,16 @@ thresholds. Gate 5 owns comparative performance policy.
 
 ## Current checkpoint
 
-Gates 0 through 5 are complete. Gate 6 has completed the A1 Windows 2D production slice; later
-sprite/3D native targets and removal of transitional SDL aliases remain separate migration work.
+Gates 0 through 5 are complete. Gate 6 completed the A1 Windows 2D production slice. The later
+direct-D3D11 3D target extension is now implemented; sprite targets and removal of transitional SDL
+aliases remain separate migration work.
 Gate 5 selected direct D3D11 for the Windows compositor backend.
 bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
 not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
 unacceptable CPU readback bridge into DirectComposition. SDL_Renderer could wrap the external
 D3D11 targets, but retaining its unused window swapchain violated presentation ownership and
 produced a persistent idle worker on the test machine. No shared graphics candidate entered the
-production renderer. Direct D3D11 now feeds the normal portrait-only DirectComposition path;
+production renderer. Direct D3D11 now feeds the normal portrait and rigged-3D DirectComposition path;
 `EIDOLON_PRESENTATION_BACKEND` remains a developer override rather than the activation mechanism.
 
 The first backend-neutral interaction slice is compiled: committed layer policy replaces
@@ -336,8 +337,8 @@ post-drag resumption, persisted presentation selection, and body-capability fall
 
 - a portable persisted `presentation_preference` now selects `native` or
   `sdl_window_legacy` without encoding a Windows backend into user state;
-- startup resolves the requested body before backend creation: portrait selects DirectComposition,
-  while sprite/3D bodies select SDL compatibility with an explicit unsupported-body reason;
+- startup originally resolved portrait to DirectComposition while sprite/3D selected SDL. The
+  subsequent 2026-08-07 extension added direct native 3D targets; sprite remains unsupported;
 - native creation or environment bootstrap failure retains the existing explicit SDL fallback;
 - the settings UI exposes inherited preference, active backend, restart semantics, and queued
   unsupported body selection instead of silently coercing the body to portrait;

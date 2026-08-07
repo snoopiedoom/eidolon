@@ -435,6 +435,7 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
         break;
     case EIDOLON_PRESENTATION_EVENT_POINTER_DOWN:
     case EIDOLON_PRESENTATION_EVENT_POINTER_MOTION:
+    case EIDOLON_PRESENTATION_EVENT_POINTER_WHEEL:
     case EIDOLON_PRESENTATION_EVENT_POINTER_UP:
     case EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED:
         if (next.data.pointer.scene_revision == 0U || next.data.pointer.pointer_id == 0U ||
@@ -457,7 +458,8 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
               !isfinite(next.data.pointer.layer_y_relative))) ||
             ((next.data.pointer.valid_coordinates &
               EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL) != 0U &&
-             (!isfinite(next.data.pointer.global_x) || !isfinite(next.data.pointer.global_y)))) {
+              (!isfinite(next.data.pointer.global_x) || !isfinite(next.data.pointer.global_y))) ||
+            !isfinite(next.data.pointer.wheel_x) || !isfinite(next.data.pointer.wheel_y)) {
             SDL_SetError("invalid presentation pointer event");
             return false;
         }

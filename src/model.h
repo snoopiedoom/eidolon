@@ -6,6 +6,7 @@
 #include "epr/performance_runtime.h"
 #include "motion.h"
 #include "pose.h"
+#include "presentation.h"
 #include "vrm_calibration.h"
 
 #define EIDOLON_MODEL_RENDER_RESOLUTION_MIN 512
@@ -28,12 +29,21 @@ typedef struct EidolonVrmRuntimeReport {
     bool hidden_frame_ready;
 } EidolonVrmRuntimeReport;
 
-EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *model_path,
+EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
+                                           EidolonPresentation *presentation,
+                                           const char *model_path,
                                            const char *shader_directory,
                                            EidolonNeutralPose neutral_pose,
                                            EidolonIdleTuning idle_tuning);
 void eidolon_model_update(EidolonModelRenderer *model, uint64_t now_ms);
 void eidolon_model_request_redraw(EidolonModelRenderer *model);
+bool eidolon_model_ready(const EidolonModelRenderer *model);
+uint64_t eidolon_model_content_revision(const EidolonModelRenderer *model);
+bool eidolon_model_render_presentation_target(
+    EidolonModelRenderer *model, EidolonPresentation *presentation,
+    const EidolonPresentationTargetUpdate *update);
+bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model,
+                                     const uint8_t **pixels, size_t *pitch);
 void eidolon_model_set_rotation(EidolonModelRenderer *model, float yaw_radians, float pitch_radians,
                                 float roll_radians);
 void eidolon_model_set_neutral_pose(EidolonModelRenderer *model, float arm_lower_radians,

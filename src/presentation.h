@@ -204,6 +204,7 @@ typedef enum EidolonPresentationEventKind {
     EIDOLON_PRESENTATION_EVENT_LAYER_CONTEXT_REQUESTED,
     EIDOLON_PRESENTATION_EVENT_POINTER_DOWN,
     EIDOLON_PRESENTATION_EVENT_POINTER_MOTION,
+    EIDOLON_PRESENTATION_EVENT_POINTER_WHEEL,
     EIDOLON_PRESENTATION_EVENT_POINTER_UP,
     EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
     EIDOLON_PRESENTATION_EVENT_MOVE_STARTED,
@@ -272,6 +273,8 @@ typedef struct EidolonPresentationPointerEvent {
     float layer_y_relative;
     float global_x;
     float global_y;
+    float wheel_x;
+    float wheel_y;
 } EidolonPresentationPointerEvent;
 
 typedef struct EidolonPresentationMoveEvent {

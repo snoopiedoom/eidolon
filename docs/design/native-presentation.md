@@ -331,8 +331,8 @@ dialogue activation plus native move lifecycle through that queue. The owner con
 activation, cancellation, click-through, movement, and final reflow. Presentation-environment
 publication, transactional application, and mixed-DPI behavior are owner-confirmed; reset events
 and host close now cross the common queue. Middle-button routed input is compiled for both Windows
-backends; SDL 3D rotation outside the host bounds, `Shift`+middle roll, double-middle reset, and
-preserved left dragging are owner-confirmed. Injected native reconstruction and SDL fallback are
+backends; the native adapter owns out-of-host capture and wheel routing while both paths preserve
+`Shift`+middle roll, double-middle reset, and left dragging. Injected native reconstruction and SDL fallback are
 also owner-confirmed. Deterministic active-output retirement and application-state-preserving
 fallback are proven; real device loss and physical display disconnect remain hardware evidence
 gaps.
@@ -705,8 +705,9 @@ behavior-preserving `sdl_window_legacy` backend, and a Windows DirectComposition
 quarantined C++ adapter. Stable body and per-session dialogue
 layers resolve to independently generated presentation targets. Portrait and dialogue content can
 be authored without an SDL window renderer, premultiplied, and uploaded directly into
-compositor-owned D3D11 targets without readback. The persisted `native` preference selects
-DirectComposition for portrait bodies; explicit legacy preference, sprite/3D bodies, native
+compositor-owned D3D11 targets without readback. Rigged-3D bodies now render directly into the same
+class of compositor-owned target and publish a CPU-projected animated-mesh hit mask. The persisted
+`native` preference selects DirectComposition for portrait and 3D bodies; explicit legacy preference, sprite bodies, native
 creation failure, and snapshots select `sdl_window_legacy` with local, logged degradation. Its
 Win32 adapter owns transformed
 per-pixel hit testing, body dragging, and bounded activation/move events. The owner accepted native
@@ -783,6 +784,15 @@ output are accepted.
 
 Gate: all three bodies work through the same scene and presentation contract; inactive renderers stay
 uninitialized.
+
+**Current checkpoint:** the rigged-3D/VRM renderer borrows the DirectComposition backend's D3D11
+device and renders straight into the generation-bound premultiplied body swapchain. Scene content
+revisions schedule animated redraws; transforms and overlay scaling remain presentation state. A
+coarse CPU projection of the current skinned mesh supplies the native alpha/input plane without a
+GPU readback. Wheel, middle down/motion/up/cancel, out-of-host capture, and double-click reset cross
+the common presentation event contract. Hidden live review and the extended native backend smoke
+pass; visible owner acceptance is the remaining checkpoint. The sprite atlas is still legacy-only,
+so the complete all-three-body Phase 4 gate is not yet closed.
 
 ### Phase 5: graphics-backend spike — complete for Windows
 

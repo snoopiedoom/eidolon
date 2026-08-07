@@ -25,13 +25,14 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-native-preferred win32_dcomp portrait | explicit/capability sdl_window_legacy fallback
+native-preferred win32_dcomp portrait/3D | explicit/capability sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```
 
 This is the current implementation. Its presentation boundary is real, but the legacy path still
-retains transitional SDL renderer aliases and the native path currently supports only portraits.
+retains transitional SDL renderer aliases. The native path supports independent portrait/dialogue
+targets and direct D3D11 rigged-3D body targets; the sprite atlas remains legacy-only.
 The first EPR slice inserts a renderer-neutral control boundary for the explicitly selected
 supported reference VRM without changing source, session, scene, or presentation ownership:
 
@@ -253,28 +254,29 @@ are attached to source offsets, not rendered lines.
 ## Windows rendering
 
 Windows interactive startup uses the persisted, platform-neutral `presentation_preference`.
-`native` is shipped: a portrait body selects `win32_dcomp`; an unsupported sprite/3D body or native
-startup failure selects `sdl_window_legacy` and logs the exact fallback reason. Explicit
+`native` is shipped: portrait and 3D bodies select `win32_dcomp`; the unsupported sprite body or
+native startup failure selects `sdl_window_legacy` and logs the exact fallback reason. Explicit
 `sdl_window_legacy` preference bypasses the native attempt. Snapshots remain on the legacy backend.
 
-The legacy backend owns the transparent SDL window, D3D11 device, context, and swapchain. The 3D
-renderer borrows that device and draws into an SDL-owned target texture; SDL samples the same
-allocation during final composition. There is no animated full-frame CPU transfer, staging-map
-loop, or upload. Its Windows character drag delegates to the native top-level move loop and may
+The legacy backend owns the transparent SDL window, D3D11 device, context, and swapchain. When
+explicitly selected, the 3D renderer borrows that device and draws into an SDL-owned target texture;
+SDL samples the same allocation during final composition. There is no animated full-frame CPU
+transfer, staging-map loop, or upload. Its Windows character drag delegates to the native top-level move loop and may
 pause application-driven animation until release. That accepted fallback limitation is not a
 DirectComposition parity target.
 
-The normal portrait `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
+The normal portrait/3D `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
-It currently supports the portrait body only. Native dialogue activation, body-context settings,
+Portraits/dialogue upload prepared pixels; animated VRM bodies render directly into the body
+swapchain and publish a CPU-projected mesh mask without framebuffer readback. Native dialogue activation, body-context settings,
 and move completion cross the bounded presentation-event queue and are owner-confirmed. Revisioned
 Win32 environment publication, topology copying, and one application-owned environment transaction
 are implemented; mixed-DPI cross-monitor behavior is owner-confirmed. Deterministic active-output
 retirement proves opaque-id removal, stable fallback selection, output-local body migration,
 usable-bounds clamping, and dialogue/expression/motion continuity through the replacement frame.
-Output-local host migration, sprite/3D targets, and real hardware display-disconnect evidence
-remain unfinished. Device/backend reset preserves application state through one fresh
+Output-local host migration, sprite targets, and real hardware display-disconnect evidence remain
+unfinished. Device/backend reset preserves application state through one fresh
 DirectComposition reconstruction and an explicitly logged SDL fallback; deterministic hidden
 probes cover both paths, while visible continuity and the resulting interaction are owner-accepted.
 Real device loss still requires optional hardware evidence. The owner accepted native and legacy

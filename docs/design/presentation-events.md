@@ -162,8 +162,8 @@ move_anchor | route_pointer
   below the backend-independent drag threshold.
 - `move_anchor` permits immediate backend-owned capture and movement and emits move lifecycle
   events.
-- `route_pointer` additionally emits bounded events for otherwise-unclaimed input, initially the
-  middle-button body-authoring gesture used by 3D rotation.
+- `route_pointer` additionally emits bounded events for otherwise-unclaimed input, including
+  middle-button body rotation and wheel scaling for 3D.
 
 `activate` and `move_anchor` are mutually exclusive. `route_pointer` is a capability bit rather
 than a competing primary action, so native movement never has to wait for application routing.
@@ -206,6 +206,7 @@ layer.activated
 layer.context_requested
 pointer.down
 pointer.motion
+pointer.wheel
 pointer.up
 pointer.canceled
 move.started

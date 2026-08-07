@@ -46,6 +46,7 @@ struct DcompTarget {
     IDCompositionEffectGroup *effect = nullptr;
     IDCompositionMatrixTransform *transform = nullptr;
     uint8_t *alpha_mask = nullptr;
+    bool alpha_mask_valid = false;
     D2D_MATRIX_3X2_F pending_matrix = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
     D2D_MATRIX_3X2_F committed_matrix = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
     float pending_offset_x = 0.0F;
@@ -156,7 +157,7 @@ HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float cl
     }
     for (size_t index = backend->input_count; index > 0U; --index) {
         DcompTarget *target = backend->input_order[index - 1U];
-        if (target == nullptr || !target->occupied || target->alpha_mask == nullptr ||
+        if (target == nullptr || !target->occupied ||
             target->committed_interaction == EIDOLON_SCENE_INTERACTION_PASS_THROUGH) {
             continue;
         }
@@ -171,7 +172,12 @@ HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float cl
         }
         const size_t pixel = static_cast<size_t>(source_y) * static_cast<size_t>(target->width) +
                              static_cast<size_t>(source_x);
-        if (target->alpha_mask[pixel] > 8U) {
+        const bool routed_gpu_coverage =
+            !target->alpha_mask_valid &&
+            (target->committed_interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) != 0U;
+        if (routed_gpu_coverage ||
+            (target->alpha_mask_valid && target->alpha_mask != nullptr &&
+             target->alpha_mask[pixel] > 8U)) {
             result.target = target;
             result.layer_x = source_x;
             result.layer_y = source_y;
@@ -291,6 +297,35 @@ bool enqueue_pointer_event(Win32DcompPresentation *backend, EidolonPresentationE
     backend->pointer_layer_x = layer_x;
     backend->pointer_layer_y = layer_y;
     return accepted;
+}
+
+bool enqueue_pointer_wheel(Win32DcompPresentation *backend, const HitTestResult &hit, float host_x,
+                           float host_y, float wheel_x, float wheel_y, uint64_t buttons) {
+    if (backend == nullptr || hit.target == nullptr ||
+        (hit.target->committed_interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) == 0U) {
+        return false;
+    }
+    const EidolonPresentationGeometry geometry = current_geometry(backend);
+    EidolonPresentationEvent event = {};
+    event.kind = EIDOLON_PRESENTATION_EVENT_POINTER_WHEEL;
+    event.monotonic_ns = SDL_GetTicksNS();
+    event.host = {1U};
+    event.data.pointer.scene_revision = hit.target->committed_scene_revision;
+    event.data.pointer.pointer_id = 1U;
+    event.data.pointer.buttons = buttons;
+    event.data.pointer.modifiers = pointer_modifiers();
+    event.data.pointer.valid_coordinates = EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL;
+    event.data.pointer.layer = hit.target->layer;
+    event.data.pointer.device_kind = EIDOLON_PRESENTATION_POINTER_DEVICE_MOUSE;
+    event.data.pointer.host_x = host_x;
+    event.data.pointer.host_y = host_y;
+    event.data.pointer.layer_x = hit.layer_x;
+    event.data.pointer.layer_y = hit.layer_y;
+    event.data.pointer.global_x = static_cast<float>(geometry.x) + host_x;
+    event.data.pointer.global_y = static_cast<float>(geometry.y) + host_y;
+    event.data.pointer.wheel_x = wheel_x;
+    event.data.pointer.wheel_y = wheel_y;
+    return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
 void stop_pointer_routing(Win32DcompPresentation *backend, bool release_capture) {
@@ -505,6 +540,21 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
             stop_pointer_routing(backend, true);
         }
         return 0;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+        POINT cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ScreenToClient(window, &cursor);
+        const float host_x = static_cast<float>(cursor.x);
+        const float host_y = static_cast<float>(cursor.y);
+        const HitTestResult hit = hit_test(backend, host_x, host_y);
+        const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) /
+                            static_cast<float>(WHEEL_DELTA);
+        (void)enqueue_pointer_wheel(backend, hit, host_x, host_y,
+                                    message == WM_MOUSEHWHEEL ? steps : 0.0F,
+                                    message == WM_MOUSEWHEEL ? steps : 0.0F,
+                                    pointer_buttons(GET_KEYSTATE_WPARAM(wparam)));
+        return 0;
+    }
     case WM_LBUTTONUP: {
         const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
         const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
@@ -1327,6 +1377,7 @@ bool set_target_alpha_mask(void *opaque, EidolonPresentationTarget id, uint64_t 
             destination[x] = source[static_cast<size_t>(x) * pixel_stride + alpha_offset];
         }
     }
+    target->alpha_mask_valid = true;
     return true;
 }
 

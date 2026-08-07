@@ -32,6 +32,7 @@ float4 main(PixelInput input) : SV_Target0
     else if (alpha_mode < 1.5)
     {
         clip(color.a - alpha_cutoff);
+        color.a = 1.0;
     }
     return color;
 }

@@ -11,6 +11,7 @@ typedef enum EidolonAppMode {
 
 bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode);
 void eidolon_app_run(EidolonApp *app);
+void eidolon_app_pump_presentation_events(EidolonApp *app);
 void eidolon_app_set_state(EidolonApp *app, EidolonState state);
 bool eidolon_app_set_render_mode(EidolonApp *app, EidolonRenderMode mode);
 void eidolon_app_set_presentation_preference(EidolonApp *app,

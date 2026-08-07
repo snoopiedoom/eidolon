@@ -108,11 +108,12 @@ portrait presentation or source/session observation.
 The first slice contains neutral idle, listening/attention, thinking, streamed-response posture,
 eye-first/head-follow gaze, one restrained right-arm contrast gesture, interruption, explicit
 resource transfer, current-state cleanup, settling, deterministic trace, and the supported VRM 1.0
-reference body through the existing SDL 3D path. The current calibration-first extension measures
+reference body through the shared 3D body renderer. The current calibration-first extension measures
 the complete mapped semantic skeleton and transactionally loads partial user-approved anchor
 profiles; capture, calibrated program compilation, and application are the active next slices.
 
-It excludes DirectComposition 3D, default-3D selection, locomotion, balance/contact planning,
+DirectComposition target submission is now presentation integration around this slice, not EPR
+ownership. The EPR slice still excludes default-3D selection, locomotion, balance/contact planning,
 fingers, a gesture catalogue, learned generation, and arbitrary non-VRM humanoids.
 
 The VRM output is an experimental supported-reference-avatar slice, not broad VRM 1.0 support. Its

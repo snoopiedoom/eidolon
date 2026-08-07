@@ -55,7 +55,7 @@ records are semantic checkpoints rather than one record per 20 ms sample.
 - static absence of SDL, D3D11, DirectComposition, Win32, scene, and presentation ownership in EPR;
 - causal reconstruction from trace alone;
 - bounded frame/control work;
-- monotonic model consumption through the SDL 3D path while portrait remains default.
+- monotonic model consumption through the shared 3D renderer while portrait remains default.
 
 Fixtures use a fixed logical clock. Ordinary structural correctness requires no manual log
 inspection.

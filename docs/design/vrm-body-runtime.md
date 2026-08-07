@@ -276,11 +276,12 @@ measurement, versioned profile, interactive capture/application, and atomic-save
 implemented; calibrated program generation and a new owner review remain. Broad compatibility
 stays outside this claim.
 
-The visible calibration/review harness is a borderless transparent SDL authoring overlay, distinct
-from both headless snapshot mode and the portrait-only DirectComposition target path. Wheel scaling
-resizes the overlay around the body instead of magnifying into a fixed render rectangle, while the
-orthographic depth range contains the model's rotation-safe bind volume. DirectComposition 3D
-submission remains future presentation integration, not a capability of this reference slice.
+The visible calibration/review harness uses the shared borderless transparent DirectComposition
+body target and remains distinct from headless snapshot mode. Wheel scaling resizes the overlay
+around the body instead of magnifying into a fixed render rectangle, while the orthographic depth
+range contains the model's rotation-safe bind volume. The renderer submits directly to the native
+D3D11 target; projected skinned geometry supplies click-through without framebuffer readback. This
+is presentation integration around the reference slice, not new EPR or broad VRM ownership.
 
 Only then broaden compatibility through JPEG/URI decoding, authored samplers, material-color and
 texture-transform expressions, deliberate MToon fallback/shading, constraints, spring bones,

@@ -117,7 +117,8 @@ exit:
 
 `--snapshot-performance` accepts a fixed logical tick from 0 through 5000 milliseconds in 20 ms
 increments. It drives the synthetic EPR evidence fixture, projects the resulting canonical control
-through the supported reference VRM, and captures the existing SDL 3D path. It does not make 3D the
+through the supported reference VRM, and captures the deterministic legacy snapshot path. The
+visible calibration and review commands use the native desktop target. This does not make 3D the
 default, claim arbitrary VRM compatibility, or route the portrait renderer through EPR.
 The VRM must first be acquired manually and pass `make vrm-structure-check VRM_PATH=...`; set
 `EIDOLON_VRM_PATH` before invoking the snapshot. The runtime never performs VRoid Hub/Pixiv
@@ -125,8 +126,8 @@ authentication or asset download.
 
 Use `make vrm-performance-review VRM_PATH=...` to open the stable reference-body camera, play the
 complete scene in real time, and hold the final settled pose for one second. The manual harness
-then starts another pass after a one-second idle pre-roll; it remains open until the owner closes
-the window or presses Escape. Closing before one complete five-second pass reports failure.
+then starts another pass after a one-second idle pre-roll; it remains open until the owner stops
+the command with Ctrl+C. Stopping before one complete five-second pass reports failure.
 
 The first DECAGRAMMATON review accepted this camera/rig/harness path and rejected the provisional
 hard-coded pose authorship. Do not tune those poses from screenshots. The active workflow is to
@@ -135,12 +136,13 @@ adjust task-space handles, and save a matching `<model>.epr-calibration` sidecar
 and sidecar parser, frozen-anchor session, live task-space editor, deterministic serializer, and
 atomic save are implemented. Run `make vrm-calibrate VRM_PATH=...`. The calibrated-program compiler
 is next; loading or authoring a sidecar does not yet replace the provisional fixture endpoints.
-The calibration body runs in a visible authoring mode with the same borderless transparent SDL
-overlay flags as the ordinary legacy 3D path. It retains middle-drag/Shift+middle camera rotation;
+The calibration body runs in a visible authoring mode on the same borderless transparent
+DirectComposition target as the desktop 3D path. It retains middle-drag/Shift+middle camera rotation;
 the wheel resizes the overlay and its model together so zoom cannot crop against a fixed host.
 Double-middle resets both rotation and overlay size. The model depth projection encloses the full
 bind-volume diagonal so an arbitrary inspection rotation cannot push geometry through the depth
-planes. Native DirectComposition target submission is still portrait-only.
+planes. The model draws directly into the native D3D11 target, and its projected mesh supplies
+click-through geometry without a normal-frame framebuffer readback.
 
 ## VRM verification boundary
 
