@@ -148,7 +148,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   thinking, responding, contrast, and interrupted/guarded anchors, then judge the derived complete
   sequence. The first review accepted camera/rig/harness correctness and rejected the provisional
   hard-coded poses; calibrated compilation, EPR trace, control, projection, and fallback
-  verification are automated.
+  verification are automated. Acceptance commands now refuse partial sidecars and fail any traced
+  fallback or solve/projection rejection rather than silently reviewing degraded motion.
 
 The owner accepted ordinary no-environment DirectComposition portrait/dialogue startup, transparent
 per-pixel click-through, smooth native body dragging, cross-monitor movement, dialogue activation,

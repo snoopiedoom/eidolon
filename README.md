@@ -113,8 +113,11 @@ stores Pixiv credentials.
 
 `make vrm-structure-check` is the schema/profile preflight; `make vrm-check` remains its compatibility
 alias. `make vrm-runtime-check` drives the complete five-second fixture through buffer loading,
-geometry, textures, skinning, projection, shaders, and a hidden GPU frame. Passing both proves the
-selected reference path on that machine, not arbitrary VRM compatibility. The visible review target
+geometry, textures, skinning, projection, shaders, and a hidden GPU frame. Unlike ordinary partial
+playback, this acceptance command requires all eight calibrated anchors, rejects any realizer
+fallback or solve/projection rejection, requires an undropped trace and projected five-second
+endpoint, and reports the actual trace/control hashes. Passing both proves the selected reference
+path on that machine, not arbitrary VRM compatibility. The visible review target
 opens the native desktop 3D path for owner judgement. It repeats a one-second idle pre-roll, the complete
 five-second performance, and a one-second settled hold until the command is stopped with Ctrl+C.
 `make vrm-calibrate` freezes the same deterministic fixture at eight named semantic

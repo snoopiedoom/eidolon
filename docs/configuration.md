@@ -225,7 +225,10 @@ registry. Neither Make nor the runtime downloads the file or handles Pixiv crede
 
 `make vrm-structure-check` verifies only the structural/profile preflight; `make vrm-check` remains
 its compatibility alias. `make vrm-runtime-check` then loads and projects the complete deterministic
-scene through the real geometry, texture, skinning, shader, and hidden GPU path. The visible review
+scene through the real geometry, texture, skinning, shader, and hidden GPU path. Ordinary playback
+may use a partial sidecar with typed local degradation, but this acceptance target requires all
+eight anchors with their owned resources, an undropped five-second trace, no realization/solve/
+projection failure, and equality between the final control and projection revisions. The visible review
 target loops the complete five-second scene between one-second idle and settled holds until the
 owner closes it or presses Escape. It exists for acting judgement. Neither target establishes
 executable authored gaze or general VRM 1.0 compatibility. Those gates are defined by the

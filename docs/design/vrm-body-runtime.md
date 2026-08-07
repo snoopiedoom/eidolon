@@ -245,6 +245,11 @@ remains its compatibility alias. `make vrm-runtime-check VRM_PATH=...` invokes t
 renderer, advances all 251 fixture samples through projection, and requires geometry, decoded
 textures, GPU skinning state, shaders/pipeline state, and a presented hidden frame. Structural
 success alone remains insufficient, and runtime success applies only to the tested asset/machine.
+The acceptance command also requires the complete eight-anchor calibration/resource vocabulary,
+an undropped trace with no calibrated fallback or realization/solve/projection rejection, the
+five-second logical endpoint, and equality between final canonical-control and projected revisions.
+It logs the resulting trace and control hashes. Partial sidecars remain valid for ordinary local-
+degradation playback but cannot satisfy this gate or enter the visible owner-review harness.
 
 The compatibility corpus must cover, at minimum: no expressions, `relaxed` only, material-only
 expression, expression look-at, asymmetric bone look-at, per-material MToon, JPEG, URI images,

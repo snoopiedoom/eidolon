@@ -106,6 +106,41 @@ static void log_usage(void) {
                   "[--vrm-runtime-check <model.vrm>] [--hook <state>]");
 }
 
+static bool performance_trace_acceptance_clean(const EidolonPerformanceRuntime *runtime,
+                                               uint64_t minimum_sequence,
+                                               bool require_no_drops) {
+    bool projection_committed = false;
+    if (runtime == NULL) {
+        return SDL_SetError("EPR acceptance trace is unavailable");
+    }
+    if (require_no_drops && runtime->trace.dropped != 0U) {
+        return SDL_SetError("EPR acceptance trace dropped %llu records",
+                            (unsigned long long)runtime->trace.dropped);
+    }
+    for (size_t index = 0U; index < runtime->trace.count; ++index) {
+        const EidolonEprTraceRecord *record =
+            eidolon_epr_trace_record(&runtime->trace, index);
+        if (record == NULL || record->sequence < minimum_sequence) {
+            continue;
+        }
+        if (record->event == EIDOLON_EPR_TRACE_PROJECTION_COMMITTED) {
+            projection_committed = true;
+        }
+        if (record->event == EIDOLON_EPR_TRACE_REALIZER_FALLBACK ||
+            record->event == EIDOLON_EPR_TRACE_REALIZER_FAILED ||
+            record->event == EIDOLON_EPR_TRACE_SOLVE_REJECTED ||
+            record->event == EIDOLON_EPR_TRACE_PROJECTION_REJECTED) {
+            return SDL_SetError("EPR acceptance trace contains %s at tick %lld",
+                                eidolon_epr_trace_event_name(record->event),
+                                (long long)record->tick);
+        }
+    }
+    if (!projection_committed) {
+        return SDL_SetError("EPR acceptance trace contains no committed projection");
+    }
+    return true;
+}
+
 static bool run_performance_review(EidolonApp *app) {
     const uint64_t pre_roll_ms = 1000U;
     const uint64_t duration_ms = 5000U;
@@ -116,11 +151,14 @@ static bool run_performance_review(EidolonApp *app) {
     unsigned int completed_passes = 0U;
     bool pass_complete = false;
     bool running = true;
-    if (!eidolon_app_set_render_mode(app, EIDOLON_RENDER_MODE_MODEL_3D) ||
+    if (!eidolon_app_vrm_performance_acceptance_ready(app) ||
+        !eidolon_app_set_render_mode(app, EIDOLON_RENDER_MODE_MODEL_3D) ||
         (app->window != NULL && !SDL_ShowWindow(app->window))) {
         return false;
     }
-    SDL_Log("EPR performance review repeats until closed; press Escape after a complete pass");
+    uint64_t cycle_trace_sequence = app->performance_runtime.trace.next_sequence;
+    SDL_Log("EPR performance review verified all calibrated anchors and repeats until closed; "
+            "press Escape after a complete pass");
     cycle_started = SDL_GetTicks();
     while (running) {
         const uint64_t now = SDL_GetTicks();
@@ -145,6 +183,10 @@ static bool run_performance_review(EidolonApp *app) {
             next_tick += 20U;
         }
         if (!pass_complete && next_tick > duration_ms) {
+            if (!performance_trace_acceptance_clean(&app->performance_runtime,
+                                                    cycle_trace_sequence, false)) {
+                return false;
+            }
             pass_complete = true;
             completed_passes += 1U;
             SDL_Log("EPR performance review completed pass %u", completed_passes);
@@ -158,6 +200,7 @@ static bool run_performance_review(EidolonApp *app) {
             if (!eidolon_app_restart_performance_fixture(app, fixture_clock_ms)) {
                 return false;
             }
+            cycle_trace_sequence = app->performance_runtime.trace.next_sequence;
             next_tick = 0U;
             pass_complete = false;
             cycle_started = SDL_GetTicks();
@@ -500,7 +543,8 @@ int main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[1], "--vrm-runtime-check") == 0) {
         EidolonVrmRuntimeReport report;
         bool advanced = true;
-        bool ready = eidolon_app_set_render_mode(&app, EIDOLON_RENDER_MODE_MODEL_3D);
+        bool ready = eidolon_app_vrm_performance_acceptance_ready(&app) &&
+                     eidolon_app_set_render_mode(&app, EIDOLON_RENDER_MODE_MODEL_3D);
         const uint64_t previous_revision =
             ready ? eidolon_model_presented_transform_revision(app.model) : 0U;
         for (uint64_t tick = 0U; ready && tick <= 5000U; tick += 20U) {
@@ -510,14 +554,27 @@ int main(int argc, char **argv) {
             }
         }
         ready = ready && advanced && wait_for_pose_frame(&app, previous_revision) &&
-                eidolon_model_vrm_runtime_report(app.model, &report);
+                eidolon_model_vrm_runtime_report(app.model, &report) &&
+                performance_trace_acceptance_clean(&app.performance_runtime, 1U, true);
+        if (ready && (!app.performance_runtime.has_tick ||
+                      app.performance_runtime.last_tick != 5000)) {
+            ready = SDL_SetError("EPR runtime check did not reach the five-second endpoint");
+        }
+        if (ready && report.projection_revision != app.performance_runtime.control.revision) {
+            ready = SDL_SetError("EPR runtime check ended with an unprojected control revision");
+        }
         if (ready) {
             SDL_Log("vrm-runtime-check passed body=%s geometry=draws:%zu textures=%zu "
                     "skinning=joints:%zu shaders=ready projection=revision:%llu "
-                    "hidden-gpu-frame=sequence:%llu",
+                    "hidden-gpu-frame=sequence:%llu calibration=anchors:0x%02x "
+                    "epr-trace=records:%zu/hash:%016llx control=%016llx",
                     eidolon_model_body_name(app.model), report.draw_count, report.texture_count,
                     report.joint_count, (unsigned long long)report.projection_revision,
-                    (unsigned long long)report.frame_sequence);
+                    (unsigned long long)report.frame_sequence,
+                    EIDOLON_VRM_CALIBRATION_COMPLETE_ANCHOR_MASK,
+                    app.performance_runtime.trace.count,
+                    (unsigned long long)eidolon_epr_trace_hash(&app.performance_runtime.trace),
+                    (unsigned long long)app.performance_runtime.control.hash);
         } else {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "vrm-runtime-check failed: %s",
                          SDL_GetError());

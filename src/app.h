@@ -33,6 +33,7 @@ void eidolon_app_set_model_scale(EidolonApp *app, float scale);
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side);
 bool eidolon_app_update_performance_fixture(EidolonApp *app, uint64_t now_ms);
 bool eidolon_app_restart_performance_fixture(EidolonApp *app, uint64_t now_ms);
+bool eidolon_app_vrm_performance_acceptance_ready(const EidolonApp *app);
 bool eidolon_app_begin_vrm_calibration(EidolonApp *app, const char *path);
 bool eidolon_app_select_vrm_calibration_anchor(EidolonApp *app,
                                                EidolonVrmCalibrationAnchorId anchor);

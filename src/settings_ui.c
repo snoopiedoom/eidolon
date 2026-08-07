@@ -278,6 +278,11 @@ static void draw_vrm_calibration(EidolonApp *app) {
     ImGui_Text("anatomy: %016llx  |  accepted mask: 0x%02x",
                (unsigned long long)session->measurements.anatomy_fingerprint,
                session->working.anchor_mask);
+    char acceptance_error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    const bool acceptance_ready = eidolon_vrm_calibration_performance_complete(
+        &session->working, acceptance_error, sizeof(acceptance_error));
+    ImGui_TextWrapped("five-second gate: %s",
+                      acceptance_ready ? "all anchors ready" : acceptance_error);
 
     const bool torso_owned =
         calibration_resource_owned(draft, EIDOLON_EPR_RESOURCE_TORSO);

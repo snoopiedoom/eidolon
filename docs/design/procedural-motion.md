@@ -221,3 +221,9 @@ authoring format.
 - manual model rotation does not alter the authored pose state;
 - secondary motion settles after an impulse;
 - a missing or unmapped optional bone degrades locally rather than breaking the model.
+
+Ordinary playback deliberately accepts partial progress under those degradation rules. Acceptance
+is stricter: both the hidden runtime gate and visible performance review require all eight anchors
+with the resources owned by their behavior family. The hidden gate additionally rejects dropped
+trace records, realizer fallback/failure, solve/projection rejection, an incomplete five-second
+clock, or a final control revision that was not projected.

@@ -32,6 +32,9 @@ typedef enum EidolonVrmCalibrationAnchorId {
     EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT,
 } EidolonVrmCalibrationAnchorId;
 
+#define EIDOLON_VRM_CALIBRATION_COMPLETE_ANCHOR_MASK                                      \
+    ((UINT32_C(1) << (uint32_t)EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT) - UINT32_C(1))
+
 typedef struct EidolonVrmBoneMeasurement {
     float bind_position[3];
     /* Distance from the nearest present semantic humanoid parent. */
@@ -91,6 +94,8 @@ bool eidolon_vrm_calibration_set_anchor(EidolonVrmCalibration *calibration,
 bool eidolon_vrm_calibration_validate(const EidolonVrmCalibration *calibration,
                                       const EidolonVrmMeasurements *measurements, char *error,
                                       size_t error_capacity);
+bool eidolon_vrm_calibration_performance_complete(const EidolonVrmCalibration *calibration,
+                                                  char *error, size_t error_capacity);
 bool eidolon_vrm_calibration_parse(const char *text, size_t size,
                                    const EidolonVrmMeasurements *measurements,
                                    EidolonVrmCalibration *calibration, char *error,

@@ -2017,6 +2017,24 @@ bool eidolon_app_restart_performance_fixture(EidolonApp *app, uint64_t now_ms) {
     return true;
 }
 
+bool eidolon_app_vrm_performance_acceptance_ready(const EidolonApp *app) {
+    EidolonVrmCalibration calibration;
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    if (app == NULL || app->model == NULL) {
+        return SDL_SetError("calibrated EPR performance model is unavailable");
+    }
+    if (!eidolon_model_vrm_calibration(app->model, &calibration)) {
+        return SDL_SetError("calibrated EPR performance sidecar is unavailable");
+    }
+    if (!eidolon_vrm_calibration_performance_complete(&calibration, error, sizeof(error))) {
+        return SDL_SetError("%s", error);
+    }
+    if (!app->performance_runtime_ready) {
+        return SDL_SetError("complete calibration could not initialize the EPR performance runtime");
+    }
+    return true;
+}
+
 static bool calibration_bind_control(const EidolonEprBodyProfile *body,
                                      const EidolonVrmMeasurements *measurements,
                                      EidolonEprTick tick, EidolonCanonicalControl *control) {

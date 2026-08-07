@@ -454,6 +454,47 @@ bool eidolon_vrm_calibration_validate(const EidolonVrmCalibration *calibration,
     return true;
 }
 
+bool eidolon_vrm_calibration_performance_complete(const EidolonVrmCalibration *calibration,
+                                                  char *error, size_t error_capacity) {
+    const uint32_t posture_resources =
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_TORSO) |
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) |
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+    const uint32_t gesture_resources =
+        UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    if (calibration == NULL || calibration->version != EIDOLON_VRM_CALIBRATION_VERSION) {
+        set_error(error, error_capacity, "performance calibration is unavailable or invalid");
+        return false;
+    }
+    for (size_t index = 0U; index < EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++index) {
+        const uint32_t bit = UINT32_C(1) << (uint32_t)index;
+        if ((calibration->anchor_mask & bit) == 0U ||
+            !calibration->anchors[index].calibrated) {
+            set_error(error, error_capacity, "performance calibration is missing anchor '%s'",
+                      ANCHOR_NAMES[index]);
+            return false;
+        }
+        const bool gesture = index == EIDOLON_VRM_CALIBRATION_CONTRAST_PREPARATION ||
+                             index == EIDOLON_VRM_CALIBRATION_CONTRAST_PEAK ||
+                             index == EIDOLON_VRM_CALIBRATION_CONTRAST_RECOVERY;
+        const uint32_t required = gesture ? gesture_resources : posture_resources;
+        if ((calibration->anchors[index].resource_mask & required) != required) {
+            set_error(error, error_capacity,
+                      "performance calibration anchor '%s' is missing required resources",
+                      ANCHOR_NAMES[index]);
+            return false;
+        }
+    }
+    if (calibration->anchor_mask != EIDOLON_VRM_CALIBRATION_COMPLETE_ANCHOR_MASK) {
+        set_error(error, error_capacity, "performance calibration has unknown anchor state");
+        return false;
+    }
+    if (error != NULL && error_capacity > 0U) {
+        error[0] = '\0';
+    }
+    return true;
+}
+
 _Static_assert(EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT == EIDOLON_EPR_POSE_ANCHOR_COUNT,
                "VRM and EPR calibration anchor registries must remain aligned");
 

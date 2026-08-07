@@ -231,6 +231,36 @@ static EidolonVrmCalibrationAnchor test_anchor(uint32_t resources, float torso_p
     return anchor;
 }
 
+static void test_performance_completion_requires_every_owned_anchor(void) {
+    const EidolonVrmMeasurements measurements = measured_fixture();
+    EidolonVrmCalibration calibration;
+    char error[256];
+    const uint32_t posture_resources =
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_TORSO) |
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) |
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+    const uint32_t gesture_resources =
+        UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    eidolon_vrm_calibration_init(&calibration, measurements.anatomy_fingerprint);
+    assert(!eidolon_vrm_calibration_performance_complete(&calibration, error, sizeof(error)));
+    assert(strstr(error, "neutral") != NULL);
+    for (size_t index = 0U; index < EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++index) {
+        const bool gesture = index == EIDOLON_VRM_CALIBRATION_CONTRAST_PREPARATION ||
+                             index == EIDOLON_VRM_CALIBRATION_CONTRAST_PEAK ||
+                             index == EIDOLON_VRM_CALIBRATION_CONTRAST_RECOVERY;
+        EidolonVrmCalibrationAnchor anchor =
+            test_anchor(gesture ? gesture_resources : posture_resources, 0.01F, 0.02F, 0.40F);
+        assert(eidolon_vrm_calibration_set_anchor(
+            &calibration, (EidolonVrmCalibrationAnchorId)index, &anchor, error, sizeof(error)));
+    }
+    assert(calibration.anchor_mask == EIDOLON_VRM_CALIBRATION_COMPLETE_ANCHOR_MASK);
+    assert(eidolon_vrm_calibration_performance_complete(&calibration, error, sizeof(error)));
+    calibration.anchors[EIDOLON_VRM_CALIBRATION_ATTENTIVE].resource_mask &=
+        ~(UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD);
+    assert(!eidolon_vrm_calibration_performance_complete(&calibration, error, sizeof(error)));
+    assert(strstr(error, "resources") != NULL);
+}
+
 static void test_calibration_compiles_transactionally_to_epr_profile(void) {
     const EidolonVrmMeasurements measurements = measured_fixture();
     EidolonEprBodyProfile body = body_profile(&measurements);
@@ -330,6 +360,7 @@ int main(void) {
     test_measurements_fingerprint_anatomy();
     test_partial_sidecar_is_transactional();
     test_invalid_anchor_does_not_commit();
+    test_performance_completion_requires_every_owned_anchor();
     test_calibration_compiles_transactionally_to_epr_profile();
     test_calibration_session_is_model_relative_and_transactional();
     puts("vrm calibration tests passed");

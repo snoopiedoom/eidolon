@@ -127,7 +127,9 @@ authentication or asset download.
 Use `make vrm-performance-review VRM_PATH=...` to open the stable reference-body camera, play the
 complete scene in real time, and hold the final settled pose for one second. The manual harness
 then starts another pass after a one-second idle pre-roll; it remains open until the owner stops
-the command with Ctrl+C. Stopping before one complete five-second pass reports failure.
+the command with Ctrl+C. It refuses incomplete calibration, and a pass containing a realizer
+fallback or solve/projection rejection is not counted. Stopping before one clean five-second pass
+reports failure.
 
 The first DECAGRAMMATON review accepted this camera/rig/harness path and rejected the provisional
 hard-coded pose authorship. Do not tune those poses from screenshots. The active workflow is to
@@ -160,8 +162,9 @@ The executable half uses the product renderer rather than a second importer:
 
 ```text
 vrm-structure-check  implemented: schema, humanoid semantics, metadata, capability truth
-vrm-runtime-check    implemented: buffers, geometry, textures, skinning, projection, shaders,
-                     the complete five-second fixture, and a hidden presented GPU frame
+vrm-runtime-check    implemented: complete eight-anchor calibration, buffers, geometry, textures,
+                     skinning, projection, shaders, hidden GPU frame, clean deterministic trace,
+                     and projected five-second endpoint
 vrm calibration      implemented authoring slice: measurements, anatomy fingerprint, named fixture
                      capture, live task-space projection, partial sidecar parse/write, atomic save
 ```
