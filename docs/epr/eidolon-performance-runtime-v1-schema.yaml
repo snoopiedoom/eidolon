@@ -806,6 +806,7 @@ vrm_character_package_example:
       finger_forward: calibrated
 
   measurements:
+    anatomy_fingerprint: "sha256-or-compiled-semantic-measurement-id"
     height_m: 1.61
     shoulder_width_m: 0.355
     hip_width_m: 0.278
@@ -816,6 +817,27 @@ vrm_character_package_example:
     lower_arm_length_m:
       left: 0.248
       right: 0.248
+    per_humanoid_role:
+      source: authoritative_bind_world_positions
+      length_definition: nearest_present_semantic_parent
+
+  semantic_calibration:
+    source: character.vrm.epr-calibration
+    partial: true
+    anchor_vocabulary:
+      - neutral
+      - attentive
+      - thinking
+      - responding
+      - contrast_preparation
+      - contrast_peak
+      - contrast_recovery
+      - interrupted_guarded
+    representation:
+      primary: normalized_task_space
+      optional_model_local_correction: quaternion_residual
+    missing_anchor: local_degradation
+    guessed_model_specific_fallback: forbidden
 
   preferred_bends:
     elbow.left: [0.18, -0.70, 0.69]

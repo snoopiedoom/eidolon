@@ -81,6 +81,18 @@ implementation such as Live2D. The same abstract performance intent should degra
 body's capabilities. Ordinary users should eventually choose a character package whose intended
 body is already selected; renderer overrides belong in advanced and authoring controls.
 
+Shared art direction and renderer-neutral evidence do not require one universal body runtime. The
+2D portrait director and rigged-3D EPR system are independent implementations that coexist behind
+the same persona, session, dialogue, selection, scene, and presentation boundaries. Making a 3D
+body the eventual default must not retire or internally absorb the 2D bodies.
+
+Rigged-3D character adaptation is calibration-first. Eidolon should measure the selected body's
+humanoid axes, segment lengths, and proportions, then let the user approve a small semantic pose
+vocabulary inside the live performance runtime. EPR derives timing, strength, transition,
+interruption, and settling from that body-relative evidence. This avoids promising that one table
+of hard-coded poses will act correctly on every model; optional authored motion remains available
+for genuinely distinct motion families.
+
 The current implementation still selects a global renderer and does not yet implement the complete
 character-package abstraction. See the
 [body-capabilities specification](design/body-capabilities.md).

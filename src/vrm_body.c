@@ -224,6 +224,87 @@ static bool json_float(JsonSpan span, float *value) {
     return true;
 }
 
+static bool json_bool(JsonSpan span, bool *value) {
+    const char *begin = skip_space(span.begin, span.end);
+    const size_t length = (size_t)(span.end - begin);
+    if (value == NULL) {
+        return false;
+    }
+    if (length == 4U && memcmp(begin, "true", 4U) == 0) {
+        *value = true;
+        return true;
+    }
+    if (length == 5U && memcmp(begin, "false", 5U) == 0) {
+        *value = false;
+        return true;
+    }
+    return false;
+}
+
+static bool json_array_count(JsonSpan array, size_t *count) {
+    const char *cursor = skip_space(array.begin, array.end);
+    size_t result = 0U;
+    if (count == NULL || cursor >= array.end || *cursor != '[') {
+        return false;
+    }
+    cursor += 1;
+    for (;;) {
+        const char *value_end;
+        cursor = skip_space(cursor, array.end);
+        if (cursor >= array.end) {
+            return false;
+        }
+        if (*cursor == ']') {
+            *count = result;
+            return true;
+        }
+        value_end = skip_value(cursor, array.end, 0U);
+        if (value_end == NULL) {
+            return false;
+        }
+        result += 1U;
+        cursor = skip_space(value_end, array.end);
+        if (cursor < array.end && *cursor == ',') {
+            cursor += 1;
+            continue;
+        }
+        if (cursor < array.end && *cursor == ']') {
+            *count = result;
+            return true;
+        }
+        return false;
+    }
+}
+
+static bool json_float_array(JsonSpan array, float *values, size_t value_count) {
+    const char *cursor = skip_space(array.begin, array.end);
+    if (values == NULL || cursor >= array.end || *cursor != '[') {
+        return false;
+    }
+    cursor += 1;
+    for (size_t index = 0; index < value_count; ++index) {
+        JsonSpan value;
+        cursor = skip_space(cursor, array.end);
+        if (cursor >= array.end || *cursor == ']') {
+            return false;
+        }
+        value.begin = cursor;
+        value.end = skip_value(cursor, array.end, 0U);
+        if (value.end == NULL || !json_float(value, &values[index])) {
+            return false;
+        }
+        cursor = skip_space(value.end, array.end);
+        if (index + 1U < value_count) {
+            if (cursor >= array.end || *cursor != ',') {
+                return false;
+            }
+            cursor += 1;
+        }
+    }
+    cursor = skip_space(cursor, array.end);
+    return cursor < array.end && *cursor == ']';
+}
+
 static int hex_digit(char value) {
     if (value >= '0' && value <= '9') {
         return value - '0';
@@ -240,6 +321,9 @@ static int hex_digit(char value) {
 static bool append_utf8(char *output, size_t capacity, size_t *length, uint32_t codepoint) {
     unsigned char bytes[4];
     size_t count;
+    if (codepoint > 0x10ffffU || (codepoint >= 0xd800U && codepoint <= 0xdfffU)) {
+        return false;
+    }
     if (codepoint <= 0x7fU) {
         bytes[0] = (unsigned char)codepoint;
         count = 1U;
@@ -247,11 +331,17 @@ static bool append_utf8(char *output, size_t capacity, size_t *length, uint32_t 
         bytes[0] = (unsigned char)(0xc0U | (codepoint >> 6U));
         bytes[1] = (unsigned char)(0x80U | (codepoint & 0x3fU));
         count = 2U;
-    } else {
+    } else if (codepoint <= 0xffffU) {
         bytes[0] = (unsigned char)(0xe0U | (codepoint >> 12U));
         bytes[1] = (unsigned char)(0x80U | ((codepoint >> 6U) & 0x3fU));
         bytes[2] = (unsigned char)(0x80U | (codepoint & 0x3fU));
         count = 3U;
+    } else {
+        bytes[0] = (unsigned char)(0xf0U | (codepoint >> 18U));
+        bytes[1] = (unsigned char)(0x80U | ((codepoint >> 12U) & 0x3fU));
+        bytes[2] = (unsigned char)(0x80U | ((codepoint >> 6U) & 0x3fU));
+        bytes[3] = (unsigned char)(0x80U | (codepoint & 0x3fU));
+        count = 4U;
     }
     if (*length + count >= capacity) {
         return false;
@@ -300,6 +390,28 @@ static bool json_string(JsonSpan span, char *output, size_t capacity) {
                 codepoint = (codepoint << 4U) | (uint32_t)digit;
             }
             cursor += 4;
+            if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+                uint32_t low = 0U;
+                if (cursor + 6 > span.end - 1 || cursor[0] != '\\' || cursor[1] != 'u') {
+                    return false;
+                }
+                cursor += 2;
+                for (size_t index = 0; index < 4U; ++index) {
+                    const int digit = hex_digit(cursor[index]);
+                    if (digit < 0) {
+                        return false;
+                    }
+                    low = (low << 4U) | (uint32_t)digit;
+                }
+                if (low < 0xdc00U || low > 0xdfffU) {
+                    return false;
+                }
+                cursor += 4;
+                codepoint = UINT32_C(0x10000) + ((codepoint - UINT32_C(0xd800)) << 10U) +
+                            (low - UINT32_C(0xdc00));
+            } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+                return false;
+            }
             if (!append_utf8(output, capacity, &length, codepoint)) {
                 return false;
             }
@@ -331,23 +443,41 @@ static bool first_array_string(JsonSpan array, char *output, size_t capacity) {
     return first.end != NULL && json_string(first, output, capacity);
 }
 
-static const cgltf_extension *find_extension(const cgltf_data *data, const char *name) {
-    for (cgltf_size index = 0; index < data->data_extensions_count; ++index) {
-        const cgltf_extension *extension = &data->data_extensions[index];
-        if (extension->name != NULL && extension->data != NULL &&
-            strcmp(extension->name, name) == 0) {
+static const cgltf_extension *find_scoped_extension(const cgltf_extension *extensions,
+                                                    cgltf_size extension_count,
+                                                    const char *name) {
+    for (cgltf_size index = 0; index < extension_count; ++index) {
+        const cgltf_extension *extension = &extensions[index];
+        if (extension->name != NULL && strcmp(extension->name, name) == 0) {
             return extension;
         }
     }
     return NULL;
 }
 
-static bool parse_expression_binds(JsonSpan expression, EidolonVrmExpressionBind *binds,
-                                   size_t *bind_count) {
+static const cgltf_extension *find_extension(const cgltf_data *data, const char *name) {
+    return find_scoped_extension(data->data_extensions, data->data_extensions_count, name);
+}
+
+const char *eidolon_vrm_capability_state_name(EidolonVrmCapabilityState state) {
+    switch (state) {
+        case EIDOLON_VRM_CAPABILITY_ABSENT:
+            return "absent";
+        case EIDOLON_VRM_CAPABILITY_DECLARED:
+            return "declared";
+        case EIDOLON_VRM_CAPABILITY_PARSED:
+            return "parsed-not-executable";
+        case EIDOLON_VRM_CAPABILITY_EXECUTABLE:
+            return "executable";
+        default:
+            return "invalid";
+    }
+}
+
+static bool parse_expression_binds(JsonSpan expression, EidolonVrmExpression *result) {
     JsonSpan array;
     const char *cursor;
     if (!object_member(expression, "morphTargetBinds", &array)) {
-        *bind_count = 0U;
         return true;
     }
     cursor = skip_space(array.begin, array.end);
@@ -355,7 +485,6 @@ static bool parse_expression_binds(JsonSpan expression, EidolonVrmExpressionBind
         return false;
     }
     cursor += 1;
-    *bind_count = 0U;
     for (;;) {
         JsonSpan bind;
         JsonSpan node_span;
@@ -368,9 +497,6 @@ static bool parse_expression_binds(JsonSpan expression, EidolonVrmExpressionBind
         cursor = skip_space(cursor, array.end);
         if (cursor >= array.end || *cursor == ']') {
             return true;
-        }
-        if (*bind_count >= EIDOLON_VRM_EXPRESSION_BIND_CAPACITY) {
-            return false;
         }
         bind.begin = cursor;
         end = skip_value(cursor, array.end, 0U);
@@ -385,10 +511,15 @@ static bool parse_expression_binds(JsonSpan expression, EidolonVrmExpressionBind
             target < 0 || weight < 0.0F || weight > 1.0F) {
             return false;
         }
-        binds[*bind_count].node = (size_t)node;
-        binds[*bind_count].target = (size_t)target;
-        binds[*bind_count].weight = weight;
-        *bind_count += 1U;
+        if (result->declared_morph_bind_count < EIDOLON_VRM_EXPRESSION_BIND_CAPACITY) {
+            EidolonVrmExpressionBind *stored =
+                &result->morph_binds[result->declared_morph_bind_count];
+            stored->node = (size_t)node;
+            stored->target = (size_t)target;
+            stored->weight = weight;
+            result->morph_bind_count += 1U;
+        }
+        result->declared_morph_bind_count += 1U;
         cursor = skip_space(end, array.end);
         if (cursor < array.end && *cursor == ',') {
             cursor += 1;
@@ -469,6 +600,152 @@ static bool parse_bones(JsonSpan root, const cgltf_data *data, EidolonVrmBody *b
     return true;
 }
 
+static const char *bone_name(EidolonVrmHumanBone bone) {
+    for (size_t index = 0; index < sizeof(BONE_NAMES) / sizeof(BONE_NAMES[0]); ++index) {
+        if (BONE_NAMES[index].bone == bone) {
+            return BONE_NAMES[index].name;
+        }
+    }
+    return "unknown";
+}
+
+static EidolonVrmHumanBone torso_parent(const EidolonVrmBody *body) {
+    if (body->node_by_bone[EIDOLON_VRM_BONE_UPPER_CHEST] >= 0) {
+        return EIDOLON_VRM_BONE_UPPER_CHEST;
+    }
+    if (body->node_by_bone[EIDOLON_VRM_BONE_CHEST] >= 0) {
+        return EIDOLON_VRM_BONE_CHEST;
+    }
+    return EIDOLON_VRM_BONE_SPINE;
+}
+
+static EidolonVrmHumanBone expected_humanoid_parent(EidolonVrmHumanBone bone,
+                                                     const EidolonVrmBody *body) {
+    switch (bone) {
+        case EIDOLON_VRM_BONE_HIPS:
+            return EIDOLON_VRM_BONE_COUNT;
+        case EIDOLON_VRM_BONE_SPINE:
+            return EIDOLON_VRM_BONE_HIPS;
+        case EIDOLON_VRM_BONE_CHEST:
+            return EIDOLON_VRM_BONE_SPINE;
+        case EIDOLON_VRM_BONE_UPPER_CHEST:
+            return EIDOLON_VRM_BONE_CHEST;
+        case EIDOLON_VRM_BONE_NECK:
+            return torso_parent(body);
+        case EIDOLON_VRM_BONE_HEAD:
+            return body->node_by_bone[EIDOLON_VRM_BONE_NECK] >= 0 ? EIDOLON_VRM_BONE_NECK
+                                                                  : torso_parent(body);
+        case EIDOLON_VRM_BONE_LEFT_EYE:
+        case EIDOLON_VRM_BONE_RIGHT_EYE:
+            return EIDOLON_VRM_BONE_HEAD;
+        case EIDOLON_VRM_BONE_LEFT_UPPER_LEG:
+        case EIDOLON_VRM_BONE_RIGHT_UPPER_LEG:
+            return EIDOLON_VRM_BONE_HIPS;
+        case EIDOLON_VRM_BONE_LEFT_LOWER_LEG:
+            return EIDOLON_VRM_BONE_LEFT_UPPER_LEG;
+        case EIDOLON_VRM_BONE_LEFT_FOOT:
+            return EIDOLON_VRM_BONE_LEFT_LOWER_LEG;
+        case EIDOLON_VRM_BONE_RIGHT_LOWER_LEG:
+            return EIDOLON_VRM_BONE_RIGHT_UPPER_LEG;
+        case EIDOLON_VRM_BONE_RIGHT_FOOT:
+            return EIDOLON_VRM_BONE_RIGHT_LOWER_LEG;
+        case EIDOLON_VRM_BONE_LEFT_SHOULDER:
+        case EIDOLON_VRM_BONE_RIGHT_SHOULDER:
+            return torso_parent(body);
+        case EIDOLON_VRM_BONE_LEFT_UPPER_ARM:
+            return body->node_by_bone[EIDOLON_VRM_BONE_LEFT_SHOULDER] >= 0
+                       ? EIDOLON_VRM_BONE_LEFT_SHOULDER
+                       : torso_parent(body);
+        case EIDOLON_VRM_BONE_LEFT_LOWER_ARM:
+            return EIDOLON_VRM_BONE_LEFT_UPPER_ARM;
+        case EIDOLON_VRM_BONE_LEFT_HAND:
+            return EIDOLON_VRM_BONE_LEFT_LOWER_ARM;
+        case EIDOLON_VRM_BONE_RIGHT_UPPER_ARM:
+            return body->node_by_bone[EIDOLON_VRM_BONE_RIGHT_SHOULDER] >= 0
+                       ? EIDOLON_VRM_BONE_RIGHT_SHOULDER
+                       : torso_parent(body);
+        case EIDOLON_VRM_BONE_RIGHT_LOWER_ARM:
+            return EIDOLON_VRM_BONE_RIGHT_UPPER_ARM;
+        case EIDOLON_VRM_BONE_RIGHT_HAND:
+            return EIDOLON_VRM_BONE_RIGHT_LOWER_ARM;
+        default:
+            return EIDOLON_VRM_BONE_COUNT;
+    }
+}
+
+static bool nearest_humanoid_parent(const cgltf_data *data, const EidolonVrmBody *body,
+                                    EidolonVrmHumanBone bone,
+                                    EidolonVrmHumanBone *parent_bone) {
+    const int node_index = body->node_by_bone[(size_t)bone];
+    const cgltf_node *node = &data->nodes[(size_t)node_index];
+    size_t remaining = (size_t)data->nodes_count + 1U;
+    node = node->parent;
+    while (node != NULL && remaining > 0U) {
+        const ptrdiff_t index = node - data->nodes;
+        if (index < 0 || (size_t)index >= (size_t)data->nodes_count) {
+            return false;
+        }
+        for (size_t candidate = 0; candidate < EIDOLON_VRM_BONE_COUNT; ++candidate) {
+            if (body->node_by_bone[candidate] == (int)index) {
+                *parent_bone = (EidolonVrmHumanBone)candidate;
+                return true;
+            }
+        }
+        node = node->parent;
+        remaining -= 1U;
+    }
+    if (node != NULL) {
+        return false;
+    }
+    *parent_bone = EIDOLON_VRM_BONE_COUNT;
+    return true;
+}
+
+static bool validate_humanoid_structure(const cgltf_data *data, const EidolonVrmBody *body,
+                                        char *error, size_t error_capacity) {
+    for (size_t index = 0; index < (size_t)data->nodes_count; ++index) {
+        if (data->nodes[index].has_matrix) {
+            set_error(error, error_capacity,
+                      "matrix node %zu is unsupported by the reference-avatar runtime", index);
+            return false;
+        }
+    }
+    for (size_t index = 0; index < EIDOLON_VRM_BONE_COUNT; ++index) {
+        EidolonVrmHumanBone actual_parent;
+        const EidolonVrmHumanBone bone = (EidolonVrmHumanBone)index;
+        const int node_index = body->node_by_bone[index];
+        if (node_index < 0) {
+            continue;
+        }
+        const cgltf_node *node = &data->nodes[(size_t)node_index];
+        for (size_t axis = 0; axis < 3U; ++axis) {
+            if (!isfinite(node->scale[axis]) || node->scale[axis] <= 0.0F) {
+                set_error(error, error_capacity,
+                          "VRM humanoid bone '%s' has non-positive scale on axis %zu",
+                          bone_name(bone), axis);
+                return false;
+            }
+        }
+        if (!nearest_humanoid_parent(data, body, bone, &actual_parent)) {
+            set_error(error, error_capacity, "VRM humanoid bone '%s' has an invalid parent chain",
+                      bone_name(bone));
+            return false;
+        }
+        const EidolonVrmHumanBone expected_parent = expected_humanoid_parent(bone, body);
+        if (actual_parent != expected_parent) {
+            set_error(error, error_capacity,
+                      "VRM humanoid bone '%s' must descend from '%s' (nearest humanoid parent is "
+                      "'%s')",
+                      bone_name(bone),
+                      expected_parent < EIDOLON_VRM_BONE_COUNT ? bone_name(expected_parent)
+                                                               : "root",
+                      actual_parent < EIDOLON_VRM_BONE_COUNT ? bone_name(actual_parent) : "root");
+            return false;
+        }
+    }
+    return true;
+}
+
 static const cgltf_accessor *morph_position_accessor(const cgltf_primitive *primitive,
                                                      size_t target) {
     if (target >= (size_t)primitive->targets_count) {
@@ -507,30 +784,202 @@ static bool expression_bind_is_realizable(const cgltf_data *data,
     return has_position_delta;
 }
 
-static bool parse_expressions(JsonSpan root, const cgltf_data *data, EidolonVrmBody *body) {
+static bool expression_array_count(JsonSpan expression, const char *name, size_t *count) {
+    JsonSpan array;
+    *count = 0U;
+    return !object_member(expression, name, &array) || json_array_count(array, count);
+}
+
+static void parse_expression(JsonSpan expression, const cgltf_data *data,
+                             EidolonVrmExpression *result) {
+    JsonSpan value;
+    memset(result, 0, sizeof(*result));
+    result->state = EIDOLON_VRM_CAPABILITY_DECLARED;
+    if (object_member(expression, "isBinary", &value) && !json_bool(value, &result->is_binary)) {
+        set_error(result->diagnostic, sizeof(result->diagnostic), "invalid isBinary value");
+        return;
+    }
+    if (!parse_expression_binds(expression, result) ||
+        !expression_array_count(expression, "materialColorBinds",
+                                &result->material_color_bind_count) ||
+        !expression_array_count(expression, "textureTransformBinds",
+                                &result->texture_transform_bind_count)) {
+        set_error(result->diagnostic, sizeof(result->diagnostic),
+                  "expression bind declaration is malformed");
+        return;
+    }
+
+    result->state = EIDOLON_VRM_CAPABILITY_PARSED;
+    if (result->declared_morph_bind_count > EIDOLON_VRM_EXPRESSION_BIND_CAPACITY) {
+        set_error(result->diagnostic, sizeof(result->diagnostic),
+                  "morph bind count %zu exceeds executable capacity %u",
+                  result->declared_morph_bind_count, EIDOLON_VRM_EXPRESSION_BIND_CAPACITY);
+        return;
+    }
+    for (size_t index = 0; index < result->morph_bind_count; ++index) {
+        if (!expression_bind_is_realizable(data, &result->morph_binds[index])) {
+            set_error(result->diagnostic, sizeof(result->diagnostic),
+                      "morph bind %zu has no executable position target", index);
+            return;
+        }
+    }
+    if (result->material_color_bind_count > 0U || result->texture_transform_bind_count > 0U) {
+        result->state = EIDOLON_VRM_CAPABILITY_DECLARED;
+        set_error(result->diagnostic, sizeof(result->diagnostic),
+                  "material-color/texture-transform binds are declared but not parsed or "
+                  "executable");
+        return;
+    }
+    if (result->morph_bind_count == 0U) {
+        set_error(result->diagnostic, sizeof(result->diagnostic),
+                  "expression has no executable position-morph binds");
+        return;
+    }
+    result->state = EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    set_error(result->diagnostic, sizeof(result->diagnostic), "%zu position-morph bind(s)",
+              result->morph_bind_count);
+}
+
+static void expression_absent(EidolonVrmExpression *expression) {
+    memset(expression, 0, sizeof(*expression));
+    expression->state = EIDOLON_VRM_CAPABILITY_ABSENT;
+    set_error(expression->diagnostic, sizeof(expression->diagnostic), "not declared");
+}
+
+static void parse_expressions(JsonSpan root, const cgltf_data *data, EidolonVrmBody *body) {
     JsonSpan expressions;
     JsonSpan preset;
-    JsonSpan neutral;
-    JsonSpan focused;
+    JsonSpan expression;
+    expression_absent(&body->neutral_expression);
+    expression_absent(&body->relaxed_expression);
     if (!object_member(root, "expressions", &expressions) ||
-        !object_member(expressions, "preset", &preset) ||
-        !object_member(preset, "neutral", &neutral) ||
-        !object_member(preset, "relaxed", &focused) ||
-        !parse_expression_binds(neutral, body->neutral_binds, &body->neutral_bind_count) ||
-        !parse_expression_binds(focused, body->focused_binds, &body->focused_bind_count)) {
-        return false;
+        !object_member(expressions, "preset", &preset)) {
+        return;
     }
-    for (size_t index = 0; index < body->neutral_bind_count; ++index) {
-        if (!expression_bind_is_realizable(data, &body->neutral_binds[index])) {
+    if (object_member(preset, "neutral", &expression)) {
+        parse_expression(expression, data, &body->neutral_expression);
+    }
+    if (object_member(preset, "relaxed", &expression)) {
+        parse_expression(expression, data, &body->relaxed_expression);
+    }
+}
+
+static bool parse_range_map(JsonSpan look_at, const char *name, EidolonVrmLookAtRangeMap *map) {
+    JsonSpan object;
+    JsonSpan value;
+    memset(map, 0, sizeof(*map));
+    if (!object_member(look_at, name, &object)) {
+        return true;
+    }
+    map->present = true;
+    if (object_member(object, "inputMaxValue", &value)) {
+        if (!json_float(value, &map->input_max_degrees) || map->input_max_degrees < 0.0F ||
+            map->input_max_degrees > 180.0F) {
+            return false;
+        }
+        map->has_input_max = true;
+    }
+    if (object_member(object, "outputScale", &value)) {
+        if (!json_float(value, &map->output_scale)) {
+            return false;
+        }
+        map->has_output_scale = true;
+    }
+    return true;
+}
+
+static void parse_look_at(JsonSpan root, EidolonVrmBody *body) {
+    JsonSpan look_at;
+    JsonSpan value;
+    char type[16];
+    memset(&body->look_at, 0, sizeof(body->look_at));
+    body->look_at.state = EIDOLON_VRM_CAPABILITY_ABSENT;
+    set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic), "not declared");
+    if (!object_member(root, "lookAt", &look_at)) {
+        return;
+    }
+    body->look_at.state = EIDOLON_VRM_CAPABILITY_DECLARED;
+    if (object_member(look_at, "type", &value)) {
+        if (!json_string(value, type, sizeof(type))) {
+            set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
+                      "lookAt.type is malformed");
+            return;
+        }
+        if (strcmp(type, "bone") == 0) {
+            body->look_at.type = EIDOLON_VRM_LOOK_AT_BONE;
+        } else if (strcmp(type, "expression") == 0) {
+            body->look_at.type = EIDOLON_VRM_LOOK_AT_EXPRESSION;
+        } else {
+            set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
+                      "lookAt.type '%s' is unsupported", type);
+            return;
+        }
+    }
+    if (object_member(look_at, "offsetFromHeadBone", &value)) {
+        if (!json_float_array(value, body->look_at.offset_from_head, 3U)) {
+            set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
+                      "lookAt.offsetFromHeadBone is malformed");
+            return;
+        }
+        body->look_at.has_offset = true;
+    }
+    if (!parse_range_map(look_at, "rangeMapHorizontalInner", &body->look_at.horizontal_inner) ||
+        !parse_range_map(look_at, "rangeMapHorizontalOuter", &body->look_at.horizontal_outer) ||
+        !parse_range_map(look_at, "rangeMapVerticalDown", &body->look_at.vertical_down) ||
+        !parse_range_map(look_at, "rangeMapVerticalUp", &body->look_at.vertical_up)) {
+        set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
+                  "lookAt range map is malformed");
+        return;
+    }
+    body->look_at.state = EIDOLON_VRM_CAPABILITY_PARSED;
+    set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
+              "authored %s look-at parsed; runtime degrades to head-only",
+              body->look_at.type == EIDOLON_VRM_LOOK_AT_BONE          ? "bone"
+              : body->look_at.type == EIDOLON_VRM_LOOK_AT_EXPRESSION ? "expression"
+                                                                     : "unspecified");
+}
+
+static bool parse_mtoon(const cgltf_data *data, EidolonVrmBody *body, char *error,
+                        size_t error_capacity) {
+    size_t parsed_count = 0U;
+    body->material_count = (size_t)data->materials_count;
+    if (body->material_count > 0U) {
+        body->mtoon_material_states =
+            calloc(body->material_count, sizeof(*body->mtoon_material_states));
+        if (body->mtoon_material_states == NULL) {
+            set_error(error, error_capacity, "out of memory while reporting MToon materials");
             return false;
         }
     }
-    for (size_t index = 0; index < body->focused_bind_count; ++index) {
-        if (!expression_bind_is_realizable(data, &body->focused_binds[index])) {
-            return false;
+    for (size_t index = 0; index < body->material_count; ++index) {
+        const cgltf_material *material = &data->materials[index];
+        const cgltf_extension *extension = find_scoped_extension(
+            material->extensions, material->extensions_count, "VRMC_materials_mtoon");
+        if (extension == NULL) {
+            body->mtoon_material_states[index] = EIDOLON_VRM_CAPABILITY_ABSENT;
+            continue;
+        }
+        body->mtoon_material_count += 1U;
+        body->mtoon_material_states[index] = EIDOLON_VRM_CAPABILITY_DECLARED;
+        if (extension->data != NULL) {
+            JsonSpan root = {extension->data, extension->data + strlen(extension->data)};
+            JsonSpan spec_span;
+            char spec[16];
+            if (skip_value(root.begin, root.end, 0U) != NULL &&
+                object_member(root, "specVersion", &spec_span) &&
+                json_string(spec_span, spec, sizeof(spec)) && strcmp(spec, "1.0") == 0) {
+                body->mtoon_material_states[index] = EIDOLON_VRM_CAPABILITY_PARSED;
+                parsed_count += 1U;
+            }
         }
     }
-    body->has_expression = body->neutral_bind_count > 0U && body->focused_bind_count > 0U;
+    if (body->mtoon_material_count == 0U) {
+        body->mtoon_state = EIDOLON_VRM_CAPABILITY_ABSENT;
+    } else if (parsed_count == body->mtoon_material_count) {
+        body->mtoon_state = EIDOLON_VRM_CAPABILITY_PARSED;
+    } else {
+        body->mtoon_state = EIDOLON_VRM_CAPABILITY_DECLARED;
+    }
     return true;
 }
 
@@ -552,7 +1001,7 @@ bool eidolon_vrm_body_parse(const cgltf_data *data, EidolonVrmBody *body, char *
         body->node_by_bone[index] = -1;
     }
     extension = find_extension(data, "VRMC_vrm");
-    if (extension == NULL) {
+    if (extension == NULL || extension->data == NULL) {
         set_error(error, error_capacity, "model is not VRM 1.0 (VRMC_vrm is missing)");
         return false;
     }
@@ -571,18 +1020,39 @@ bool eidolon_vrm_body_parse(const cgltf_data *data, EidolonVrmBody *body, char *
     if (!parse_bones(root, data, body, error, error_capacity)) {
         return false;
     }
-    body->has_look_at = body->node_by_bone[EIDOLON_VRM_BONE_LEFT_EYE] >= 0 &&
-                        body->node_by_bone[EIDOLON_VRM_BONE_RIGHT_EYE] >= 0 &&
-                        object_member(root, "lookAt", &spec_span);
-    if (!parse_expressions(root, data, body)) {
-        body->neutral_bind_count = 0U;
-        body->focused_bind_count = 0U;
-        body->has_expression = false;
+    if (!validate_humanoid_structure(data, body, error, error_capacity)) {
+        return false;
     }
-    body->has_spring_bones = find_extension(data, "VRMC_springBone") != NULL;
-    body->has_mtoon = find_extension(data, "VRMC_materials_mtoon") != NULL;
+    body->eye_bones_present = body->node_by_bone[EIDOLON_VRM_BONE_LEFT_EYE] >= 0 &&
+                              body->node_by_bone[EIDOLON_VRM_BONE_RIGHT_EYE] >= 0;
+    parse_look_at(root, body);
+    parse_expressions(root, data, body);
+    body->spring_bones_state = find_extension(data, "VRMC_springBone") != NULL
+                                   ? EIDOLON_VRM_CAPABILITY_DECLARED
+                                   : EIDOLON_VRM_CAPABILITY_ABSENT;
+    body->node_constraints_state = EIDOLON_VRM_CAPABILITY_ABSENT;
+    for (size_t index = 0; index < (size_t)data->nodes_count; ++index) {
+        const cgltf_node *node = &data->nodes[index];
+        if (find_scoped_extension(node->extensions, node->extensions_count,
+                                  "VRMC_node_constraint") != NULL) {
+            body->node_constraints_state = EIDOLON_VRM_CAPABILITY_DECLARED;
+            break;
+        }
+    }
+    if (!parse_mtoon(data, body, error, error_capacity)) {
+        eidolon_vrm_body_destroy(body);
+        return false;
+    }
     body->fingerprint = hash_text(extension->data);
     return true;
+}
+
+void eidolon_vrm_body_destroy(EidolonVrmBody *body) {
+    if (body == NULL) {
+        return;
+    }
+    free(body->mtoon_material_states);
+    memset(body, 0, sizeof(*body));
 }
 
 static bool node_position(const cgltf_data *data, int index, float position[3]) {
@@ -689,8 +1159,9 @@ bool eidolon_vrm_body_make_profile(const cgltf_data *data, const EidolonVrmBody 
     profile->elbow_limit_radians = 2.70F;
     profile->has_required_humanoid = true;
     profile->has_right_arm = true;
-    profile->has_eyes = body->has_look_at;
-    profile->has_expression = body->has_expression;
+    profile->has_eyes = body->look_at.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    profile->has_expression =
+        body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
     if (!isfinite(profile->right_upper_arm_length) || !isfinite(profile->right_lower_arm_length) ||
         profile->right_upper_arm_length <= 0.0001F || profile->right_lower_arm_length <= 0.0001F) {
         set_error(error, error_capacity, "VRM right arm has invalid measurements");

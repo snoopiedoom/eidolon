@@ -122,6 +122,24 @@ static void route_event(EidolonEventPump *pump, const SDL_Event *source, Eidolon
         pointer_position(&event->data.pointer);
         return;
     }
+    case SDL_EVENT_MOUSE_WHEEL: {
+        if (!belongs_to_presentation(pump, source)) {
+            return;
+        }
+        SDL_Event converted = *source;
+        if (pump->presentation_renderer != NULL &&
+            !SDL_ConvertEventToRenderCoordinates(pump->presentation_renderer, &converted)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not convert wheel coordinates: %s",
+                        SDL_GetError());
+        }
+        event->kind = EIDOLON_APP_EVENT_POINTER_WHEEL;
+        event->data.pointer.x = converted.wheel.mouse_x;
+        event->data.pointer.y = converted.wheel.mouse_y;
+        event->data.pointer.wheel_y =
+            converted.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -converted.wheel.y
+                                                               : converted.wheel.y;
+        return;
+    }
     default:
         return;
     }

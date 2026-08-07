@@ -98,15 +98,34 @@ make model-mouth-calibrate BLENDER=C:/Blender/blender.exe
 
 Audit output and previews live under `build/model-audit`.
 
-### VRM 1.0 runtime bodies
+### Experimental VRM reference body
 
-EPR's first rigged-body ecosystem is VRM 1.0. A VRM body must carry authoritative `VRMC_vrm`
-humanoid metadata and license information. The runtime validates humanoid roles and publishes a
-body-neutral capability profile; it does not infer VRM conformance from exported node names.
+EPR's first rigged-body experiment uses one supported VRM 1.0 reference avatar and a deliberately
+narrow renderer dialect. This is not a claim that Eidolon can load arbitrary VRM 1.0 files. A
+candidate must carry authoritative `VRMC_vrm` humanoid metadata and license information; the
+current preflight validates the supported hierarchy/transform subset and publishes an explicit
+capability profile. The separate runtime check establishes geometry, textures, skinning,
+projection, shader, and hidden-frame executability only for the selected asset/machine.
+
+This rigged-3D asset path is independent from the portrait and sprite asset paths. Selecting or
+rejecting a VRM never changes their manifests, images, or renderer-local state.
 
 Large third-party VRM files remain local and uncommitted. A distributable character package must
 carry compatible rights metadata before it can ship. See the
-[VRM body runtime contract](design/vrm-body-runtime.md).
+[experimental VRM reference-body contract](design/vrm-body-runtime.md).
+
+For calibration-first EPR work, the runtime measures every mapped humanoid bind position and
+nearest-semantic-parent segment length, then associates user-approved semantic anchors with the
+resulting anatomy fingerprint. The default sidecar path is `<model>.epr-calibration`; an explicit
+`EIDOLON_VRM_CALIBRATION_PATH` may select another file. A calibration for a nonredistributable
+reference model remains local until its own distribution and derivative-data status is reviewed.
+
+The current owner-selected local development default is
+`assets/2349235869624830263.vrm` (Vampire Cat by Touko Asada). It passes the supported VRM 1.0
+structure and runtime gates. Its embedded metadata restricts avatar use to the author, prohibits
+redistribution and modification, and requires credit. The file is ignored by Git and is neither a
+public project dependency nor a recommendation. `EIDOLON_VRM_PATH` overrides it at runtime;
+`DEFAULT_VRM_MODEL=...` overrides the compiled default at build time.
 
 The first reference body is
 [DECAGRAMMATON by Leona_SAN34](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654).
@@ -115,11 +134,18 @@ redistribution and modification. The embedded author is `reona`. Operators must 
 their own Pixiv account, acquire the file manually, and re-check the page terms at download time.
 Eidolon does not automate authentication or download and must never commit the resulting `.vrm`.
 
-Validate any manually acquired candidate through the same parser used by the runtime:
+Run the current structural/profile preflight on the manually acquired reference body:
 
 ```powershell
-make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-structure-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-runtime-check VRM_PATH="C:\local-assets\character.vrm"
 ```
+
+Passing `make vrm-structure-check` does not prove runtime renderability. The runtime target exercises
+the real selected-reference geometry, textures, skinning, projection, shaders, and a hidden GPU
+frame. Passing both still does not prove that an arbitrary VRM is supported. `make vrm-check` remains
+a structural compatibility alias; the contract defines the broader corpus required before the
+support claim can expand.
 
 ## Project-specific: Rio authoring and repair
 

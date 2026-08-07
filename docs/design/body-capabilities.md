@@ -4,12 +4,14 @@
 
 Eidolon currently exposes sprite, portrait, and 3D as global renderer choices. That is useful for
 development but makes an engine backend look like the product. A character should select an
-intended body while the shared performance system degrades gracefully across bodies with different
-expressive power.
+intended body while independent body-performance systems consume shared product evidence and
+degrade gracefully across bodies with different expressive power.
 
 ## Goals
 
 - preserve one coherent art and performance direction across multiple body implementations;
+- let 2D, sprite, and rigged-3D systems coexist without one becoming the implementation layer of
+  another;
 - let ordinary users choose a character rather than an engine backend;
 - advertise capabilities without renderer-specific branches in session or persona logic;
 - degrade unsupported performance intent locally and predictably;
@@ -31,11 +33,43 @@ defaults, and rights information. It selects one intended default body.
 
 A **body variant** is one concrete appearance implemented by one **body renderer**. The body
 renderer owns asset loading, drawing, body-local motion, and capability realization. Shared
-performance code produces renderer-neutral intent. Configuration and authoring tools may expose an
-advanced renderer override without making that override the ordinary product model.
+application evidence crosses renderer-neutral contracts; each body system owns its own planner,
+mapping, and motor state where their requirements differ. Configuration and authoring tools may
+expose an advanced renderer override without making that override the ordinary product model.
 
 Persona and session identity are independent from body selection. Changing a body changes visible
 capability and geometry, not who is speaking or which session owns a bubble.
+
+## Independent implementations, shared boundaries
+
+The 2D portrait director and the EPR/VRM runtime are separate body-performance systems. They share
+upstream truth and downstream application contracts, not renderer-specific state:
+
+```text
+normalized session truth + semantic/delivery/attention evidence
+                         |
+             +-----------+-----------+
+             |                       |
+             v                       v
+    portrait director       EPR behavior/physical runtime
+             |                       |
+             v                       v
+ portrait face + motion       VRM/3D pose projection
+             |                       |
+             +-----------+-----------+
+                         |
+                         v
+       body geometry/content -> scene -> presentation
+```
+
+The portrait path is not required to run through EPR. EPR does not consume portrait face indexes,
+image manifests, or whole-image spring state. Both systems may use the same body-neutral affect,
+semantic beat, delivery, and attention evidence where that evidence has a proven stable contract.
+
+The current product activates one body variant for the visible character. Coexistence means every
+implementation remains buildable, selectable, failure-isolated, and able to preserve shared
+session/dialogue state across selection or fallback; it does not require every renderer to remain
+initialized or draw simultaneously.
 
 ## Body tiers
 
@@ -57,7 +91,9 @@ state animation, subject to the atlas's declared rows and timing.
 ### Rigged 3D model
 
 A hierarchy, skin, materials, and semantic humanoid mapping. It may add gaze, IK, semantic poses,
-procedural motion, and secondary physics.
+procedural motion, and secondary physics. Skeleton presence alone does not advertise every semantic
+pose: a calibration-first body reports only the pose families backed by matching user-approved
+anchors or another declared realization generator.
 
 Future renderers such as Live2D fit the same contract by advertising capabilities rather than
 creating another session or persona pathway.
@@ -72,23 +108,24 @@ continuous_affect
 speech_motion
 attention_target
 semantic_pose
+semantic_pose_families
 gaze
 lip_sync
 click_regions
 secondary_motion
 ```
 
-Capabilities describe what a loaded body can realize; they do not promise that the current shared
-performance runtime already produces every corresponding intent.
+Capabilities describe what a loaded body can realize; they do not promise that either body system
+already produces every corresponding intent.
 
 ## Target data flow
 
 ```text
-operational state + semantic affect + delivery marks
+operational state + semantic affect + delivery/attention evidence
                          ↓
-renderer-neutral performance intent
+body-neutral evidence or Performance Intent boundary
                          ↓
-body capability projection
+selected body system and capability projection
                          ↓
 supported local expression / motion / pose / attention
                          ↓
@@ -98,9 +135,10 @@ body geometry + visible bounds + click regions
 Body geometry returns to composition and bubble layout. This feedback is geometric only; the body
 cannot acquire session ownership through it.
 
-The first concrete rigged-body projection is the [VRM 1.0 body runtime](vrm-body-runtime.md).
-EPR consumes its normalized profile and optional capabilities; it never branches on VRM fields or
-model node names.
+The first concrete rigged-body projection is the
+[experimental VRM reference-body runtime](vrm-body-runtime.md). EPR consumes its normalized profile
+and optional capabilities; it never branches on VRM fields or model node names. This experimental
+path is not a general VRM loader and does not alter portrait ownership.
 
 ## Selection and degradation
 
@@ -120,6 +158,8 @@ selection boundary; documentation must not describe that migration as complete.
 ## Invariants
 
 - one art direction governs space, attention, restraint, dialogue, and interaction across bodies;
+- no body system owns or mutates another body system's renderer-specific state;
+- sharing Performance Intent or evidence does not require a single universal body runtime;
 - body selection never changes persona or session identity;
 - session and semantic systems never branch on asset filenames or renderer internals;
 - a missing body capability never breaks dialogue or session observation;
@@ -142,13 +182,14 @@ selection boundary; documentation must not describe that migration as complete.
 ## Acceptance criteria
 
 - a static image, portrait set, sprite atlas, and rigged 3D model can consume the same abstract
-  performance event without session-layer renderer branches;
+  performance evidence without session-layer renderer branches or renderer-to-renderer calls;
 - unsupported intent degrades without dropping dialogue or session visibility;
 - selecting a character loads its intended body without asking an ordinary user to understand
   renderer backends;
 - an advanced override changes only body realization;
 - switching body or framing preserves session ordering and reflows bubbles from updated geometry;
 - inactive 3D resources are not initialized for a 2D body;
+- a failed 3D body leaves portrait/sprite selection and their local performance state available;
 - invalid package edits retain the last known-good package or deterministic fallback;
 - character rights information is present before a package is considered distributable.
 

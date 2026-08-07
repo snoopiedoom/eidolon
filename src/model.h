@@ -6,12 +6,27 @@
 #include "epr/performance_runtime.h"
 #include "motion.h"
 #include "pose.h"
+#include "vrm_calibration.h"
 
 #define EIDOLON_MODEL_RENDER_RESOLUTION_MIN 512
 #define EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT 1024
 #define EIDOLON_MODEL_RENDER_RESOLUTION_MAX 2048
 
 typedef struct EidolonModelRenderer EidolonModelRenderer;
+
+typedef struct EidolonVrmRuntimeReport {
+    size_t draw_count;
+    size_t texture_count;
+    size_t joint_count;
+    uint64_t projection_revision;
+    uint64_t frame_sequence;
+    bool geometry_ready;
+    bool textures_ready;
+    bool skinning_ready;
+    bool shaders_ready;
+    bool projection_ready;
+    bool hidden_frame_ready;
+} EidolonVrmRuntimeReport;
 
 EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *model_path,
                                            const char *shader_directory,
@@ -27,8 +42,15 @@ void eidolon_model_set_semantic_pose(EidolonModelRenderer *model, const EidolonS
 void eidolon_model_clear_semantic_pose(EidolonModelRenderer *model);
 void eidolon_model_set_idle_tuning(EidolonModelRenderer *model, EidolonIdleTuning tuning);
 bool eidolon_model_body_profile(const EidolonModelRenderer *model, EidolonEprBodyProfile *profile);
+bool eidolon_model_vrm_measurements(const EidolonModelRenderer *model,
+                                    EidolonVrmMeasurements *measurements);
+bool eidolon_model_vrm_calibration(const EidolonModelRenderer *model,
+                                   EidolonVrmCalibration *calibration);
 bool eidolon_model_apply_control(EidolonModelRenderer *model,
                                  const EidolonCanonicalControl *control);
+bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
+                                      EidolonVrmRuntimeReport *report);
+uint64_t eidolon_model_vrm_projection_revision(const EidolonModelRenderer *model);
 const char *eidolon_model_body_name(const EidolonModelRenderer *model);
 bool eidolon_model_set_render_resolution(EidolonModelRenderer *model, int side);
 int eidolon_model_render_resolution(const EidolonModelRenderer *model);

@@ -61,6 +61,8 @@ COMMON_SOURCES := \
 	src/text_renderer.c \
 	src/user_settings.c \
 	src/vrm_body.c \
+	src/vrm_calibration.c \
+	src/vrm_calibration_session.c \
 	src/vrm_projection.c
 
 IMGUI_DIR := lib/imgui
@@ -80,22 +82,40 @@ IMGUI_CPP_SOURCES := \
 ifeq ($(OS),Windows_NT)
 PLATFORM := windows
 EXE := .exe
-SDL3_ROOT ?= C:/dev/SDL3
-SDL3_TTF_ROOT ?= $(CURDIR)/.cache/sdl_ttf/SDL3_ttf-3.2.2
+SDL_DEPS_ROOT ?= $(CURDIR)/.cache/sdl
+SDL3_ROOT ?= $(SDL_DEPS_ROOT)/install
+SDL3_TTF_ROOT ?= $(SDL3_ROOT)
+SDL3_BUILD_SCRIPT := $(CURDIR)/tools/build_sdl_windows.ps1
+SDL3_STAMP := $(SDL_DEPS_ROOT)/.installed
+SDL3_DLL := $(SDL3_ROOT)/bin/SDL3.dll
+SDL3_TTF_DLL := $(SDL3_TTF_ROOT)/bin/SDL3_ttf.dll
+SDL_CMAKE_GENERATOR ?= Ninja
+WINDOWS_CLANG_TARGET ?= x86_64-w64-windows-gnu
+SDL_CMAKE_TARGET ?= $(if $(findstring clang,$(CC)),$(WINDOWS_CLANG_TARGET),)
+SDL_CMAKE_TOOLCHAIN ?=
+SDL_DEPS_PREREQ := $(SDL3_STAMP)
 SHADERCROSS ?= $(CURDIR)/.cache/shadercross/bin/shadercross.exe
 PLATFORM_SOURCES := src/platform/windows_ipc.c src/platform/windows_overlay.c \
 	src/platform/windows_session_files.c src/raster_d3d11.c
 PLATFORM_CPP_SOURCES := src/platform/windows_dcomp.cpp
-CPPFLAGS += -Isrc -I"$(SDL3_ROOT)/include" -I"$(SDL3_TTF_ROOT)/include"
-LDFLAGS += -L"$(SDL3_ROOT)/lib/x64" -L"$(SDL3_TTF_ROOT)/lib/x64"
+CPPFLAGS += -Isrc -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00 \
+	-I"$(SDL3_ROOT)/include" -I"$(SDL3_TTF_ROOT)/include"
+LDFLAGS += -L"$(SDL3_ROOT)/lib" -L"$(SDL3_TTF_ROOT)/lib"
 LDLIBS += -lSDL3_ttf -lSDL3 -ldcomp -ldwmapi -ldxgi -ldxguid -luser32 -lgdi32 -ld3d11 \
 	-lwinhttp -lws2_32 -lbcrypt -lole32
+ifneq ($(findstring clang,$(CC)),)
+CFLAGS += --target=$(WINDOWS_CLANG_TARGET)
+LDFLAGS += --target=$(WINDOWS_CLANG_TARGET)
+endif
+ifneq ($(findstring clang,$(CXX)),)
+CXXFLAGS += --target=$(WINDOWS_CLANG_TARGET)
+endif
 define make-dir
 @powershell.exe -NoProfile -Command "New-Item -ItemType Directory -Force '$(subst /,\,$(dir $@))' | Out-Null"
 endef
 define copy-runtime
-@powershell.exe -NoProfile -Command "if (Test-Path '$(SDL3_ROOT)/lib/x64/SDL3.dll') { Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)' }"
-@powershell.exe -NoProfile -Command "if (Test-Path '$(SDL3_TTF_ROOT)/lib/x64/SDL3_ttf.dll') { Copy-Item -Force '$(SDL3_TTF_ROOT)/lib/x64/SDL3_ttf.dll' '$(dir $@)' }"
+@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_DLL)' '$(dir $@)'"
+@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_TTF_DLL)' '$(dir $@)'"
 endef
 define copy-output
 @powershell.exe -NoProfile -Command "Copy-Item -Force '$(subst /,\,$<)' '$(subst /,\,$@)'"
@@ -106,6 +126,7 @@ endef
 else
 PLATFORM := linux
 EXE :=
+SDL_DEPS_PREREQ :=
 PKG_CONFIG ?= pkg-config
 SHADERCROSS ?= shadercross
 PLATFORM_SOURCES := src/platform/linux_ipc.c src/platform/linux_overlay.c \
@@ -145,6 +166,7 @@ else
 SHADER_OUTPUTS := $(SPIRV_SHADERS) $(DXIL_SHADERS)
 endif
 RUNTIME_MODEL := $(CURDIR)/assets/model/rio.glb
+DEFAULT_VRM_MODEL ?= $(CURDIR)/assets/2349235869624830263.vrm
 VRM_REFERENCE_URL := https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654
 VRM_PATH ?=
 MOTION_CONFIG := $(CURDIR)/config/motion.cfg
@@ -159,7 +181,7 @@ IMGUI_DEPS := $(IMGUI_OBJECTS:.o=.d) $(PLATFORM_CPP_OBJECTS:.o=.d)
 CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
 	"-DEIDOLON_FONT_PATH=\"$(CURDIR)/assets/fonts/MesloLG Nerd Font/MesloLGSNerdFontMono-Regular.ttf\"" \
-	-DEIDOLON_MODEL_PATH=\"$(RUNTIME_MODEL)\" \
+	-DEIDOLON_MODEL_PATH=\"$(DEFAULT_VRM_MODEL)\" \
 	-DEIDOLON_VRM_REFERENCE_URL=\"$(VRM_REFERENCE_URL)\" \
 	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
 	-DEIDOLON_SYSTEM_SETTINGS_PATH=\"$(abspath config/settings.cfg)\" \
@@ -185,7 +207,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke bgfx-dcomp-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-deps sdl-clean sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check vrm-structure-check vrm-runtime-check vrm-calibrate vrm-performance-review model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -194,8 +216,30 @@ editor-config:
 	$(PYTHON) tools/generate_compile_commands.py --make "$(MAKE)" --mode "$(MODE)" \
 		--target "$(MODE_TARGET)" --output "$(CURDIR)/compile_commands.json"
 
-text-setup:
-	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/setup_text_windows.ps1"
+ifeq ($(OS),Windows_NT)
+$(SDL3_STAMP): $(SDL3_BUILD_SCRIPT) lib/SDL/CMakeLists.txt lib/SDL_ttf/CMakeLists.txt
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(SDL3_BUILD_SCRIPT)" \
+		-BuildRoot "$(SDL_DEPS_ROOT)" -CCompiler "$(CC)" -CxxCompiler "$(CXX)" \
+		-Generator "$(SDL_CMAKE_GENERATOR)" -CompilerTarget "$(SDL_CMAKE_TARGET)" \
+		-CompilerToolchain "$(SDL_CMAKE_TOOLCHAIN)"
+	@powershell.exe -NoProfile -Command "New-Item -ItemType File -Force '$@' | Out-Null"
+
+sdl-deps: $(SDL3_STAMP)
+
+text-setup: sdl-deps
+
+sdl-clean:
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(SDL3_BUILD_SCRIPT)" \
+		-BuildRoot "$(SDL_DEPS_ROOT)" -Clean
+else
+sdl-deps:
+	@echo "Linux uses the system SDL3 and SDL3_ttf packages discovered by pkg-config."
+
+text-setup: sdl-deps
+
+sdl-clean:
+	@echo "Linux SDL packages are system-managed; nothing to clean."
+endif
 
 affect-setup:
 	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(CURDIR)/tools/setup_affect_windows.ps1"
@@ -237,12 +281,12 @@ $(AFFECT_WORKER): tools/affect_worker.c src/affect_tokenizer.c src/affect_tokeni
 	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(AFFECT_ORT)/lib/onnxruntime.dll' '$(dir $@)'"
 
 $(AFFECT_CLIENT_TEST): tests/affect_client_test.c src/affect_client.c src/affect_client.h \
-		src/affect_protocol.h src/log.c $(AFFECT_WORKER) $(SDL3_ROOT)/lib/x64/SDL3.dll
+		src/affect_protocol.h src/log.c $(AFFECT_WORKER) | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) -DEIDOLON_TEST_AFFECT_WORKER=\"$(abspath $(AFFECT_WORKER))\" \
 		$(TEST_CFLAGS) tests/affect_client_test.c src/affect_client.c src/log.c \
 		$(LDFLAGS) $(LDLIBS) -o $@
-	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$(dir $@)'"
+	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_DLL)' '$(dir $@)'"
 
 $(AFFECT_BENCHMARK): tools/affect_benchmark.c src/affect.c src/affect.h src/affect_protocol.h \
 		src/state.h $(AFFECT_WORKER)
@@ -285,18 +329,18 @@ $(MODE_TARGET): $(OBJECTS) $(IMGUI_OBJECTS) $(PLATFORM_CPP_OBJECTS) | shaders
 	$(make-dir)
 	$(CXX) $(LDFLAGS) $(OBJECTS) $(IMGUI_OBJECTS) $(PLATFORM_CPP_OBJECTS) $(LDLIBS) -o $@
 
-$(OBJ_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 IMGUI_SMOKE := $(BUILD_ROOT)/tests/$(MODE)/imgui_smoke$(EXE)
 IMGUI_SMOKE_OBJECT := $(OBJ_DIR)/tests/imgui_smoke.o
 
-$(OBJ_DIR)/%.o: %.cpp
+$(OBJ_DIR)/%.o: %.cpp | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CXX) $(IMGUI_CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(IMGUI_SMOKE_OBJECT): tests/imgui_smoke.c
+$(IMGUI_SMOKE_OBJECT): tests/imgui_smoke.c | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CC) $(IMGUI_CPPFLAGS) $(CFLAGS) -c $< -o $@
 
@@ -306,7 +350,7 @@ $(IMGUI_SMOKE): $(IMGUI_SMOKE_OBJECT) $(IMGUI_OBJECTS)
 	$(copy-runtime)
 
 imgui-smoke: $(IMGUI_SMOKE)
-	"$(IMGUI_SMOKE)"
+	$(IMGUI_SMOKE)
 
 ifeq ($(OS),Windows_NT)
 BGFX_DIR := lib/bgfx
@@ -374,12 +418,12 @@ $(BGFX_LIB): $(BGFX_OBJECTS)
 	$(make-dir)
 	$(AR) rcs $@ $^
 
-$(BGFX_SMOKE_OBJECT): tests/bgfx_smoke.c
+$(BGFX_SMOKE_OBJECT): tests/bgfx_smoke.c | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CC) -I"$(SDL3_ROOT)/include" -I$(BGFX_DIR)/include -I$(BX_DIR)/include \
 		$(CFLAGS) -c $< -o $@
 
-$(BGFX_INTEROP_SMOKE_OBJECT): tests/bgfx_interop_smoke.c
+$(BGFX_INTEROP_SMOKE_OBJECT): tests/bgfx_interop_smoke.c | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CC) -I"$(SDL3_ROOT)/include" -I$(BGFX_DIR)/include -I$(BX_DIR)/include \
 		$(CFLAGS) -c $< -o $@
@@ -396,13 +440,13 @@ $(D3D11_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
 		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
 		-Wno-language-extension-token -c $< -o $@
 
-$(SDL_GPU_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+$(SDL_GPU_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CXX) -DEIDOLON_DCOMP_SDL_GPU=1 -I"$(SDL3_ROOT)/include" $(CXXFLAGS) \
 		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
 		-Wno-language-extension-token -c $< -o $@
 
-$(SDL_RENDERER_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp
+$(SDL_RENDERER_DCOMP_SMOKE_OBJECT): tests/bgfx_dcomp_smoke.cpp | $(SDL_DEPS_PREREQ)
 	$(make-dir)
 	$(CXX) -DEIDOLON_DCOMP_SDL_RENDERER=1 -I"$(SDL3_ROOT)/include" $(CXXFLAGS) \
 		-Wall -Wextra -Wpedantic -Wshadow -Wconversion \
@@ -443,7 +487,7 @@ d3d11-dcomp-smoke: $(D3D11_DCOMP_SMOKE)
 
 $(SDL_GPU_DCOMP_SMOKE): $(SDL_GPU_DCOMP_SMOKE_OBJECT)
 	$(make-dir)
-	$(CXX) -L"$(SDL3_ROOT)/lib/x64" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
+	$(CXX) -L"$(SDL3_ROOT)/lib" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
 		-lgdi32 -lpsapi -luser32 -lole32 -o $@
 	$(copy-runtime)
 
@@ -452,7 +496,7 @@ sdl-gpu-dcomp-smoke: $(SDL_GPU_DCOMP_SMOKE)
 
 $(SDL_RENDERER_DCOMP_SMOKE): $(SDL_RENDERER_DCOMP_SMOKE_OBJECT)
 	$(make-dir)
-	$(CXX) -L"$(SDL3_ROOT)/lib/x64" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
+	$(CXX) -L"$(SDL3_ROOT)/lib" $^ -lSDL3 -ldcomp -ld3d11 -ldxgi -ldxguid \
 		-lgdi32 -lpsapi -luser32 -lole32 -o $@
 	$(copy-runtime)
 
@@ -548,15 +592,16 @@ RELAY_CORE_TEST := $(TEST_DIR)/relay_core_test$(EXE)
 CODEX_RELAY_TEST := $(TEST_DIR)/codex_relay_test$(EXE)
 PERFORMANCE_RUNTIME_TEST := $(TEST_DIR)/performance_runtime_test$(EXE)
 VRM_BODY_TEST := $(TEST_DIR)/vrm_body_test$(EXE)
+VRM_CALIBRATION_TEST := $(TEST_DIR)/vrm_calibration_test$(EXE)
 VRM_PROJECTION_TEST := $(TEST_DIR)/vrm_projection_test$(EXE)
 EPR_TRACE_TOOL := $(BUILD_ROOT)/tools/$(MODE)/epr-trace$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
 
-$(TEST_RUNTIME): $(SDL3_ROOT)/lib/x64/SDL3.dll
+$(TEST_RUNTIME): $(SDL3_STAMP)
 	$(make-dir)
-	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_ROOT)/lib/x64/SDL3.dll' '$@'"
+	@powershell.exe -NoProfile -Command "Copy-Item -Force '$(SDL3_DLL)' '$@'"
 else
 TEST_RUNTIME :=
 endif
@@ -705,6 +750,12 @@ $(VRM_BODY_TEST): tests/vrm_body_test.c src/vrm_body.c src/cgltf_impl.c | $(TEST
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
+$(VRM_CALIBRATION_TEST): tests/vrm_calibration_test.c src/vrm_calibration.c \
+		src/vrm_calibration_session.c src/ik.c src/cgltf_impl.c | \
+		$(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
 $(VRM_PROJECTION_TEST): tests/vrm_projection_test.c src/vrm_projection.c src/motion.c | \
 		$(TEST_RUNTIME)
 	$(make-dir)
@@ -719,7 +770,7 @@ $(EPR_TRACE_TOOL): tools/epr_trace.c src/epr/performance_intent.c \
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $(filter-out Makefile,$^) -o $@
 
 epr-trace: $(EPR_TRACE_TOOL)
-	"$(EPR_TRACE_TOOL)"
+	$(EPR_TRACE_TOOL)
 
 PROVIDER ?= codex
 PROVIDER_URL ?= ws://127.0.0.1:4500
@@ -738,7 +789,7 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
 	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST) $(VRM_BODY_TEST) \
-	$(VRM_PROJECTION_TEST)
+	$(VRM_CALIBRATION_TEST) $(VRM_PROJECTION_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -767,9 +818,10 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(RELAY_CORE_TEST)
 	$(PERFORMANCE_RUNTIME_TEST)
 	$(VRM_BODY_TEST)
+	$(VRM_CALIBRATION_TEST)
 	$(VRM_PROJECTION_TEST)
 
-vrm-check: $(VRM_BODY_TEST)
+vrm-structure-check: $(VRM_BODY_TEST)
 ifeq ($(strip $(VRM_PATH)),)
 	@echo "Eidolon does not download or redistribute its reference VRM."
 	@echo "Sign in with Pixiv and acquire the VRM 1.0 model manually:"
@@ -777,7 +829,34 @@ ifeq ($(strip $(VRM_PATH)),)
 	@echo "Then run: make vrm-check VRM_PATH=/absolute/path/to/model.vrm"
 	@false
 else
+	@echo "Running structural/profile preflight only; this does not prove runtime renderability."
 	"$(VRM_BODY_TEST)" "$(VRM_PATH)"
+endif
+
+vrm-check: vrm-structure-check
+
+vrm-runtime-check: $(TARGET)
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrm-runtime-check VRM_PATH=/absolute/path/to/model.vrm"
+	@false
+else
+	$(TARGET) --vrm-runtime-check "$(VRM_PATH)"
+endif
+
+vrm-calibrate: $(TARGET)
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrm-calibrate VRM_PATH=/absolute/path/to/model.vrm"
+	@false
+else
+	$(TARGET) --calibrate-vrm "$(VRM_PATH)"
+endif
+
+vrm-performance-review: $(TARGET)
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrm-performance-review VRM_PATH=/absolute/path/to/model.vrm"
+	@false
+else
+	$(TARGET) --review-performance "$(VRM_PATH)"
 endif
 
 MODEL_SOURCE_DIR := $(CURDIR)/assets/blue-archive-rio-battle-full-rip-rig/source/Rio Battle
@@ -859,7 +938,9 @@ help:
 	@echo "make graphics-backend-benchmark  compare equivalent Eidolon-sized layers"
 	@echo "make provider-live-test PROVIDER=codex PROVIDER_URL=ws://...  probe a running provider"
 	@echo "make codex-relay-test  launch a hidden app-server and verify the in-path relay"
-	@echo "make text-setup      download verified SDL_ttf runtime/development files"
+	@echo "make sdl-deps       build pinned SDL3 and SDL3_ttf submodules"
+	@echo "make sdl-clean      remove the generated SDL dependency build/install tree"
+	@echo "make text-setup     compatibility alias for make sdl-deps"
 	@echo "make affect-setup    download verified optional GoEmotions runtime/model"
 	@echo "make affect          build the optional native GoEmotions worker"
 	@echo "make affect-check    run one visible native inference smoke test"
@@ -867,7 +948,11 @@ help:
 	@echo "make character-sprites  inspect the complete Blue Archive portrait download"
 	@echo "make character-sprites-download  download all grouped character portraits"
 	@echo "make character-sprites-check  test wiki filename grouping without network access"
-	@echo "make vrm-check VRM_PATH=...  validate a manually acquired VRM 1.0 performance body"
+	@echo "make vrm-structure-check VRM_PATH=...  preflight the experimental reference VRM"
+	@echo "make vrm-check VRM_PATH=...            compatibility alias for vrm-structure-check"
+	@echo "make vrm-runtime-check VRM_PATH=...    exercise the complete hidden VRM/GPU path"
+	@echo "make vrm-calibrate VRM_PATH=...        edit and save anatomy-bound EPR anchors"
+	@echo "make vrm-performance-review VRM_PATH=...  loop the five-second EPR acceptance scene"
 	@echo "make log             tail the Eidolon debug log"
 	@echo "make shaders         bake SDL_GPU SPIR-V and DXIL shaders"
 	@echo "make model-audit     inspect every Rio FBX with Blender"

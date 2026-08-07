@@ -49,9 +49,11 @@ Classifier labels, portrait face indexes, request queues, and reveal ownership d
 EPR. EPR owns later behavior selection, temporal commitment, body-resource grants, interruption,
 and canonical body control.
 
-The existing portrait director remains supported while this boundary lands. Shared-character
-ownership is an explicit performance-subject lease; registry iteration order may not choose which
-session moves the body.
+The portrait director remains an independent supported body system after this boundary lands; it is
+not a temporary adapter awaiting replacement by EPR. The portrait may publish body-neutral evidence
+to EPR without moving portrait face selection, image labels, reveal ownership, or whole-image motion
+into the 3D runtime. Shared-character ownership is an explicit performance-subject lease; registry
+iteration order may not choose which session moves the body.
 
 ## Compilation
 

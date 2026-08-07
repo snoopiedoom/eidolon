@@ -220,6 +220,129 @@ static void select_semantic_pose(EidolonApp *app) {
     ImGui_EndCombo();
 }
 
+static bool calibration_resource_owned(const EidolonVrmCalibrationAnchor *anchor,
+                                       EidolonEprBodyResource resource) {
+    return (anchor->resource_mask & (UINT32_C(1) << (unsigned int)resource)) != 0U;
+}
+
+static void draw_calibration_angle(EidolonApp *app, const char *label, bool head,
+                                   size_t component) {
+    float *source = head ? app->vrm_calibration_session.draft.head_euler
+                         : app->vrm_calibration_session.draft.torso_euler;
+    float degrees = source[component] * 180.0F / SDL_PI_F;
+    if (ImGui_SliderFloatEx(label, &degrees, -180.0F, 180.0F, "%.1f deg", 0)) {
+        (void)eidolon_app_set_vrm_calibration_euler(app, head, component,
+                                                   degrees * SDL_PI_F / 180.0F);
+    }
+}
+
+static void draw_calibration_vector(EidolonApp *app, const char *prefix, bool pole,
+                                    float values[3]) {
+    static const char *components[3] = {"out", "up", "forward"};
+    for (size_t component = 0U; component < 3U; ++component) {
+        char label[64];
+        float value = values[component];
+        SDL_snprintf(label, sizeof(label), "%s %s", prefix, components[component]);
+        if (ImGui_SliderFloatEx(label, &value, -2.0F, 2.0F, "%.3f arm", 0)) {
+            (void)eidolon_app_set_vrm_calibration_arm_component(app, pole, component, value);
+        }
+    }
+}
+
+static void draw_vrm_calibration(EidolonApp *app) {
+    EidolonVrmCalibrationSession *session = &app->vrm_calibration_session;
+    EidolonVrmCalibrationAnchor *draft = &session->draft;
+    const char *preview = eidolon_vrm_calibration_anchor_name(session->selected_anchor);
+    ImGui_SeparatorText("VRM calibration");
+    ImGui_TextWrapped("Freeze one semantic EPR anchor, adjust this character, then accept it. "
+                      "Measurements and accepted anchors are saved beside the VRM.");
+    if (ImGui_BeginCombo("calibration anchor", preview, 0)) {
+        for (int value = 0; value < (int)EIDOLON_VRM_CALIBRATION_ANCHOR_COUNT; ++value) {
+            const EidolonVrmCalibrationAnchorId anchor =
+                (EidolonVrmCalibrationAnchorId)value;
+            const bool selected = anchor == session->selected_anchor;
+            if (ImGui_SelectableEx(eidolon_vrm_calibration_anchor_name(anchor), selected, 0,
+                                   (ImVec2){0.0F, 0.0F})) {
+                (void)eidolon_app_select_vrm_calibration_anchor(app, anchor);
+            }
+            if (selected) {
+                ImGui_SetItemDefaultFocus();
+            }
+        }
+        ImGui_EndCombo();
+    }
+    ImGui_Text("fixture tick: %lld ms  |  source: %s",
+               (long long)eidolon_vrm_calibration_anchor_tick(session->selected_anchor),
+               session->source_was_calibrated ? "accepted calibration" : "EPR seed");
+    ImGui_Text("anatomy: %016llx  |  accepted mask: 0x%02x",
+               (unsigned long long)session->measurements.anatomy_fingerprint,
+               session->working.anchor_mask);
+
+    const bool torso_owned =
+        calibration_resource_owned(draft, EIDOLON_EPR_RESOURCE_TORSO);
+    ImGui_SeparatorText("torso");
+    ImGui_BeginDisabled(!torso_owned);
+    draw_calibration_angle(app, "torso pitch", false, 0U);
+    draw_calibration_angle(app, "torso yaw", false, 1U);
+    draw_calibration_angle(app, "torso roll", false, 2U);
+    ImGui_EndDisabled();
+
+    const bool head_owned = calibration_resource_owned(draft, EIDOLON_EPR_RESOURCE_HEAD);
+    ImGui_SeparatorText("head");
+    ImGui_BeginDisabled(!head_owned);
+    draw_calibration_angle(app, "head pitch", true, 0U);
+    draw_calibration_angle(app, "head yaw", true, 1U);
+    draw_calibration_angle(app, "head roll", true, 2U);
+    ImGui_EndDisabled();
+
+    EidolonVrmCalibrationArm *arm = &draft->arms[EIDOLON_VRM_CALIBRATION_RIGHT];
+    const bool arm_owned =
+        calibration_resource_owned(draft, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+    ImGui_SeparatorText("right arm (whole-arm units)");
+    ImGui_BeginDisabled(!arm_owned);
+    draw_calibration_vector(app, "hand", false, arm->hand_target);
+    draw_calibration_vector(app, "elbow pole", true, arm->elbow_pole);
+    static const char *wrist_components[3] = {"pitch", "yaw", "roll"};
+    for (size_t component = 0U; component < 3U; ++component) {
+        char label[64];
+        float degrees = arm->wrist_euler[component] * 180.0F / SDL_PI_F;
+        SDL_snprintf(label, sizeof(label), "wrist %s", wrist_components[component]);
+        if (ImGui_SliderFloatEx(label, &degrees, -180.0F, 180.0F, "%.1f deg", 0)) {
+            (void)eidolon_app_set_vrm_calibration_wrist(app, component,
+                                                       degrees * SDL_PI_F / 180.0F);
+        }
+    }
+    float weight = arm->weight;
+    if (ImGui_SliderFloatEx("right arm weight", &weight, 0.0F, 1.0F, "%.2f", 0)) {
+        (void)eidolon_app_set_vrm_calibration_arm_weight(app, weight);
+    }
+    ImGui_EndDisabled();
+    ImGui_TextWrapped("The current slice owns only the right arm. Left-arm and per-bone residual "
+                      "editors remain intentionally unavailable until projection consumes them.");
+
+    ImGui_BeginDisabled(!session->dirty && session->source_was_calibrated);
+    if (ImGui_Button("revert draft")) {
+        (void)eidolon_app_revert_vrm_calibration_anchor(app);
+    }
+    ImGui_SameLine();
+    if (ImGui_Button("accept anchor")) {
+        (void)eidolon_app_commit_vrm_calibration_anchor(app);
+    }
+    ImGui_EndDisabled();
+    ImGui_SameLine();
+    if (ImGui_Button("save sidecar")) {
+        (void)eidolon_app_save_vrm_calibration(app);
+    }
+    ImGui_Text("draft: %s  |  sidecar: %s",
+               (session->dirty || !session->source_was_calibrated) ? "unaccepted"
+                                                                   : "accepted/current",
+               session->saved ? "saved" : "not saved");
+    ImGui_TextWrapped("path: %s", session->path);
+    if (session->error[0] != '\0') {
+        ImGui_TextWrapped("error: %s", session->error);
+    }
+}
+
 static void draw_model_settings(EidolonApp *app) {
     select_model_resolution(app);
 
@@ -244,6 +367,14 @@ static void draw_model_settings(EidolonApp *app) {
     reset_setting_button(app, EIDOLON_USER_SETTING_MODEL_ROLL, "reset##model_roll");
     ImGui_Text("default: %.1f deg  |  source: %s", app->system_settings.model_roll_degrees,
                setting_source(app, EIDOLON_USER_SETTING_MODEL_ROLL));
+
+    ImGui_TextWrapped("The mouse wheel changes the 3D overlay size without cropping the render; "
+                      "double middle-click resets rotation and overlay size.");
+
+    if (app->vrm_calibration_ready) {
+        draw_vrm_calibration(app);
+        return;
+    }
 
     ImGui_SeparatorText("pose");
     select_semantic_pose(app);

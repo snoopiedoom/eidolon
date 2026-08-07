@@ -32,8 +32,8 @@ transparent desktop presentation + native hit testing
 
 This is the current implementation. Its presentation boundary is real, but the legacy path still
 retains transitional SDL renderer aliases and the native path currently supports only portraits.
-The first EPR slice inserts a renderer-neutral control boundary for an explicitly selected VRM
-body without changing source, session, scene, or presentation ownership:
+The first EPR slice inserts a renderer-neutral control boundary for the explicitly selected
+supported reference VRM without changing source, session, scene, or presentation ownership:
 
 ```text
 accepted operational + semantic evidence
@@ -51,6 +51,34 @@ selected body renderer
 
 See the [EPR overview](design/epr-overview.md). A2 remains the owner of eventual stable
 `(source_id, session_id)` truth; EPR consumes that truth through one ingress adapter.
+
+## Parallel body systems
+
+The diagram above is the rigged-3D path, not a replacement pipeline for every body. The portrait
+director and EPR/VRM runtime are independent body-performance systems:
+
+```text
+shared operational + semantic + delivery evidence
+                 |
+       +---------+---------+
+       |                   |
+       v                   v
+portrait planning      EPR 3D planning
+       |                   |
+       v                   v
+portrait realization   VRM/model realization
+       |                   |
+       +---------+---------+
+                 |
+                 v
+       shared scene/presentation contracts
+```
+
+They coexist in the same application and preserve the same session, persona, dialogue, selection,
+and presentation owners. They do not share renderer-specific labels, pose state, motors, or asset
+structures. Performance Intent is a stable boundary available to EPR; it is not a requirement that
+the portrait renderer run through the physical 3D runtime. One body variant is active for the
+visible character today, while inactive expensive renderers remain uninitialized.
 
 The completed target separates every body/content renderer from platform-native surface
 presentation:
@@ -113,8 +141,10 @@ snapshots and prepared expression tracks.
 - `performance_runtime`, `behavior_plan`, `body_resources`, `realization`, `canonical_control`:
   approved EPR boundaries for immutable intent, plan generations, temporal commitment, explicit
   grants, modality programs, and whole-state control transactions;
-- `vrm_body`, `vrm_projection`: VRM 1.0 validation and body-profile publication followed by
-  transactional model-local projection; neither renders or selects behavior;
+- `vrm_body`, `vrm_calibration`, `vrm_projection`: experimental supported-reference-avatar parsing,
+  full semantic-skeleton measurement, versioned anatomy-bound calibration profiles, body-profile
+  publication, and model-local projection; none renders, selects upstream meaning, or currently
+  claims general VRM 1.0 compatibility;
 - `performance_trace`: bounded typed causal records; it observes decisions without owning them;
 - `draw`: transparent SDL composition, dialogue rendering, snapshots, and hit-mask invalidation;
 - `text_renderer`: SDL_ttf faces, fallback selection, and reusable cached text objects;
@@ -135,9 +165,13 @@ The active body renderer is selected at runtime:
 - **2D portrait** displays one full-canvas transparent expression image at a time. Expression art
   swaps atomically on the next rendered frame. Breathing, posture, delivery spring, attention, and
   semantic accents compose into one bottom-anchored transform.
-- **3D model** evaluates a skinned GLB/VRM hierarchy. A selected VRM consumes complete EPR
-  canonical-control revisions; Rio retains its legacy procedural pose path. Both render into an
-  SDL-owned GPU texture.
+- **3D model** evaluates a skinned hierarchy. The experimental supported reference VRM consumes EPR
+  canonical-control revisions; this does not imply arbitrary VRM compatibility. Rio retains its
+  legacy procedural pose path. Both render into an SDL-owned GPU texture.
+
+Each bullet is an independent body implementation. Shared upstream evidence and downstream scene
+contracts do not authorize a renderer to mutate another renderer's state or force all bodies
+through one internal control pipeline.
 
 Body selection must not initialize expensive inactive renderers unnecessarily. When the 2D
 portrait is selected successfully, 3D initialization is skipped. The current global

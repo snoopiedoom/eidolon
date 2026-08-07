@@ -1493,6 +1493,12 @@ A package is not distributable merely because it is valid VRM.
 
 VRM Animation is a useful portable authored-motion source because it maps humanoid roles, expressions and look-at in a separate glTF animation file.
 
+It is not the primary answer to adapting ordinary EPR posture and gesture to a user-supplied body.
+That path begins by measuring the body and letting the user approve a small semantic anchor
+vocabulary in the running EPR scenario. The runtime can then derive strength, phase transitions,
+interruption and settling from body-relative task-space anchors. VRMA remains an optional generator
+for forms that need authored trajectories or cannot be derived from the calibrated vocabulary.
+
 Eidolon may use VRMA for:
 
 - authored gesture nuclei;
@@ -1723,6 +1729,7 @@ character.vrm
 character.eidolon.yaml
 style.yaml
 humanoid-calibration.yaml
+character.vrm.epr-calibration
 contact-surfaces.yaml
 joint-limits.yaml
 behavior-library/
@@ -1742,6 +1749,9 @@ The Eidolon sidecar adds information VRM does not standardize:
 
 - capability declarations;
 - anatomical frames and measurements;
+- a measured-anatomy fingerprint used to reject stale calibration;
+- partial user-approved semantic anchors with resource masks and normalized task-space goals;
+- optional model-local residual rotations for corrections that generic IK cannot reproduce;
 - semantic contact surfaces;
 - joint limits and comfort regions;
 - expression affect calibration;
@@ -1752,6 +1762,12 @@ The Eidolon sidecar adds information VRM does not standardize:
 - normalized rights conclusion and source evidence.
 
 It does not duplicate VRM node mappings unnecessarily.
+
+`character.vrm.epr-calibration` names the strict line-oriented first experimental runtime format.
+It may contain neutral plus any completed subset of attentive, thinking, responding, contrast
+preparation/peak/recovery and interrupted/guarded. The eventual package compiler may ingest that
+file into the broader human-readable package formats above; the persisted format remains versioned
+and is never a dump of runtime structs.
 
 ### 22.3 Behavior schema format
 
@@ -2033,14 +2049,29 @@ The crossed-arm motif never means one emotion by itself.
 1. acquire or author a legally distributable VRM 1.0 model;
 2. validate humanoid hierarchy, T-pose, expressions, look-at, node constraints and spring chains;
 3. inspect deformation at shoulder, elbow, wrist, pelvis, knee and ankle extremes;
-4. derive anatomical frames and body measurements;
-5. author joint comfort and hard-limit data;
-6. define semantic contact surfaces;
-7. calibrate expression targets and conflicts;
-8. preview canonical neutral and extreme validation poses;
-9. save rights evidence and normalized package conclusion.
+4. derive anatomical frames, per-role bind positions, segment lengths and proportions;
+5. fingerprint the measured semantic anatomy and start or load its partial calibration sidecar;
+6. author joint comfort and hard-limit data;
+7. define semantic contact surfaces;
+8. calibrate expression targets and conflicts;
+9. preview canonical neutral and extreme validation poses;
+10. save rights evidence and normalized package conclusion.
 
-### 25.2 Behavior authoring
+### 25.2 Runtime semantic calibration
+
+1. run the actual EPR scenario with the selected model and freeze at one named semantic anchor;
+2. adjust body-relative task-space handles before editing raw bones;
+3. add a bounded model-local residual only where the canonical solver cannot match the approved
+   deformation or authored axes;
+4. validate resource ownership, reach, joint comfort and residual normalization;
+5. save the complete anchor transactionally while retaining all previously valid anchors;
+6. replay the behavior family at weaker/stronger intensity and through interruption/recovery;
+7. revise only rejected anchors and add a new anchor only for a genuinely new motion family.
+
+Calibration records how a body should realize semantic form. It does not assign upstream meaning,
+replace resource arbitration, or authorize the body adapter to write unowned channels.
+
+### 25.3 Behavior authoring
 
 1. author the semantic nucleus in a canonical VRM mannequin or task-space editor;
 2. annotate resources, contacts and phase points;
@@ -2052,7 +2083,7 @@ The crossed-arm motif never means one emotion by itself.
 8. compile and run deterministic scenario tests;
 9. conduct owner visual review.
 
-### 25.3 Tooling
+### 25.4 Tooling
 
 The authoring tool should expose:
 
@@ -2264,7 +2295,8 @@ This sequence minimizes architectural rework. It does not reduce the final V1 sc
 ### Phase 1: VRM semantic runtime
 
 - humanoid validation and mapping;
-- anatomical frames and rest normalization;
+- anatomical frames, per-role bind measurement, segment lengths and rest normalization;
+- anatomy fingerprint plus versioned partial calibration-profile loading;
 - expressions, look-at, node constraints and spring-bone execution order;
 - package capabilities and rights metadata;
 - canonical pose inspection.
@@ -2309,6 +2341,7 @@ This sequence minimizes architectural rework. It does not reduce the final V1 sc
 - analytic arm IK;
 - wrist orientation and twist;
 - hand shapes;
+- interactive semantic-anchor capture and calibrated program generation;
 - transactional solve.
 
 **Gate:** initial gesture and posture vocabulary is readable from front and side.
@@ -2354,7 +2387,7 @@ This sequence minimizes architectural rework. It does not reduce the final V1 sc
 
 ### Phase 10: authored motion and generator interchange
 
-- VRMA import and phase annotation;
+- optional VRMA import and phase annotation for motion families beyond calibrated-anchor derivation;
 - authored/procedural generator parity;
 - compact motion matching or DMP experimentation;
 - learned generator interface and provenance policy.
@@ -2475,4 +2508,3 @@ That separation is what lets Eidolon become more than an avatar playing reaction
 ## 32. Condensed thesis statement
 
 > **Eidolon should model embodiment as an incremental, dynamically dispatched performance graph whose units carry semantic provenance, temporal constraints, body-resource claims and executable realization programs. A deterministic arbiter composes or revises those units against the body's actual current state, then projects the resulting canonical constraints through a capability-aware VRM physical realizer. Authored, procedural and learned motion are interchangeable realization strategies—not owners of meaning, truth or the body.**
-

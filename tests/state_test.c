@@ -1,6 +1,7 @@
 #include "state.h"
 
 #include <assert.h>
+#include <stddef.h>
 
 int main(void) {
     EidolonState state = EIDOLON_STATE_COUNT;

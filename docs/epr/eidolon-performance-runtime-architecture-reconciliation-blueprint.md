@@ -9,6 +9,14 @@ This document reconciles the proposed EPR thesis, research corpus, and schema ag
 A1-complete repository. It is an approved decision artifact, not an implementation specification
 frozen for all future EPR work. The canonical contracts linked below own production behavior.
 
+Post-implementation scope note (2026-07-31): the portrait and EPR/VRM paths are independent body
+systems that coexist behind shared evidence and scene/presentation boundaries. This blueprint does
+not route the portrait renderer through EPR or give either body system ownership of the other's
+local state. References below to “VRM 1.0” mean the first experimental supported-reference-avatar
+ecosystem, not broad VRM 1.0 compatibility. The current normative scope and correctness gates live
+in the [experimental VRM reference-body contract](../design/vrm-body-runtime.md) and
+[product roadmap](../product-roadmap.md).
+
 The central conclusion is narrower than the thesis: EPR needs two hard runtime cores in its first
 slice:
 
@@ -274,7 +282,8 @@ cross-module transaction order. It must not become a god controller.
 6. **The current GLB loader is not a latent VRM adapter.** It does not parse VRM 1.0 extensions,
    first-person/look-at metadata, expression morph/material binds, node constraints, or spring
    bones. It accepts one skin, basic PBR base-color texture, joint/weight attributes, and triangles.
-   VRM support is a new semantic loader/adapter above reusable glTF/GPU plumbing.
+   Even experimental reference-avatar support requires a new semantic loader/adapter above reusable
+   glTF/GPU plumbing.
 
 7. **Model-local bone data currently masquerades as semantic state.** The mutable `MotionRig`
    contains glTF node transforms and Rio cache indexes. It is useful projection state, not a
@@ -604,7 +613,7 @@ Each deterministic realizer emits a bounded, versioned program:
 - posture: semantic base joint targets, weights, onset/settle curves;
 - gaze: semantic target, eye/head contributions, lead/follow delay, range/fallback policy;
 - gesture: task-space hand path, elbow-pole policy, wrist orientation, phase anchors;
-- expression: neutral/focused VRM expression weights when supported;
+- expression: an explicitly mapped semantic expression weight when supported;
 - idle: seeded residual channels with bounded amplitude and phase.
 
 Programs refer only to semantic resources, anchors, normalized body measures, and capability names.
@@ -635,13 +644,15 @@ The first VRM adapter must:
   defaults, and optional capabilities;
 - project semantic posture and arm controls into the VRM humanoid;
 - use VRM look-at for the eye component while head/torso orientation remains canonical control;
-- map neutral/focused expression weights if the body supplies suitable expression binds;
+- map the semantic focused-expression channel only through an explicit supported expression
+  mapping; do not redefine VRM preset names inside the adapter;
 - leave unsupported optional expression/look-at channels neutral and trace one local degradation;
 - declare spring-bone/node-constraint update ownership even though active spring control is deferred;
 - reject invalid required humanoid structure transactionally without affecting portrait/session
   operation.
 
-The visible body asset must be a legally usable VRM 1.0 file with compatible license metadata.
+The visible body asset must be the legally usable supported reference avatar with authoritative VRM
+1.0 metadata and compatible license metadata.
 Existing Rio GLB proves the renderer but is neither the VRM contract nor the first shippable VRM
 body. Asset selection/acquisition is a Phase 2 input and any external download remains separately
 approval-controlled.

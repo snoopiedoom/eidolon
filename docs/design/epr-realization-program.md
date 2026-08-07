@@ -19,6 +19,12 @@ A realizer receives:
 - fixed configuration and seed;
 - current canonical state when cleanup continuity requires it.
 
+For rigged bodies, the normalized body profile may expose a matching set of user-approved semantic
+calibration anchors. A posture/gesture realizer selects semantic endpoints from that set and derives
+phase-local strength and trajectories; it does not copy model-local rotations into the
+renderer-neutral IR. If a required anchor is absent, realization fails locally through a declared
+fallback instead of substituting a hard-coded model-specific pose.
+
 It emits one versioned bounded program or a typed local failure. It does not mutate the plan,
 grant resources, inspect sessions/classifier labels, parse files, or draw.
 
@@ -28,7 +34,7 @@ First-slice realizers are:
 - attentive, thinking-contained, responding-open, and interrupted-guarded posture;
 - eye-first/head-follow gaze;
 - one restrained right-arm contrast gesture;
-- neutral/focused expression when supported;
+- one semantic focused-expression channel when explicitly mapped and executable;
 - right-arm settle generated from current state.
 
 ## Realization Program
@@ -41,6 +47,11 @@ immutable while sampled.
 
 Programs contain no glTF node index, VRM JSON property, SDL type, D3D type, DirectComposition type,
 Win32 handle, scene layer, or presentation target.
+
+Calibrated task-space targets may be compiled into a program because they are expressed in
+body-relative anatomical coordinates. Optional model-local residual quaternions remain in the body
+adapter sidecar and apply only after canonical solving; they never become upstream semantic
+meaning.
 
 ## Canonical control state
 
@@ -55,14 +66,19 @@ The first-slice canonical state owns:
 - validity and capability-degradation flags.
 
 It does not contain left-arm pose, model-local bone orientations, matrices, or GPU palette data.
-The first VRM adapter lowers its bind T-pose left arm as a body-local neutral baseline; that is not
-a hidden EPR gesture channel.
+A projection that receives no left-arm resource preserves the incoming base/imported left-arm pose;
+it may not invent a body-local relaxed baseline. The reference projection now preserves that
+unowned chain. Controlled anatomical rotations pass through precomputed bind-world correction
+frames, and the accepted projection commits from a complete scratch TRS pose. A future animation
+owner publishes its fresh base pose through the explicit capture seam before EPR projection;
+constraints and secondary physics then compose after the atomic EPR commit.
 
 ## Composition order
 
 At each fixed control tick:
 
-1. create one complete neutral candidate for the current plan generation;
+1. create one complete EPR-owned candidate from the last valid/base canonical state for the current
+   plan generation;
 2. sample the granted base posture program;
 3. apply cooperative gaze/head composition;
 4. apply compatible seeded idle residuals;

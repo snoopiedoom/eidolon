@@ -5,6 +5,7 @@
 
 typedef enum EidolonAppMode {
     EIDOLON_APP_INTERACTIVE,
+    EIDOLON_APP_AUTHORING,
     EIDOLON_APP_SNAPSHOT,
 } EidolonAppMode;
 
@@ -30,9 +31,24 @@ bool eidolon_app_reset_user_setting(EidolonApp *app, EidolonUserSettingField fie
 void eidolon_app_set_model_scale(EidolonApp *app, float scale);
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side);
 bool eidolon_app_update_performance_fixture(EidolonApp *app, uint64_t now_ms);
+bool eidolon_app_restart_performance_fixture(EidolonApp *app, uint64_t now_ms);
+bool eidolon_app_begin_vrm_calibration(EidolonApp *app, const char *path);
+bool eidolon_app_select_vrm_calibration_anchor(EidolonApp *app,
+                                               EidolonVrmCalibrationAnchorId anchor);
+bool eidolon_app_apply_vrm_calibration_draft(EidolonApp *app);
+bool eidolon_app_set_vrm_calibration_euler(EidolonApp *app, bool head, size_t component,
+                                           float radians);
+bool eidolon_app_set_vrm_calibration_arm_component(EidolonApp *app, bool pole, size_t component,
+                                                   float value);
+bool eidolon_app_set_vrm_calibration_wrist(EidolonApp *app, size_t component, float radians);
+bool eidolon_app_set_vrm_calibration_arm_weight(EidolonApp *app, float weight);
+bool eidolon_app_revert_vrm_calibration_anchor(EidolonApp *app);
+bool eidolon_app_commit_vrm_calibration_anchor(EidolonApp *app);
+bool eidolon_app_save_vrm_calibration(EidolonApp *app);
 void eidolon_app_log_presentation_metrics(const EidolonApp *app);
 void eidolon_app_set_model_rotation(EidolonApp *app, float yaw_degrees, float pitch_degrees,
                                     float roll_degrees);
+void eidolon_app_adjust_model_scale(EidolonApp *app, float wheel_steps);
 void eidolon_app_set_neutral_pose(EidolonApp *app, float arm_lower_degrees,
                                   float elbow_add_degrees);
 void eidolon_app_select_semantic_pose(EidolonApp *app, int pose_index);

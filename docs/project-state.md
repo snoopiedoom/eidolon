@@ -1,6 +1,6 @@
 # Project state
 
-Updated 2026-07-24. This file records the current implementation frontier and restart checklist.
+Updated 2026-08-07. This file records the current implementation frontier and restart checklist.
 Stable design and operating knowledge belongs in the other documents; this file may change as
 milestones move.
 
@@ -39,9 +39,15 @@ product capability is absent.
 Bunny Asuna is the alpha-driving portrait body: ten full-canvas expressions, full/bust framing,
 Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible agent
 session. The Mutsuki Dress v2 sprite remains a fallback. Rio's procedural 3D renderer remains
-selectable and is deliberately initialized only when requested. A local VRM 1.0 body can now run
-the first complete EPR vertical slice through that existing SDL 3D presentation path; the portrait
-remains the shipped default.
+selectable and is deliberately initialized only when requested. One manually selected reference
+VRM can run the first EPR vertical slice through that existing SDL 3D presentation path. This is an
+experimental supported-reference-avatar path, not general VRM 1.0 support; the portrait remains the
+shipped default.
+
+The portrait director and EPR/VRM runtime are separate body-performance systems. They coexist behind
+shared session, dialogue, selection, scene, and presentation boundaries, but neither owns the
+other's expression labels, motion state, pose state, or assets. Shared body-neutral evidence does
+not require the portrait to run through EPR.
 
 The settings/debug surface is a separate Dear ImGui window. Preferred renderer, portable
 presentation preference, display scale, portrait framing, 3D resolution/rotation, and dialogue
@@ -97,13 +103,31 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   expression, eye-first/head-follow gaze, a restrained right-arm contrast gesture, interruption,
   current-state resource transfer and cleanup, guarded settling, and prevention of interrupted
   phase replay;
-- one local VRM 1.0 path validates authoritative humanoid roles and optional morph/look-at
-  capabilities, projects monotonic control transactions, renders morph/material/alpha data, and
-  degrades optional capabilities locally;
+- one experimental reference-avatar path validates authoritative humanoid hierarchy/scale, rejects
+  unsupported matrix nodes, reports optional capabilities through absent/declared/parsed/executable
+  states, maps an independently parsed `relaxed` position morph over the bind-face baseline, and
+  projects monotonic EPR control revisions through the current base-color/alpha subset;
 - the reference VRM is acquired manually through its Pixiv-authenticated VRoid Hub page, remains
-  outside Git under its no-redistribution terms, and is validated locally by `make vrm-check`;
-- deterministic performance snapshots and a hidden five-second SDL 3D run complete with the
-  portrait/default and native-presentation selections unchanged;
+  outside Git under its no-redistribution terms, and receives the current structural/profile
+  preflight through `make vrm-structure-check` (`make vrm-check` remains an alias);
+- bind-world correction frames remove raw local-axis assumptions for controlled torso/head/eye/wrist
+  rotations, and a complete scratch TRS transaction preserves unowned pose channels while leaving
+  the live rig untouched on failure;
+- `make vrm-runtime-check` exercises the actual geometry, 39 decoded textures, 226-joint skinning,
+  shaders, 252 projected control revisions, and a presented hidden GPU frame for DECAGRAMMATON;
+- the owner-selected local default is now Vampire Cat (`2349235869624830263.vrm`), which separately
+  passes with 20 draws, 31 textures, 195 joints, and 252 projected revisions; its embedded
+  author-only/no-redistribution/no-modification terms keep it a private untracked fixture;
+- the VRM path now measures bind position and nearest-semantic-parent length for every mapped
+  humanoid role, publishes bilateral proportions/body axes and an anatomy fingerprint, and
+  transactionally loads partial semantic-anchor sidecars without changing visible poses;
+- `make vrm-calibrate VRM_PATH=...` now rebuilds the actual EPR fixture at eight frozen semantic
+  anchors, projects live task-space edits, and deterministically/atomically saves partial sidecars;
+- calibration and visible performance review now use an explicit transparent/borderless authoring
+  mode instead of accidentally showing the opaque snapshot host; wheel scaling grows the overlay
+  with the body, and rotation-safe depth fitting prevents orbit inspection from clipping the rig;
+- deterministic performance snapshots, the hidden runtime gate, and the visible five-second SDL 3D
+  review command complete with the portrait default and native-presentation selection unchanged;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
 
@@ -113,9 +137,10 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   response and retain the new performance log if timing still feels wrong.
 - Switch all three body renderers through settings and confirm scale, framing, rotation, and restart
   persistence.
-- Judge the VRM EPR sequence as a performance: whether attention, thinking, contrast, interruption,
-  cleanup, and continued presence read correctly and feel alive. Structural trace and control
-  verification is automated.
+- Use the in-runtime calibration surface to approve the selected local body's neutral, attentive,
+  thinking, responding, contrast, and interrupted/guarded anchors, then judge the derived complete
+  sequence. The first review accepted camera/rig/harness correctness and rejected the provisional
+  hard-coded poses; EPR trace and control verification remains automated.
 
 The owner accepted ordinary no-environment DirectComposition portrait/dialogue startup, transparent
 per-pixel click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
@@ -155,15 +180,35 @@ interaction after both injected recovery branches.
 - portable Linux font fallback and feature parity remain unfinished;
 - the complete character-sprite download is intentionally not part of Git and has not been run as
   part of normal verification;
-- Rio pose endpoints remain calibration work, not finished animation: relaxed is stiff, guarded is
-  behind the body, and attentive/playful are unconvincing;
+- legacy Rio pose endpoints remain calibration work, not finished animation, and are separate from
+  the EPR/VRM calibration profile;
 - the first EPR ingress is a deterministic synthetic fixture behind the future A2 boundary; live
   A2 source/session provenance is not duplicated here;
 - retired-plan compaction is not needed by the bounded first fixture but must land before
   long-running live A2 evidence can produce unbounded performance episodes;
-- the VRM path implements the first focused morph and base PBR color/alpha subset; MToon shading,
-  spring bones, node constraints, fingers, locomotion, balance, and a broader gesture catalogue are
-  deferred;
+- the VRM path is limited to the selected reference-avatar experiment and must not be exposed as an
+  unrestricted "load a VRM" capability;
+- MToon is detected and version-checked per material, but the renderer still provides only its
+  documented base-color fallback rather than executable MToon shading;
+- `neutral` and `relaxed` are independent and the bind face is now the zero-expression baseline;
+  other preset/custom expressions and material-color/texture-transform bind payloads are not yet
+  retained or executable;
+- authored look-at type, offset, and range maps are parsed, but authored bone/expression look-at is
+  deliberately parsed/not executable and degrades to head-only gaze;
+- projection preserves the unowned left arm and unrelated TRS, transforms canonical angular control
+  through authored bind frames, and commits from scratch; future imported animation must publish its
+  fresh base through the capture seam before EPR, with constraints/physics ordered afterward;
+- the calibration sidecar measures, fingerprints, parses, captures, edits, and atomically saves
+  partial anchors; left-arm/residual editing and compiling EPR programs from accepted anchors are
+  not implemented yet;
+- matrix nodes are rejected for the supported slice, and humanoid nearest-ancestor plus positive
+  scale validation now run before profile publication;
+- the renderer remains a narrow embedded-PNG, global-clamp-sampler, shared-skin-palette,
+  position-morph, base-color/alpha dialect; `make vrm-runtime-check` proves that dialect for the
+  selected asset/machine, not general VRM compatibility;
+- MToon shading, material/texture-transform expressions, spring bones, node constraints, fingers,
+  locomotion, balance, and a broader gesture catalogue are deferred until the correctness and
+  composition gates close;
 - planted feet, wrist orientation, lower-body IK, gaze/blink behavior, and secondary physics remain
   future 3D milestones;
 - ChatGPT Desktop chat and ZCode expose no verified attachable local stream, so their agent adapters
@@ -183,9 +228,13 @@ is complete and owner-accepted for the Windows 2D daily-driver path. DirectCompo
 normal portrait selection; `sdl_window_legacy` remains the explicit, capability, and failure
 fallback with its accepted modal-drag limitation.
 
-The separate EPR/VRM workstream is at its first owner-feel gate. Its implementation stays on
-`sdl_window_legacy`; native DirectComposition 3D and making 3D the default remain downstream of
-owner acceptance and do not alter A2 ownership.
+The separate EPR/VRM workstream has closed its corrective implementation/runtime gates. Its first
+owner-feel review accepted the camera, rig, and harness but rejected the provisional pose
+authorship, so the workstream is now implementing calibration-derived realization. It stays on
+`sdl_window_legacy`; native DirectComposition 3D and making 3D the default remain downstream and do
+not alter A2 or portrait ownership.
+
+Primary daily-driver priorities:
 
 1. add source-instance identity and migrate registry ownership from legacy
    `(adapter kind, session id)` to durable `(source_id, session_id)`;
@@ -200,10 +249,24 @@ owner acceptance and do not alter A2 ownership.
 9. define and measure the idle resource budget, then complete an owner-controlled workday soak;
 10. begin public-V1 character-package discovery only after the daily-driver alpha gate closes.
 
+Parallel EPR/VRM reference-body priorities:
+
+1. use the implemented in-runtime calibration session to author the selected local body's named task-space
+   anchors; bounded residual and left-arm controls remain follow-up authoring tools;
+2. compile posture/gesture programs from approved anchors and degrade
+   missing anchors locally without guessed fallback poses;
+3. calibrate the selected local body and repeat the owner-controlled visible performance judgement;
+4. extend the hostile corpus with renderer-level JPEG/URI/sampler/skin-palette fixtures and official
+   sample models;
+5. retain the imported-animation -> EPR -> look-at -> constraints -> spring seams before adding any
+   downstream pose owners; VRMA remains optional rather than the primary calibration path.
+
 ## Deferred by the active roadmap
 
 - native DirectComposition 3D, production-path EPR tuning, and making 3D the default body remain
-  downstream of owner acceptance of the first SDL EPR performance;
+  downstream of owner acceptance of the calibrated SDL EPR performance;
+- the EPR/VRM workstream's correctness gates are not deferred by the 2D roadmap; they are required
+  before the experimental reference body is treated as landed;
 - portrait-catalog expression annotation remains downstream of current Expression Director tuning
   and distributable character-package decisions.
 - conversational memory, persona-mediated output, and the local-first persona bridge are post-V1
@@ -214,7 +277,8 @@ owner acceptance and do not alter A2 ownership.
 1. Read the [product brief](product-brief.md), [V1 goal](v1-goal.md),
    [product roadmap](product-roadmap.md), this file, and the specification owning the next task.
 2. Run `git status --short`; preserve existing work and extracted local assets.
-3. On a fresh machine, set `SDL3_ROOT` as needed and run `make text-setup`.
+3. On a fresh machine, initialize submodules and run `make sdl-deps` (or let the first `make` build
+   the pinned SDL3/SDL3_ttf dependency layer automatically).
 4. Run `make check`, then build the relevant debug target. Use `make affect-setup` only when the
    ignored local classifier payload is absent.
 5. Use hidden snapshots for automated visual inspection. Ask the user to perform visible feel and

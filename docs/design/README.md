@@ -8,7 +8,7 @@ These documents define behavior that should survive implementation rewrites.
 - [EPR behavior plan and temporal dispatch](epr-behavior-plan.md)
 - [EPR body resources](epr-body-resources.md)
 - [EPR Realization Programs](epr-realization-program.md)
-- [VRM body runtime](vrm-body-runtime.md)
+- [Experimental VRM reference-body runtime](vrm-body-runtime.md)
 - [EPR tracing and validation](epr-tracing-validation.md)
 - [Procedural motion](procedural-motion.md)
 - [Multi-session dialogue](session-dialogue.md)

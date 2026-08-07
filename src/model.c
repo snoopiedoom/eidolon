@@ -5,10 +5,12 @@
 #include "motion.h"
 #include "pose_solver.h"
 #include "vrm_body.h"
+#include "vrm_calibration.h"
 #include "vrm_projection.h"
 
 #include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +32,8 @@
 #define MODEL_READBACK_COUNT 3
 #endif
 #define MODEL_FRAME_INTERVAL_MS 33U
+#define VRM_VIEW_VERTICAL_SPAN 1.70F
+#define VRM_VIEW_RIGHT_ACTION_BIAS 0.085F
 
 typedef struct EidolonModelVertex {
     float position[3];
@@ -121,8 +125,11 @@ struct EidolonModelRenderer {
     EidolonVrmBody vrm_body;
     EidolonVrmProjection vrm_projection;
     EidolonEprBodyProfile body_profile;
+    EidolonVrmMeasurements vrm_measurements;
+    EidolonVrmCalibration vrm_calibration;
     bool humanoid_ready;
     bool vrm_ready;
+    bool vrm_calibration_loaded;
     bool semantic_pose_active;
     bool semantic_pose_failed;
     Uint16 joint_nodes[MODEL_MAX_JOINTS];
@@ -140,6 +147,7 @@ struct EidolonModelRenderer {
     float pitch_radians;
     float roll_radians;
     float rotation_pivot[3];
+    float view_center[3];
     float view_scale;
     float view_depth_scale;
     bool fit_vrm_view;
@@ -149,6 +157,54 @@ struct EidolonModelRenderer {
     int target_height;
     bool failed;
 };
+
+static void load_optional_vrm_calibration(EidolonModelRenderer *model, const char *model_path) {
+    char default_path[1024];
+    const char *configured_path = SDL_getenv("EIDOLON_VRM_CALIBRATION_PATH");
+    const bool explicitly_configured = configured_path != NULL && configured_path[0] != '\0';
+    const char *path = configured_path;
+    if (!explicitly_configured) {
+        const int written = SDL_snprintf(default_path, sizeof(default_path), "%s.epr-calibration",
+                                         model_path);
+        if (written <= 0 || (size_t)written >= sizeof(default_path)) {
+            eidolon_log_write("model", "VRM calibration sidecar path is too long");
+            return;
+        }
+        path = default_path;
+    }
+
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path, &info) || info.type != SDL_PATHTYPE_FILE) {
+        SDL_ClearError();
+        if (explicitly_configured) {
+            eidolon_log_write("model", "configured VRM calibration sidecar is unavailable: %s",
+                              path);
+        }
+        return;
+    }
+    size_t size = 0U;
+    char *text = SDL_LoadFile(path, &size);
+    if (text == NULL) {
+        eidolon_log_write("model", "could not load VRM calibration sidecar '%s': %s", path,
+                          SDL_GetError());
+        SDL_ClearError();
+        return;
+    }
+    EidolonVrmCalibration candidate;
+    char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
+    const bool valid = eidolon_vrm_calibration_parse(
+        text, size, &model->vrm_measurements, &candidate, error, sizeof(error));
+    SDL_free(text);
+    if (!valid) {
+        eidolon_log_write("model", "ignored invalid VRM calibration sidecar '%s': %s", path,
+                          error);
+        return;
+    }
+    model->vrm_calibration = candidate;
+    model->vrm_calibration_loaded = true;
+    eidolon_log_write("model", "loaded VRM calibration sidecar '%s' anchors=0x%02x", path,
+                      model->vrm_calibration.anchor_mask);
+}
 
 #if !defined(_WIN32)
 static const SDL_GPUTextureFormat MODEL_COLOR_FORMAT = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -270,21 +326,26 @@ static void set_rotation_pivot(EidolonModelRenderer *model, const EidolonCpuGeom
     }
     for (size_t axis = 0; axis < 3; ++axis) {
         model->rotation_pivot[axis] = (minimum[axis] + maximum[axis]) * 0.5F;
+        model->view_center[axis] = model->rotation_pivot[axis];
     }
     if (model->vrm_ready) {
         const float width = maximum[0] - minimum[0];
         const float height = maximum[1] - minimum[1];
         const float depth = maximum[2] - minimum[2];
-        if (height > 0.0001F) {
-            model->view_scale = 1.70F / height;
-            model->view_depth_scale = 0.80F / SDL_max(depth, 0.10F);
+        if (width > 0.0001F && height > 0.0001F) {
+            const float rotation_safe_depth = SDL_sqrtf(width * width + height * height +
+                                                        depth * depth);
+            model->view_scale = VRM_VIEW_VERTICAL_SPAN / height;
+            model->view_center[0] += width * VRM_VIEW_RIGHT_ACTION_BIAS;
+            model->view_depth_scale = 0.80F / SDL_max(rotation_safe_depth, 0.10F);
             model->fit_vrm_view = true;
             eidolon_log_write(
                 "model",
-                "VRM geometry fit width=%.3f height=%.3f depth=%.3f center=%.3f,%.3f,%.3f "
-                "scale=%.3f",
+                "VRM performance view width=%.3f height=%.3f depth=%.3f "
+                "pivot=%.3f,%.3f,%.3f center=%.3f,%.3f,%.3f scale=%.3f",
                 width, height, depth, model->rotation_pivot[0], model->rotation_pivot[1],
-                model->rotation_pivot[2], model->view_scale);
+                model->rotation_pivot[2], model->view_center[0], model->view_center[1],
+                model->view_center[2], model->view_scale);
         }
     }
 }
@@ -299,12 +360,13 @@ static void model_projection(const EidolonModelRenderer *model, float projection
         return;
     }
     matrix_identity(projection);
-    projection[0] = model->view_scale;
-    projection[5] = model->view_scale;
+    const float scale = model->view_scale;
+    projection[0] = scale;
+    projection[5] = scale;
     projection[10] = -model->view_depth_scale;
-    projection[12] = -model->rotation_pivot[0] * model->view_scale;
-    projection[13] = -model->rotation_pivot[1] * model->view_scale;
-    projection[14] = 0.5F + model->rotation_pivot[2] * model->view_depth_scale;
+    projection[12] = -model->view_center[0] * scale;
+    projection[13] = -model->view_center[1] * scale;
+    projection[14] = 0.5F + model->view_center[2] * model->view_depth_scale;
 }
 
 static const cgltf_accessor *primitive_attribute(const cgltf_primitive *primitive,
@@ -597,15 +659,12 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
                 transform_position(world, position,
                                    geometry->vertices[vertex_cursor + vertex_index].position);
                 EidolonModelVertex *vertex = &geometry->vertices[vertex_cursor + vertex_index];
-                if (vrm_body != NULL && vrm_body->has_expression &&
-                    (!accumulate_expression_delta(primitive, (size_t)node_index, vertex_index,
-                                                  world, vrm_body->neutral_binds,
-                                                  vrm_body->neutral_bind_count,
-                                                  vertex->neutral_delta) ||
-                     !accumulate_expression_delta(primitive, (size_t)node_index, vertex_index,
-                                                  world, vrm_body->focused_binds,
-                                                  vrm_body->focused_bind_count,
-                                                  vertex->focused_delta))) {
+                if (vrm_body != NULL &&
+                    vrm_body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE &&
+                    !accumulate_expression_delta(
+                        primitive, (size_t)node_index, vertex_index, world,
+                        vrm_body->relaxed_expression.morph_binds,
+                        vrm_body->relaxed_expression.morph_bind_count, vertex->focused_delta)) {
                     return false;
                 }
 
@@ -1294,8 +1353,7 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     matrix_multiply(model_rotation, from_pivot, rotation_from_pivot);
     matrix_multiply(to_pivot, rotation_from_pivot, centered_rotation);
     matrix_multiply(projection, centered_rotation, scene.model_view_projection);
-    scene.expression_weights[0] =
-        model->vrm_ready ? 1.0F - model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[0] = 0.0F;
     scene.expression_weights[1] =
         model->vrm_ready ? model->vrm_projection.focused_expression_weight : 0.0F;
     scene.expression_weights[2] = 0.0F;
@@ -1903,8 +1961,7 @@ static bool submit_model_frame(EidolonModelRenderer *model, uint64_t now_ms) {
     matrix_multiply(model_rotation, from_pivot, rotation_from_pivot);
     matrix_multiply(to_pivot, rotation_from_pivot, centered_rotation);
     matrix_multiply(projection, centered_rotation, scene.model_view_projection);
-    scene.expression_weights[0] =
-        model->vrm_ready ? 1.0F - model->vrm_projection.focused_expression_weight : 0.0F;
+    scene.expression_weights[0] = 0.0F;
     scene.expression_weights[1] =
         model->vrm_ready ? model->vrm_projection.focused_expression_weight : 0.0F;
     scene.expression_weights[2] = 0.0F;
@@ -2185,12 +2242,18 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
         char error[256];
         if (!eidolon_vrm_body_parse(data, &model->vrm_body, error, sizeof(error)) ||
             !eidolon_vrm_body_make_profile(data, &model->vrm_body, &model->body_profile, error,
-                                           sizeof(error))) {
-            SDL_SetError("VRM 1.0 body validation failed: %s", error);
+                                           sizeof(error)) ||
+            !eidolon_vrm_measure(data, &model->vrm_body, &model->vrm_measurements, error,
+                                 sizeof(error))) {
+            SDL_SetError("experimental reference VRM validation failed: %s", error);
             cgltf_free(data);
             eidolon_model_destroy(model);
             return NULL;
         }
+        model->body_profile.fingerprint = model->vrm_measurements.anatomy_fingerprint;
+        eidolon_vrm_calibration_init(&model->vrm_calibration,
+                                     model->vrm_measurements.anatomy_fingerprint);
+        load_optional_vrm_calibration(model, model_path);
     }
 
     EidolonCpuGeometry geometry;
@@ -2203,9 +2266,10 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
     }
     if (is_vrm) {
         model->vrm_ready =
-            eidolon_vrm_projection_init(&model->vrm_projection, &model->vrm_body, &model->motion);
+            eidolon_vrm_projection_init(&model->vrm_projection, &model->vrm_body,
+                                        &model->body_profile, &model->motion);
         if (!model->vrm_ready) {
-            SDL_SetError("could not initialize VRM 1.0 control projection");
+            SDL_SetError("could not initialize experimental reference VRM control projection");
             cpu_geometry_destroy(&geometry);
             cgltf_free(data);
             eidolon_model_destroy(model);
@@ -2255,20 +2319,53 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer, const char *m
     eidolon_log_write("model",
                       "loaded %s draws=%zu textures=%zu joints=%zu target=%dx%d gpu=%s humanoid=%s "
                       "frame-transfer=%s",
-                      model->vrm_ready ? "VRM 1.0" : "GLB", model->draw_count, model->texture_count,
+                      model->vrm_ready ? "experimental reference VRM" : "GLB", model->draw_count,
+                      model->texture_count,
                       model->joint_count, model->target_width, model->target_height,
                       gpu_driver != NULL ? gpu_driver : "unknown",
                       (model->humanoid_ready || model->vrm_ready) ? "ready" : "unavailable",
                       frame_transfer);
     if (model->vrm_ready) {
         eidolon_log_write("model",
-                          "VRM body '%s' by %s look-at=%s expression=%s spring=%s "
-                          "license=%s",
+                          "reference VRM body '%s' by %s eyes=%s look-at=%s relaxed=%s "
+                          "neutral=%s mtoon=%s spring=%s constraints=%s license=%s",
                           model->vrm_body.name, model->vrm_body.author,
-                          model->vrm_body.has_look_at ? "yes" : "head-only",
-                          model->vrm_body.has_expression ? "neutral+relaxed" : "neutral-only",
-                          model->vrm_body.has_spring_bones ? "declared-not-simulated" : "absent",
+                          model->vrm_body.eye_bones_present ? "present" : "absent",
+                          eidolon_vrm_capability_state_name(model->vrm_body.look_at.state),
+                          eidolon_vrm_capability_state_name(
+                              model->vrm_body.relaxed_expression.state),
+                          eidolon_vrm_capability_state_name(
+                              model->vrm_body.neutral_expression.state),
+                          eidolon_vrm_capability_state_name(model->vrm_body.mtoon_state),
+                          eidolon_vrm_capability_state_name(model->vrm_body.spring_bones_state),
+                          eidolon_vrm_capability_state_name(
+                              model->vrm_body.node_constraints_state),
                           model->vrm_body.license_url);
+        eidolon_log_write(
+            "model",
+            "reference VRM anatomy fingerprint=%016llx height=%.4f shoulders=%.4f torso=%.4f "
+            "arms=%.4f+%.4f/%.4f+%.4f legs=%.4f+%.4f/%.4f+%.4f calibration=%s",
+            (unsigned long long)model->vrm_measurements.anatomy_fingerprint,
+            model->vrm_measurements.skeleton_height, model->vrm_measurements.shoulder_width,
+            model->vrm_measurements.torso_length,
+            model->vrm_measurements.upper_arm_length[EIDOLON_VRM_CALIBRATION_LEFT],
+            model->vrm_measurements.lower_arm_length[EIDOLON_VRM_CALIBRATION_LEFT],
+            model->vrm_measurements.upper_arm_length[EIDOLON_VRM_CALIBRATION_RIGHT],
+            model->vrm_measurements.lower_arm_length[EIDOLON_VRM_CALIBRATION_RIGHT],
+            model->vrm_measurements.upper_leg_length[EIDOLON_VRM_CALIBRATION_LEFT],
+            model->vrm_measurements.lower_leg_length[EIDOLON_VRM_CALIBRATION_LEFT],
+            model->vrm_measurements.upper_leg_length[EIDOLON_VRM_CALIBRATION_RIGHT],
+            model->vrm_measurements.lower_leg_length[EIDOLON_VRM_CALIBRATION_RIGHT],
+            model->vrm_calibration_loaded ? "loaded" : "not-authored");
+        if (model->vrm_body.relaxed_expression.state != EIDOLON_VRM_CAPABILITY_EXECUTABLE) {
+            eidolon_log_write("model", "reference VRM relaxed expression unavailable: %s",
+                              model->vrm_body.relaxed_expression.diagnostic);
+        }
+        if (model->vrm_body.look_at.state != EIDOLON_VRM_CAPABILITY_ABSENT &&
+            model->vrm_body.look_at.state != EIDOLON_VRM_CAPABILITY_EXECUTABLE) {
+            eidolon_log_write("model", "reference VRM authored look-at unavailable: %s",
+                              model->vrm_body.look_at.diagnostic);
+        }
     }
     if (model->humanoid_ready) {
         eidolon_log_write(
@@ -2287,6 +2384,24 @@ bool eidolon_model_body_profile(const EidolonModelRenderer *model, EidolonEprBod
     return true;
 }
 
+bool eidolon_model_vrm_measurements(const EidolonModelRenderer *model,
+                                    EidolonVrmMeasurements *measurements) {
+    if (model == NULL || measurements == NULL || !model->vrm_ready || model->failed) {
+        return false;
+    }
+    *measurements = model->vrm_measurements;
+    return true;
+}
+
+bool eidolon_model_vrm_calibration(const EidolonModelRenderer *model,
+                                   EidolonVrmCalibration *calibration) {
+    if (model == NULL || calibration == NULL || !model->vrm_ready || model->failed) {
+        return false;
+    }
+    *calibration = model->vrm_calibration;
+    return true;
+}
+
 bool eidolon_model_apply_control(EidolonModelRenderer *model,
                                  const EidolonCanonicalControl *control) {
     if (model == NULL || control == NULL || !model->vrm_ready || model->failed) {
@@ -2298,6 +2413,58 @@ bool eidolon_model_apply_control(EidolonModelRenderer *model,
     }
     model->transform_revision += 1U;
     return true;
+}
+
+bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
+                                      EidolonVrmRuntimeReport *report) {
+    bool ready;
+    bool textures_ready;
+    if (model == NULL || report == NULL || model->failed) {
+        return false;
+    }
+    SDL_zero(*report);
+    report->draw_count = model->draw_count;
+    report->texture_count = model->texture_count;
+    report->joint_count = model->joint_count;
+    report->projection_revision = model->vrm_projection.control_revision;
+    report->frame_sequence = model->presented_frame_sequence;
+    report->geometry_ready = model->draw_count > 0U && model->draws != NULL &&
+                             model->vertex_buffer != NULL && model->index_buffer != NULL;
+    textures_ready = model->texture_count > 0U && model->textures != NULL;
+    for (size_t index = 0U; textures_ready && index < model->texture_count; ++index) {
+        textures_ready = model->textures[index] != NULL;
+    }
+    report->textures_ready = textures_ready;
+#if defined(_WIN32)
+    report->skinning_ready = model->joint_count > 0U && model->bones_buffer != NULL;
+    report->shaders_ready = model->vertex_shader != NULL && model->pixel_shader != NULL &&
+                            model->input_layout != NULL;
+#else
+    report->skinning_ready = model->joint_count > 0U;
+    report->shaders_ready = model->pipeline != NULL && model->alpha_pipeline != NULL;
+#endif
+    report->projection_ready = model->vrm_ready && model->vrm_projection.ready &&
+                               model->vrm_projection.control_revision > 0U;
+    report->hidden_frame_ready = model->presented_frame_sequence > 0U;
+    ready = report->geometry_ready && report->textures_ready && report->skinning_ready &&
+            report->shaders_ready && report->projection_ready && report->hidden_frame_ready;
+    if (!ready) {
+        SDL_SetError("VRM runtime incomplete geometry=%s textures=%s skinning=%s shaders=%s "
+                     "projection=%s hidden-frame=%s",
+                     report->geometry_ready ? "ready" : "failed",
+                     report->textures_ready ? "ready" : "failed",
+                     report->skinning_ready ? "ready" : "failed",
+                     report->shaders_ready ? "ready" : "failed",
+                     report->projection_ready ? "ready" : "failed",
+                     report->hidden_frame_ready ? "ready" : "failed");
+    }
+    return ready;
+}
+
+uint64_t eidolon_model_vrm_projection_revision(const EidolonModelRenderer *model) {
+    return model != NULL && model->vrm_ready && !model->failed
+               ? model->vrm_projection.control_revision
+               : 0U;
 }
 
 const char *eidolon_model_body_name(const EidolonModelRenderer *model) {
@@ -2458,6 +2625,7 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
     SDL_free(model->textures);
     SDL_free(model->draws);
     eidolon_vrm_projection_destroy(&model->vrm_projection);
+    eidolon_vrm_body_destroy(&model->vrm_body);
     eidolon_motion_destroy(&model->motion);
     SDL_free(model);
 }

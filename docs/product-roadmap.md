@@ -22,14 +22,14 @@ real. Owner-controlled evaluation remains authoritative for interaction quality 
 
 ```text
 current implementation
-        ↓
-daily-driver alpha
-        ↓
-public V1
-        ↓
-persistent-persona platform
-        ↓
-protocol and ecosystem
+        |
+        +-> primary release sequence: daily-driver alpha -> public V1
+        |                              -> persistent-persona platform
+        |                              -> protocol and ecosystem
+        |
+        +-> parallel EPR/VRM experiment: reference-avatar slice
+                                       -> correctness/composition gates
+                                       -> broader rigged-3D support
 ```
 
 The daily-driver alpha proves that Eidolon is worth keeping open every day. Public V1 proves that
@@ -42,9 +42,12 @@ before the earlier product gates are complete.
 ## Settled product decisions
 
 - The current proving body is the 2D expression-portrait renderer.
-- A rigged 3D body remains the intended eventual default.
-- Work on 2D expression, timing, and motion must produce renderer-neutral performance knowledge
-  that a future 3D controller can consume.
+- A rigged 3D body remains the intended eventual default, but becoming the default does not retire
+  portrait, sprite, or other body implementations.
+- The portrait director and EPR/VRM runtime are separate body-performance systems. Neither is a
+  migration layer or internal implementation of the other.
+- Work on 2D expression, timing, and motion publishes renderer-neutral performance knowledge that
+  a 3D controller may consume without importing portrait labels, motors, or asset state.
 - Codex CLI is the required session source for daily-driver alpha.
 - OpenCode remains supported by the architecture but is not an alpha release blocker.
 - Alpha restart continuity restores presentation and session context, not conversational memory or
@@ -99,6 +102,18 @@ static | portrait | sprite | 3D body
 
 Portrait-specific expression labels and motion remain renderer data, not the semantic API.
 
+### Keep body systems separate and coexistent
+
+The 2D portrait director, sprite playback, legacy Rio controller, and EPR/VRM runtime remain
+independently buildable and selectable. They share source/session truth, dialogue, body-neutral
+performance evidence, scene geometry, and presentation contracts where appropriate. They do not
+share renderer-local expression labels, skeleton state, pose transactions, or motor state.
+
+The current product activates one body variant for the visible character. A selected body's
+failure may trigger a deterministic fallback, but it may not corrupt another body implementation or
+change persona, session, or dialogue ownership. Performance Intent is an available boundary for
+EPR, not a mandate that every body execute through one universal runtime.
+
 ### Keep real-time paths independent
 
 Presentation, input, dialogue reveal, and baseline motion continue when inference, classification,
@@ -129,6 +144,55 @@ terminal with its original attribution.
 Persisted settings, character packages, session-source configuration, and future persona state use
 versioned formats with explicit migration or safe fallback. Runtime structs are not persistence
 formats.
+
+## Parallel experimental workstream: EPR/VRM reference body
+
+This workstream is separate from the 2D daily-driver release sequence. It may progress and land in
+bounded units, but it neither advances nor blocks Gate A unless the roadmap explicitly changes the
+release body. The portrait remains the default and its acceptance evidence remains valid while the
+3D experiment changes.
+
+The current implementation is a supported-reference-avatar vertical slice, not general VRM 1.0
+support. Its owning contract is the
+[experimental VRM reference-body runtime](design/vrm-body-runtime.md).
+
+Landing order:
+
+Items 1-5 are implemented for the supported DECAGRAMMATON reference path. Item 6 is active: its
+measurement/profile and first interactive task-space calibration/save slices are implemented;
+calibrated program generation remains. Vampire Cat (`2349235869624830263.vrm`) is the current
+owner-selected private development default after separately passing both gates; its restrictive
+embedded permissions prevent treating that local selection as a public reference recommendation.
+Item 7 is the subsequent owner-controlled gate. None of these results broadens the compatibility
+claim.
+
+1. **Truthful experiment boundary:** use experimental/reference-avatar language in configuration,
+   logs, validation, and user documentation; do not expose an unrestricted "load a VRM" promise.
+2. **Structural correctness:** detect MToon at the material level, validate humanoid descendant
+   relationships and positive scale, and decompose or explicitly reject matrix-bearing controlled
+   nodes.
+3. **Expression and gaze correctness:** use a zero-expression baseline, preserve expressions
+   independently, parse authored look-at type/ranges or report head-only execution, and distinguish
+   absent, declared, parsed, and executable capabilities.
+4. **Composable pose ownership:** replace whole-rig bind reset and invented unowned channels with
+   resource-owned pose deltas, bind-space correction frames, and a complete scratch-pose
+   transaction before imported animation, constraints, or secondary motion are added.
+5. **Executable validation:** separate structural/profile validation from actual buffer, geometry,
+   texture, sampler, projection, shader, and hidden-frame validation; add adversarial and official
+   sample fixtures rather than validating only the selected reference model.
+6. **Calibration-derived realization:** measure authoritative humanoid bind positions, axes,
+   segment lengths, and proportions; bind a versioned partial sidecar to that anatomy; let the user
+   approve semantic anchors inside the running EPR scenario; and derive intensity, transitions,
+   interruption, and settling from those anchors instead of accumulating model-specific guessed
+   poses. VRMA remains an optional later generator, not the prerequisite for ordinary posture.
+7. **Reference-body acceptance:** retain deterministic EPR traces and complete an owner-controlled
+   visible performance review of the calibrated performance without changing the portrait default
+   or presentation selection.
+
+Only after those gates may the workstream claim a broader compatibility tier. JPEG/URI images,
+authored samplers, material and texture-transform expressions, deliberate MToon shading/fallback,
+constraints, spring bones, fingers, locomotion, balance, and a broader gesture catalogue remain
+subsequent scoped milestones. Compatibility broadening must keep the other body systems intact.
 
 ## Gate A: daily-driver alpha
 

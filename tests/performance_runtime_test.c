@@ -398,6 +398,34 @@ static void test_synthetic_adapter_is_bounded_and_deterministic(void) {
     assert(eidolon_epr_trace_hash(&first.trace) == eidolon_epr_trace_hash(&second.trace));
 }
 
+static void test_synthetic_adapter_restarts_monotonically(void) {
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceFixture fixture;
+    const EidolonEprBodyProfile profile = eidolon_epr_default_body_profile();
+
+    assert(eidolon_epr_runtime_init(&runtime, 44U, &profile));
+    eidolon_performance_fixture_init(&fixture);
+    for (uint64_t now_ms = 0U; now_ms <= 5000U; now_ms += 20U) {
+        assert(eidolon_performance_fixture_update(&fixture, &runtime, now_ms));
+    }
+    assert(runtime.intent.revision == 6U);
+    assert(runtime.last_tick == 5000);
+    assert(eidolon_performance_fixture_restart(&fixture, &runtime, 5020U));
+    for (uint64_t now_ms = 5020U; now_ms <= 10020U; now_ms += 20U) {
+        if (!eidolon_performance_fixture_update(&fixture, &runtime, now_ms)) {
+            fprintf(stderr, "fixture replay failed at driver=%llu tick=%lld revision=%llu stage=%u\n",
+                    (unsigned long long)now_ms, (long long)runtime.last_tick,
+                    (unsigned long long)runtime.intent.revision, fixture.stage);
+            assert(false);
+        }
+    }
+    assert(runtime.intent.revision == 12U);
+    assert(runtime.intent.predecessor_revision == 11U);
+    assert(runtime.last_tick == 10020);
+    assert(runtime.plan.generation == 12U);
+    assert(!fixture.failed);
+}
+
 int main(void) {
     test_intent_validation();
     test_temporal_transaction();
@@ -409,6 +437,7 @@ int main(void) {
     test_interrupted_beat_cannot_replay();
     test_trace_is_a_deterministic_ring();
     test_synthetic_adapter_is_bounded_and_deterministic();
+    test_synthetic_adapter_restarts_monotonically();
     puts("performance runtime tests passed");
     return 0;
 }

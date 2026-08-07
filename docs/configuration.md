@@ -152,8 +152,8 @@ Current keys control:
 - slow sway period and spine/chest/head rotations.
 
 Units are part of key names. Arm lowering accepts `-45..90` degrees, elbow addition accepts
-`-90..90`, and idle rotation amplitudes accept `-15..15`. Use Character > 3D Model semantic target
-sliders for pose authoring; raw neutral values are diagnostics, not a semantic pose format.
+`-90..90`, and idle rotation amplitudes accept `-15..15`. The legacy Character > 3D Model target
+sliders and `src/pose.c` presets are Rio diagnostics, not the EPR/VRM semantic calibration path.
 
 Press `F5` to force-reload character and motion configuration even when file timestamps or hashes
 have not changed. This shortcut requires the legacy SDL presentation window to own keyboard focus;
@@ -161,13 +161,18 @@ the no-activate native host deliberately does not register a global hotkey.
 
 ## EPR and local VRM development
 
-The first EPR body is a manually acquired local asset. Eidolon cannot redistribute it and does not
-implement VRoid Hub/Pixiv authentication. Sign in through the
+The first EPR body is a manually acquired local reference asset for an experimental rigged-3D
+system. It is separate from the portrait and sprite systems, and it is not a general VRM loader.
+Eidolon cannot redistribute the asset and does not implement VRoid Hub/Pixiv authentication. Sign
+in through the
 [reference model's VRoid Hub page](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654),
-accept the current terms, download the VRM 1.0 file, and validate it:
+accept the current terms, download the VRM 1.0 file, and run the current structural/profile
+preflight:
 
 ```powershell
-make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-structure-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-runtime-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-performance-review VRM_PATH="C:\local-assets\character.vrm"
 ```
 
 Debug builds then expose an intentionally non-persistent body override:
@@ -181,15 +186,48 @@ $env:EIDOLON_PRESENTATION_BACKEND = "sdl_window_legacy"
 
 `EIDOLON_BODY_RENDERER` accepts `sprite`, `portrait`, or `model_3d`. It is ignored by release
 builds, does not write user settings, and does not change the shipped portrait default.
-`EIDOLON_VRM_PATH` selects a user-supplied body variant only when the existing 3D renderer is
-initialized. Without it, legacy Rio 3D remains available but EPR has no VRM body profile and stays
-inactive. The first EPR path accepts VRM 1.0; legacy VRM 0.x files are rejected rather than guessed
-into the new contract. Third-party VRM assets remain local and separately licensed.
+`EIDOLON_VRM_PATH` supplies the local experimental reference asset only when the existing 3D
+renderer is initialized. It is a development override, not an arbitrary-avatar support promise.
+Without it, legacy Rio 3D remains available but EPR has no VRM body profile and stays inactive. The
+first EPR path recognizes VRM 1.0 metadata within its supported reference-avatar slice; legacy VRM
+0.x files are rejected rather than guessed into the new contract. Third-party VRM assets remain
+local and separately licensed.
+
+When a VRM loads, Eidolon measures its mapped humanoid bind positions, segment lengths,
+proportions, and anatomical frame. It then looks for a versioned semantic calibration sidecar at
+`<VRM path>.epr-calibration`. Set `EIDOLON_VRM_CALIBRATION_PATH` to select a different sidecar:
+
+```powershell
+$env:EIDOLON_VRM_CALIBRATION_PATH = "C:\local-assets\character.epr-calibration"
+```
+
+Sidecars bind to an anatomy fingerprint, may contain only the anchors calibrated so far, and are
+loaded transactionally. A missing or stale file leaves the VRM uncalibrated and does not disable
+geometry, projection, another body renderer, or session handling. Create or update one inside the
+actual runtime fixture with:
+
+```powershell
+make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"
+```
+
+The command freezes named anchors, applies task-space edits immediately through scratch projection,
+and atomically saves accepted anchors. Loading a sidecar does not yet drive ordinary EPR playback;
+the calibrated-program compiler is the next slice. See
+[Procedural motion](design/procedural-motion.md) for the format and anchor vocabulary.
 
 An unavailable or invalid configured path emits the acquisition page and validation command and
-leaves the already initialized portrait active. EPR starts only after a valid VRM body profile
-exists; EPR or VRM failure does not stop IPC, configured session sources, or the session registry.
-Neither Make nor the runtime downloads the file or handles Pixiv credentials.
+leaves the already initialized portrait active. EPR starts only after the supported reference asset
+passes the current preflight and publishes its preliminary body profile; later runtime creation can
+still fail locally. EPR or VRM failure does not stop IPC, configured session sources, or the session
+registry. Neither Make nor the runtime downloads the file or handles Pixiv credentials.
+
+`make vrm-structure-check` verifies only the structural/profile preflight; `make vrm-check` remains
+its compatibility alias. `make vrm-runtime-check` then loads and projects the complete deterministic
+scene through the real geometry, texture, skinning, shader, and hidden GPU path. The visible review
+target loops the complete five-second scene between one-second idle and settled holds until the
+owner closes it or presses Escape. It exists for acting judgement. Neither target establishes
+executable authored gaze or general VRM 1.0 compatibility. Those gates are defined by the
+[experimental VRM reference-body contract](design/vrm-body-runtime.md).
 
 ## Agent adapters
 

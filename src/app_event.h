@@ -13,6 +13,7 @@ typedef enum EidolonAppEventKind {
     EIDOLON_APP_EVENT_POINTER_DOWN,
     EIDOLON_APP_EVENT_POINTER_UP,
     EIDOLON_APP_EVENT_POINTER_MOTION,
+    EIDOLON_APP_EVENT_POINTER_WHEEL,
 } EidolonAppEventKind;
 
 typedef enum EidolonAppPointerButton {
@@ -31,6 +32,7 @@ typedef struct EidolonAppPointerEvent {
     float y;
     float x_relative;
     float y_relative;
+    float wheel_y;
     float global_x;
     float global_y;
     uint64_t modifiers;

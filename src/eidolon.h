@@ -24,6 +24,7 @@
 #include "state.h"
 #include "text_renderer.h"
 #include "user_settings.h"
+#include "vrm_calibration_session.h"
 
 #define EIDOLON_WINDOW_WIDTH 520
 #define EIDOLON_WINDOW_HEIGHT 360
@@ -76,6 +77,8 @@ typedef struct EidolonApp {
     EidolonPerformanceFixture performance_fixture;
     bool performance_runtime_ready;
     uint64_t performance_control_attempted_revision;
+    EidolonVrmCalibrationSession vrm_calibration_session;
+    bool vrm_calibration_ready;
     EidolonPortraitRenderer *portrait;
     EidolonSettingsUi *settings_ui;
     EidolonEventPump *event_pump;
@@ -98,6 +101,7 @@ typedef struct EidolonApp {
     EidolonMotionConfigWatch motion_config_watch;
     bool running;
     bool snapshot_mode;
+    bool authoring_mode;
     EidolonPrimaryInteraction primary_interaction;
     bool primary_moved;
     float primary_local_x;

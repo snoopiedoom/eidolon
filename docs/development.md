@@ -7,8 +7,8 @@ quarantined dependency/tool builds, but Eidolon itself does not use CMake.
 
 Windows requires:
 
-- LLVM/Clang and GNU Make;
-- an SDL3 development package containing `include/SDL3`, `lib/x64/SDL3.lib`, and `SDL3.dll`;
+- LLVM/Clang, GNU Make, CMake, and Ninja;
+- a MinGW-w64 toolchain supplying Windows headers, import libraries, and the GNU C++ runtime;
 - the Windows SDK's x64 `fxc.exe` for D3D11 shaders;
 - Blender for the 3D authoring pipeline only;
 - initialized dependency trees under `lib/`; substantial upstream libraries use pinned Git
@@ -20,21 +20,29 @@ Initialize submodules after cloning or pulling a revision that changes them:
 git submodule update --init --recursive
 ```
 
-The Makefile defaults `SDL3_ROOT` to `C:/dev/SDL3`. Override it instead of changing the Makefile:
+SDL 3.4.12 and SDL_ttf 3.2.2 are pinned submodules. On Windows, the first build configures their
+upstream CMake projects with Ninja and installs the resulting development/runtime tree under
+`.cache/sdl/install`. CMake is quarantined to these upstream dependencies; Eidolon itself remains a
+GNU Make build. The dependency layer can also be prepared explicitly:
 
 ```powershell
-$env:SDL3_ROOT = "D:/sdk/SDL3"
-make
+make sdl-deps
 ```
 
-SDL_ttf is a pinned setup dependency:
+Use `make sdl-clean` to discard only the generated SDL dependency build and install trees. The next
+`make` reconstructs them from the pinned submodules. `make text-setup` remains a compatibility alias
+for `make sdl-deps`.
+
+The Windows Clang build targets `x86_64-w64-windows-gnu` by default, allowing the LLVM release
+archive to use an installed MinGW-w64 SDK instead of requiring MSVC headers and libraries. Override
+the target used by both Make and the SDL CMake build only when deliberately changing ABI:
 
 ```powershell
-make text-setup
+make WINDOWS_CLANG_TARGET=x86_64-w64-windows-gnu
 ```
 
-This downloads and verifies SDL_ttf 3.2.2 into ignored `.cache/sdl_ttf`. The normal build never
-downloads dependencies.
+Submodule initialization is the only SDL source acquisition step. Ordinary builds never download
+SDL or SDL_ttf.
 
 Linux discovers SDL3 and SDL_ttf through `pkg-config`. Its renderer currently follows the legacy
 SDL_GPU/shadercross path.
@@ -109,10 +117,56 @@ exit:
 
 `--snapshot-performance` accepts a fixed logical tick from 0 through 5000 milliseconds in 20 ms
 increments. It drives the synthetic EPR evidence fixture, projects the resulting canonical control
-through the selected VRM, and captures the existing SDL 3D path. It does not make 3D the default.
-The VRM must first be acquired manually and pass `make vrm-check VRM_PATH=...`; set
+through the supported reference VRM, and captures the existing SDL 3D path. It does not make 3D the
+default, claim arbitrary VRM compatibility, or route the portrait renderer through EPR.
+The VRM must first be acquired manually and pass `make vrm-structure-check VRM_PATH=...`; set
 `EIDOLON_VRM_PATH` before invoking the snapshot. The runtime never performs VRoid Hub/Pixiv
 authentication or asset download.
+
+Use `make vrm-performance-review VRM_PATH=...` to open the stable reference-body camera, play the
+complete scene in real time, and hold the final settled pose for one second. The manual harness
+then starts another pass after a one-second idle pre-roll; it remains open until the owner closes
+the window or presses Escape. Closing before one complete five-second pass reports failure.
+
+The first DECAGRAMMATON review accepted this camera/rig/harness path and rejected the provisional
+hard-coded pose authorship. Do not tune those poses from screenshots. The active workflow is to
+measure the loaded humanoid, freeze the live EPR sequence at named semantic anchors, let the owner
+adjust task-space handles, and save a matching `<model>.epr-calibration` sidecar. The measurement
+and sidecar parser, frozen-anchor session, live task-space editor, deterministic serializer, and
+atomic save are implemented. Run `make vrm-calibrate VRM_PATH=...`. The calibrated-program compiler
+is next; loading or authoring a sidecar does not yet replace the provisional fixture endpoints.
+The calibration body runs in a visible authoring mode with the same borderless transparent SDL
+overlay flags as the ordinary legacy 3D path. It retains middle-drag/Shift+middle camera rotation;
+the wheel resizes the overlay and its model together so zoom cannot crop against a fixed host.
+Double-middle resets both rotation and overlay size. The model depth projection encloses the full
+bind-volume diagonal so an arbitrary inspection rotation cannot push geometry through the depth
+planes. Native DirectComposition target submission is still portrait-only.
+
+## VRM verification boundary
+
+The EPR/VRM path is an experimental supported-reference-avatar system separate from the 2D
+portrait director. A 3D build, test, or failure must leave portrait tests, assets, and local
+performance state independent.
+
+`make vrm-structure-check VRM_PATH=...` runs cgltf structural validation, validates the supported
+humanoid hierarchy/scale and matrix restriction, parses truthful capability states, and builds the
+body profile. `make vrm-check` remains its compatibility alias.
+
+The executable half uses the product renderer rather than a second importer:
+
+```text
+vrm-structure-check  implemented: schema, humanoid semantics, metadata, capability truth
+vrm-runtime-check    implemented: buffers, geometry, textures, skinning, projection, shaders,
+                     the complete five-second fixture, and a hidden presented GPU frame
+vrm calibration      implemented authoring slice: measurements, anatomy fingerprint, named fixture
+                     capture, live task-space projection, partial sidecar parse/write, atomic save
+```
+
+Passing both targets is evidence for the selected reference body on the current machine; it is not
+a broad compatibility claim. Retain the focused unit tests, deterministic EPR trace, hidden
+performance snapshots, and explicit owner-controlled visible review. The
+[VRM reference-body contract](design/vrm-body-runtime.md) owns the required adversarial fixture
+corpus and compatibility gates.
 
 Automated Blender inspection must use `--background`. `make model-mouth-calibrate` is the sole
 intentional live exception because it is an explicitly user-operated calibration tool.

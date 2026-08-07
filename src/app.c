@@ -14,6 +14,7 @@
 #include "platform/windows_dcomp.h"
 #endif
 
+#include <math.h>
 #include <stdlib.h>
 
 #define MODEL_ROTATION_DEGREES_PER_PIXEL 0.35F
@@ -666,13 +667,8 @@ static bool ensure_model(EidolonApp *app) {
     }
     model_path = SDL_getenv("EIDOLON_VRM_PATH");
     if (model_path == NULL || model_path[0] == '\0') {
-        eidolon_log_write(
-            "performance",
-            "EPR VRM body inactive; manually acquire a VRM 1.0 model from %s, validate it with "
-            "make vrm-check VRM_PATH=..., then set EIDOLON_VRM_PATH; legacy Rio 3D remains "
-            "available",
-            EIDOLON_VRM_REFERENCE_URL);
         model_path = EIDOLON_MODEL_PATH;
+        eidolon_log_write("model", "using compiled default 3D body path=%s", model_path);
     } else {
         vrm_path_configured = true;
     }
@@ -1468,6 +1464,7 @@ create_win32_dcomp_presentation(const EidolonPresentationGeometry *geometry) {
 bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     SDL_zero(*app);
     app->snapshot_mode = mode == EIDOLON_APP_SNAPSHOT;
+    app->authoring_mode = mode == EIDOLON_APP_AUTHORING;
     app->model_scale = 1.0F;
     app->display_scale = 1.0F;
     app->window_coordinate_scale = 1.0F;
@@ -1510,7 +1507,8 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     }
 
     bool stored_settings_loaded = false;
-    if (!app->snapshot_mode && !presentation_test_ignore_user_settings() &&
+    if (!app->snapshot_mode && !app->authoring_mode &&
+        !presentation_test_ignore_user_settings() &&
         eidolon_user_settings_resolve_path(app->user_settings_path,
                                            sizeof(app->user_settings_path))) {
         SDL_PathInfo path_info;
@@ -1542,9 +1540,13 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         app->user_settings.render_mode < (int)EIDOLON_RENDER_MODE_COUNT) {
         requested_render_mode = (EidolonRenderMode)app->user_settings.render_mode;
     }
+    if (app->authoring_mode) {
+        requested_render_mode = EIDOLON_RENDER_MODE_MODEL_3D;
+    }
     EidolonRenderMode body_renderer_override = requested_render_mode;
     const bool has_body_renderer_override =
-        !app->snapshot_mode && body_renderer_test_override(&body_renderer_override);
+        !app->snapshot_mode && !app->authoring_mode &&
+        body_renderer_test_override(&body_renderer_override);
     if (has_body_renderer_override) {
         requested_render_mode = body_renderer_override;
     }
@@ -1741,7 +1743,7 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
         set_initial_position(app);
     }
 
-    if (!app->snapshot_mode) {
+    if (!app->snapshot_mode && !app->authoring_mode) {
         if (!eidolon_ipc_server_init(&app->ipc)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Could not open the local state channel; is Eidolon already running?");
@@ -1778,13 +1780,13 @@ bool eidolon_app_init(EidolonApp *app, EidolonAppMode mode) {
     app->running = true;
     app->state = EIDOLON_STATE_IDLE;
     eidolon_affect_controller_init(&app->affect, app->state, SDL_GetTicks());
-    if (!app->snapshot_mode) {
+    if (!app->snapshot_mode && !app->authoring_mode) {
         app->affect_client = eidolon_affect_client_create(EIDOLON_AFFECT_WORKER_PATH);
     }
     eidolon_animation_set_state(&app->animation, app->state, SDL_GetTicks());
     if (!app->snapshot_mode) {
         eidolon_app_log_presentation_metrics(app);
-        app->user_settings_ready = app->user_settings_path[0] != '\0';
+        app->user_settings_ready = !app->authoring_mode && app->user_settings_path[0] != '\0';
     }
     return true;
 }
@@ -1904,6 +1906,14 @@ void eidolon_app_set_model_scale(EidolonApp *app, float scale) {
     }
 }
 
+void eidolon_app_adjust_model_scale(EidolonApp *app, float wheel_steps) {
+    if (app == NULL || app->render_mode != EIDOLON_RENDER_MODE_MODEL_3D ||
+        !isfinite(wheel_steps) || wheel_steps == 0.0F) {
+        return;
+    }
+    eidolon_app_set_model_scale(app, app->model_scale * SDL_powf(1.12F, wheel_steps));
+}
+
 bool eidolon_app_set_model_render_resolution(EidolonApp *app, int side) {
     const bool changed = app->model_render_resolution != side;
     if (!eidolon_model_set_render_resolution(app->model, side)) {
@@ -1951,6 +1961,188 @@ bool eidolon_app_update_performance_fixture(EidolonApp *app, uint64_t now_ms) {
                           (unsigned long long)control->revision, SDL_GetError());
         SDL_ClearError();
     }
+    return true;
+}
+
+bool eidolon_app_restart_performance_fixture(EidolonApp *app, uint64_t now_ms) {
+    if (app == NULL || app->render_mode != EIDOLON_RENDER_MODE_MODEL_3D || app->model == NULL ||
+        !app->performance_runtime_ready) {
+        return SDL_SetError("EPR performance replay requires an active VRM body");
+    }
+    if (!eidolon_performance_fixture_restart(&app->performance_fixture,
+                                             &app->performance_runtime, now_ms)) {
+        return SDL_SetError("EPR performance fixture could not begin another monotonic pass");
+    }
+    return true;
+}
+
+static bool calibration_source_control(const EidolonApp *app,
+                                       EidolonVrmCalibrationAnchorId anchor,
+                                       EidolonCanonicalControl *control) {
+    EidolonEprBodyProfile body;
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceFixture fixture;
+    const EidolonEprTick target = eidolon_vrm_calibration_anchor_tick(anchor);
+    if (app == NULL || control == NULL || target < 0 ||
+        !eidolon_model_body_profile(app->model, &body) ||
+        !eidolon_epr_runtime_init(&runtime, app->motion_config.seed, &body)) {
+        return false;
+    }
+    eidolon_performance_fixture_init(&fixture);
+    const uint64_t whole_tick = (uint64_t)target - (uint64_t)target % 20U;
+    for (uint64_t tick = 0U; tick <= whole_tick; tick += 20U) {
+        if (!eidolon_performance_fixture_update(&fixture, &runtime, tick)) {
+            return false;
+        }
+    }
+    if ((uint64_t)target != whole_tick && !eidolon_epr_runtime_step(&runtime, target)) {
+        return false;
+    }
+    const EidolonCanonicalControl *source = eidolon_epr_runtime_control(&runtime);
+    if (source == NULL) {
+        return false;
+    }
+    *control = *source;
+    return true;
+}
+
+bool eidolon_app_apply_vrm_calibration_draft(EidolonApp *app) {
+    EidolonCanonicalControl control;
+    if (app == NULL || !app->vrm_calibration_ready ||
+        !eidolon_vrm_calibration_session_make_control(&app->vrm_calibration_session, &control) ||
+        !eidolon_model_apply_control(app->model, &control)) {
+        return false;
+    }
+    return true;
+}
+
+bool eidolon_app_select_vrm_calibration_anchor(EidolonApp *app,
+                                               EidolonVrmCalibrationAnchorId anchor) {
+    EidolonCanonicalControl source;
+    if (app == NULL || !app->vrm_calibration_ready) {
+        return SDL_SetError("VRM calibration is not active");
+    }
+    if (anchor == app->vrm_calibration_session.selected_anchor &&
+        app->vrm_calibration_session.source_control.valid) {
+        return true;
+    }
+    if (app->vrm_calibration_session.dirty &&
+        anchor != app->vrm_calibration_session.selected_anchor) {
+        SDL_strlcpy(app->vrm_calibration_session.error,
+                    "accept or revert the current anchor before switching",
+                    sizeof(app->vrm_calibration_session.error));
+        return false;
+    }
+    if (!calibration_source_control(app, anchor, &source) ||
+        !eidolon_vrm_calibration_session_select(&app->vrm_calibration_session, anchor, &source) ||
+        !eidolon_app_apply_vrm_calibration_draft(app)) {
+        return SDL_SetError("could not select VRM calibration anchor '%s'",
+                            eidolon_vrm_calibration_anchor_name(anchor));
+    }
+    return true;
+}
+
+bool eidolon_app_begin_vrm_calibration(EidolonApp *app, const char *path) {
+    EidolonVrmMeasurements measurements;
+    EidolonVrmCalibration calibration;
+    EidolonEprBodyProfile body;
+    if (app == NULL || app->render_mode != EIDOLON_RENDER_MODE_MODEL_3D || app->model == NULL) {
+        return SDL_SetError("VRM calibration requires an active 3D model");
+    }
+    if (!eidolon_model_vrm_measurements(app->model, &measurements)) {
+        return SDL_SetError("VRM calibration could not read model measurements");
+    }
+    if (!eidolon_model_vrm_calibration(app->model, &calibration)) {
+        return SDL_SetError("VRM calibration could not read the loaded sidecar state");
+    }
+    if (!eidolon_model_body_profile(app->model, &body)) {
+        return SDL_SetError("VRM calibration could not read the EPR body profile");
+    }
+    if (!eidolon_vrm_calibration_session_init(&app->vrm_calibration_session, &measurements, &body,
+                                              &calibration, path,
+                                              eidolon_model_vrm_projection_revision(app->model))) {
+        return false;
+    }
+    app->vrm_calibration_ready = true;
+    if (!eidolon_app_select_vrm_calibration_anchor(app, EIDOLON_VRM_CALIBRATION_NEUTRAL)) {
+        app->vrm_calibration_ready = false;
+        return false;
+    }
+    eidolon_log_write("calibration",
+                      "VRM calibration session ready body=%s fingerprint=%016llx path=%s",
+                      eidolon_model_body_name(app->model),
+                      (unsigned long long)measurements.anatomy_fingerprint, path);
+    return true;
+}
+
+static bool touch_vrm_calibration(EidolonApp *app) {
+    app->vrm_calibration_session.dirty = true;
+    app->vrm_calibration_session.saved = false;
+    return eidolon_app_apply_vrm_calibration_draft(app);
+}
+
+bool eidolon_app_set_vrm_calibration_euler(EidolonApp *app, bool head, size_t component,
+                                           float radians) {
+    if (app == NULL || !app->vrm_calibration_ready || component >= 3U || !isfinite(radians)) {
+        return false;
+    }
+    float *euler = head ? app->vrm_calibration_session.draft.head_euler
+                        : app->vrm_calibration_session.draft.torso_euler;
+    euler[component] = SDL_clamp(radians, -SDL_PI_F, SDL_PI_F);
+    return touch_vrm_calibration(app);
+}
+
+bool eidolon_app_set_vrm_calibration_arm_component(EidolonApp *app, bool pole, size_t component,
+                                                   float value) {
+    if (app == NULL || !app->vrm_calibration_ready || component >= 3U || !isfinite(value)) {
+        return false;
+    }
+    EidolonVrmCalibrationArm *arm =
+        &app->vrm_calibration_session.draft.arms[EIDOLON_VRM_CALIBRATION_RIGHT];
+    float *vector = pole ? arm->elbow_pole : arm->hand_target;
+    vector[component] = SDL_clamp(value, -2.0F, 2.0F);
+    return touch_vrm_calibration(app);
+}
+
+bool eidolon_app_set_vrm_calibration_wrist(EidolonApp *app, size_t component, float radians) {
+    if (app == NULL || !app->vrm_calibration_ready || component >= 3U || !isfinite(radians)) {
+        return false;
+    }
+    app->vrm_calibration_session.draft.arms[EIDOLON_VRM_CALIBRATION_RIGHT]
+        .wrist_euler[component] = SDL_clamp(radians, -SDL_PI_F, SDL_PI_F);
+    return touch_vrm_calibration(app);
+}
+
+bool eidolon_app_set_vrm_calibration_arm_weight(EidolonApp *app, float weight) {
+    if (app == NULL || !app->vrm_calibration_ready || !isfinite(weight)) {
+        return false;
+    }
+    app->vrm_calibration_session.draft.arms[EIDOLON_VRM_CALIBRATION_RIGHT].weight =
+        SDL_clamp(weight, 0.0F, 1.0F);
+    return touch_vrm_calibration(app);
+}
+
+bool eidolon_app_revert_vrm_calibration_anchor(EidolonApp *app) {
+    if (app == NULL || !app->vrm_calibration_ready) {
+        return false;
+    }
+    eidolon_vrm_calibration_session_revert(&app->vrm_calibration_session);
+    return eidolon_app_apply_vrm_calibration_draft(app);
+}
+
+bool eidolon_app_commit_vrm_calibration_anchor(EidolonApp *app) {
+    return app != NULL && app->vrm_calibration_ready &&
+           eidolon_vrm_calibration_session_commit(&app->vrm_calibration_session);
+}
+
+bool eidolon_app_save_vrm_calibration(EidolonApp *app) {
+    if (app == NULL || !app->vrm_calibration_ready ||
+        !eidolon_vrm_calibration_session_save(&app->vrm_calibration_session)) {
+        return false;
+    }
+    eidolon_log_write("calibration", "saved VRM calibration path=%s anchors=0x%08x",
+                      app->vrm_calibration_session.path,
+                      app->vrm_calibration_session.working.anchor_mask);
     return true;
 }
 
@@ -2681,6 +2873,7 @@ static void begin_model_rotation_drag(EidolonApp *app, const EidolonAppPointerEv
     if (pointer->clicks >= 2U) {
         end_model_rotation_drag(app);
         eidolon_app_set_model_rotation(app, 0.0F, 0.0F, 0.0F);
+        eidolon_app_set_model_scale(app, 1.0F);
         return;
     }
 
@@ -2740,6 +2933,7 @@ static void handle_routed_pointer(EidolonApp *app, const EidolonPresentationEven
         if (pointer->click_count >= 2U) {
             end_model_rotation_drag(app);
             eidolon_app_set_model_rotation(app, 0.0F, 0.0F, 0.0F);
+            eidolon_app_set_model_scale(app, 1.0F);
             return;
         }
         app->model_rotation_dragging = true;
@@ -3012,6 +3206,11 @@ static void handle_app_event(EidolonApp *app, const EidolonAppEvent *event) {
             update_model_rotation_drag(app, &event->data.pointer);
         } else if (app->primary_interaction != EIDOLON_PRIMARY_INTERACTION_NONE) {
             update_primary_interaction(app, &event->data.pointer);
+        }
+        break;
+    case EIDOLON_APP_EVENT_POINTER_WHEEL:
+        if (point_in_model_rect(app, event->data.pointer.x, event->data.pointer.y)) {
+            eidolon_app_adjust_model_scale(app, event->data.pointer.wheel_y);
         }
         break;
     case EIDOLON_APP_EVENT_NONE:
@@ -3374,7 +3573,7 @@ void eidolon_app_destroy(EidolonApp *app) {
     eidolon_affect_client_destroy(app->affect_client);
     eidolon_conversation_sources_destroy(app->conversation_sources);
     eidolon_session_registry_destroy(&app->session_registry);
-    if (!app->snapshot_mode) {
+    if (!app->snapshot_mode && !app->authoring_mode) {
         eidolon_ipc_server_destroy(&app->ipc);
     }
     eidolon_model_destroy(app->model);

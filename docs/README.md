@@ -39,14 +39,18 @@ particular implementation changes.
 - [Native presentation and graphics stack](design/native-presentation.md)
 - [Backend-neutral presentation events](design/presentation-events.md)
 - [Presentation environment and output topology](design/presentation-environment.md)
-- [Eidolon Performance Runtime](design/epr-overview.md) — ownership and pipeline overview, with
-  linked contracts for intent, behavior planning, resources, realization, VRM projection, and
-  deterministic validation.
+- [Eidolon Performance Runtime](design/epr-overview.md) — independent rigged-3D behavior/runtime
+  ownership, with linked contracts for intent, behavior planning, resources, realization, the
+  experimental VRM reference body, and deterministic validation. It coexists with rather than
+  replacing the portrait director.
 
 ## Active workstreams
 
 - [bgfx and native-presentation workstream](workstreams/bgfx-integration.md) — completed graphics
   evaluation plus the current production-presentation gate, evidence, and restart checklist.
+- [Experimental EPR/VRM reference-body workstream](design/vrm-body-runtime.md) — the separate 3D
+  vertical slice, its truthful support boundary, correctness/composition gates, and compatibility
+  expansion order.
 
 New designs belong under `docs/design/`. Each specification should state the problem, goals,
 non-goals, ownership, data flow, invariants, failure behavior, and acceptance criteria. Temporary

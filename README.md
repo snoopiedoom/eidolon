@@ -35,7 +35,15 @@ V1 proves that an agent doing real work can visibly feel like one persistent per
 - DirectComposition portrait/dialogue presentation by default on Windows, with persisted
   `sdl_window_legacy` compatibility selection and explicit capability/failure fallback;
 - a native D3D11 3D path with GLB loading, GPU skinning, semantic poses, and analytic arm IK;
+- an experimental EPR/VRM vertical slice for one supported reference avatar through the legacy SDL
+  3D path, including anatomy measurement and versioned semantic-calibration profiles; this is not
+  general VRM 1.0 compatibility;
 - hidden snapshot commands for visual QA without stealing focus.
+
+The 2D portrait director and EPR/VRM runtime are separate body-performance systems. They coexist in
+the same application and may consume shared body-neutral evidence, but neither owns the other's
+expression labels, motion/pose state, or assets. The portrait remains the default and does not run
+through EPR.
 
 Windows is the active implementation target. Linux support exists, but currently follows the
 legacy SDL_GPU path and may lag behind Windows features.
@@ -44,8 +52,8 @@ legacy SDL_GPU path and may lag behind Windows features.
 
 Requirements:
 
-- LLVM/Clang and GNU Make;
-- an SDL3 development package;
+- LLVM/Clang, GNU Make, CMake, and Ninja;
+- a MinGW-w64 toolchain supplying the Windows headers and import libraries used by Clang;
 - a Windows SDK containing `fxc.exe`;
 - the pinned dependency trees under `lib/`.
 
@@ -55,10 +63,13 @@ Initialize dependency submodules after cloning:
 git submodule update --init --recursive
 ```
 
-On Windows, SDL3 defaults to `C:/dev/SDL3`; override `SDL3_ROOT` when necessary.
+On Windows, the normal build configures the pinned SDL3 and SDL3_ttf submodules with their
+upstream CMake projects, then installs the generated headers, libraries, and DLLs under the ignored
+`.cache/sdl` tree. Eidolon itself remains a GNU Make build. Build the dependency layer explicitly
+when useful, or let the first ordinary build do it:
 
 ```powershell
-make text-setup
+make sdl-deps
 make
 ./build/windows/eidolon.exe
 ```
@@ -71,22 +82,47 @@ make affect-check
 make check
 ```
 
-`make text-setup` and `make affect-setup` are explicit, checksum-verified dependency setup steps.
-Ordinary builds never download anything.
+`make text-setup` remains a compatibility alias for `make sdl-deps`. SDL source arrives only through
+`git submodule update`; ordinary builds do not download it. `make affect-setup` remains the explicit,
+checksum-verified setup step for the optional classifier.
 
 The optional EPR/VRM performance body is also not downloaded or redistributed by Eidolon. Sign in
 to VRoid Hub with Pixiv, manually acquire the
 [reference VRM 1.0 model](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654),
-and validate the local file before using it:
+and run the current structural/profile preflight before using it:
 
 ```powershell
-make vrm-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-structure-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-runtime-check VRM_PATH="C:\local-assets\character.vrm"
+make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"
+make vrm-performance-review VRM_PATH="C:\local-assets\character.vrm"
 $env:EIDOLON_VRM_PATH = "C:\local-assets\character.vrm"
+# Optional once a matching calibration sidecar exists:
+$env:EIDOLON_VRM_CALIBRATION_PATH = "C:\local-assets\character.epr-calibration"
 ```
 
-The model page currently permits avatar use but forbids redistribution and modification and
+This development checkout currently selects `assets/2349235869624830263.vrm` (Vampire Cat by
+Touko Asada) as its compiled 3D default. The file remains ignored and local. Its embedded metadata
+permits avatar use only by the author, prohibits redistribution and modification, and requires
+credit; this selection is therefore a private owner-directed test fixture, not a distributable
+Eidolon asset or public reference-model recommendation. `EIDOLON_VRM_PATH` still overrides it.
+
+The linked DECAGRAMMATON model page currently permits avatar use but forbids redistribution and modification and
 requires credit. Do not add the downloaded file to this repository. Eidolon never receives or
 stores Pixiv credentials.
+
+`make vrm-structure-check` is the schema/profile preflight; `make vrm-check` remains its compatibility
+alias. `make vrm-runtime-check` drives the complete five-second fixture through buffer loading,
+geometry, textures, skinning, projection, shaders, and a hidden GPU frame. Passing both proves the
+selected reference path on that machine, not arbitrary VRM compatibility. The visible review target
+opens the same SDL 3D path for owner judgement. It repeats a one-second idle pre-roll, the complete
+five-second performance, and a one-second settled hold until the window is closed or Escape is
+pressed. `make vrm-calibrate` freezes the same deterministic fixture at eight named semantic
+anchors. Adjust the task-space torso, head, hand, elbow-pole, and wrist controls, accept each anchor,
+and use **save sidecar**; F1 reopens the settings panel and Escape in the body window exits. The
+current hard-coded performance poses remain provisional test stimuli until the next compiler slice
+derives the complete performance from the approved sidecar. The remaining compatibility gates stay in the
+[VRM reference-body contract](docs/design/vrm-body-runtime.md).
 
 The bundled Bunny Asuna manifest expects ten transparent portraits under
 `assets/characters/asuna-bunny/portraits`. Extracted game art and the Rio source rip are deliberately
@@ -101,7 +137,8 @@ fallback sprite path.
   owns keyboard focus;
 - middle-drag a 3D model to rotate yaw/pitch;
 - hold `Shift` while middle-dragging to rotate roll;
-- double middle-click to reset 3D rotation;
+- use the mouse wheel over a 3D model to resize its transparent overlay without cropping it;
+- double middle-click to reset 3D rotation and overlay size;
 - press `F5` to reload character and motion configuration when the legacy SDL pet window owns
   keyboard focus;
 - press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
@@ -111,6 +148,9 @@ On Windows, portrait bodies normally use `win32_dcomp`. Sprite and 3D bodies, ex
 selection, and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
 backend delegates dragging to the native top-level move loop, which can pause animation and dialogue
 presentation until the mouse button is released; presentation resumes after the drag.
+The visible VRM calibration and performance-review commands use a borderless transparent SDL
+authoring overlay rather than the headless snapshot host. DirectComposition submission for 3D
+targets remains a presentation-backend gap; it is not implied by the D3D11 model renderer.
 
 Settings persist as sparse per-user overrides. Every field can return to its shipped or
 character-defined default without freezing a copy of that default into the user file. Presentation
@@ -146,6 +186,10 @@ move and fade without rerendering their content. See the
 own conversation semantics; presentation backends never own session state. Slow language decisions
 stay separate from frame-rate motion and drawing.
 
+Portrait/sprite realization and EPR/rigged-3D realization remain independent branches between the
+shared evidence and scene boundaries. Renderer-neutral evidence enables coherent character behavior
+across bodies; it does not collapse them into one implementation.
+
 ## Documentation
 
 - [Documentation index](docs/README.md)
@@ -160,6 +204,7 @@ stay separate from frame-rate motion and drawing.
 - [Character and asset pipeline](docs/assets.md)
 - [Design specifications](docs/design/README.md)
 - [Native presentation and graphics plan](docs/design/native-presentation.md)
+- [Experimental VRM reference-body contract](docs/design/vrm-body-runtime.md)
 - [Backend-neutral presentation event contract](docs/design/presentation-events.md)
 - [Presentation environment and output topology contract](docs/design/presentation-environment.md)
 

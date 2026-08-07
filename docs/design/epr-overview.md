@@ -41,6 +41,19 @@ The first vertical slice uses deterministic synthetic evidence. A temporary adap
 the current normalized conversation path, but all compatibility identity remains inside that
 adapter. A2 will eventually provide the authoritative `(source_id, session_id)` provenance.
 
+## Relationship to 2D bodies
+
+EPR is the physical behavior runtime for the rigged-3D workstream. It is not the implementation of
+the 2D portrait director. The portrait system continues to own discrete portrait expression
+selection and whole-image performance while EPR owns 3D temporal planning, resource grants,
+canonical physical control, and model projection.
+
+Both systems may consume the same renderer-neutral operational, affect, semantic-beat, delivery,
+and attention evidence. That shared evidence is a product boundary, not shared mutable body state.
+Neither system may import the other's asset labels, motor state, pose representation, or renderer
+resources. Selection or failure of an EPR/VRM body leaves the portrait and sprite systems available
+with session and dialogue continuity intact.
+
 ## Ownership
 
 One `EidolonPerformanceRuntime` instance owns:
@@ -94,11 +107,18 @@ portrait presentation or source/session observation.
 
 The first slice contains neutral idle, listening/attention, thinking, streamed-response posture,
 eye-first/head-follow gaze, one restrained right-arm contrast gesture, interruption, explicit
-resource transfer, current-state cleanup, settling, deterministic trace, and one VRM 1.0 body
-through the existing SDL 3D path.
+resource transfer, current-state cleanup, settling, deterministic trace, and the supported VRM 1.0
+reference body through the existing SDL 3D path. The current calibration-first extension measures
+the complete mapped semantic skeleton and transactionally loads partial user-approved anchor
+profiles; capture, calibrated program compilation, and application are the active next slices.
 
 It excludes DirectComposition 3D, default-3D selection, locomotion, balance/contact planning,
 fingers, a gesture catalogue, learned generation, and arbitrary non-VRM humanoids.
+
+The VRM output is an experimental supported-reference-avatar slice, not broad VRM 1.0 support. Its
+correctness and compatibility gates belong to the
+[experimental VRM reference-body contract](vrm-body-runtime.md). None of those gates changes the
+portrait runtime or makes 2D acceptance depend on 3D progress.
 
 ## Related contracts
 
@@ -108,4 +128,3 @@ fingers, a gesture catalogue, learned generation, and arbitrary non-VRM humanoid
 - [Realization Programs](epr-realization-program.md)
 - [VRM body runtime](vrm-body-runtime.md)
 - [tracing and validation](epr-tracing-validation.md)
-

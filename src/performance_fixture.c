@@ -1,5 +1,6 @@
 #include "performance_fixture.h"
 
+#include <limits.h>
 #include <string.h>
 
 #define FIXTURE_CONTROL_STEP_MS 20
@@ -17,14 +18,15 @@ static const FixtureStage STAGES[] = {
     {3000, EIDOLON_EPR_MODE_RESPONDING, true}, {3600, EIDOLON_EPR_MODE_INTERRUPTED, true},
 };
 
-static EidolonPerformanceIntent make_intent(unsigned int stage) {
+static EidolonPerformanceIntent make_intent(const EidolonPerformanceFixture *fixture,
+                                            unsigned int stage) {
     const FixtureStage *source = &STAGES[stage];
     EidolonPerformanceIntent intent;
     memset(&intent, 0, sizeof(intent));
     intent.version = EIDOLON_EPR_INTENT_VERSION;
-    intent.revision = (uint64_t)stage + 1U;
-    intent.predecessor_revision = (uint64_t)stage;
-    intent.observed_tick = source->tick;
+    intent.revision = fixture->revision_base + (uint64_t)stage + 1U;
+    intent.predecessor_revision = fixture->revision_base + (uint64_t)stage;
+    intent.observed_tick = fixture->tick_offset + source->tick;
     intent.mode = source->mode;
     intent.urgency = source->mode == EIDOLON_EPR_MODE_INTERRUPTED ? 1000U : 400U;
     intent.continuity = 800U;
@@ -40,12 +42,13 @@ static EidolonPerformanceIntent make_intent(unsigned int stage) {
         intent.lease_session = intent.provenance.session;
     }
     if (source->contrast) {
-        intent.beats[0].id = UINT64_C(0xe1d01000c017a57);
+        intent.beats[0].id = UINT64_C(0xe1d01000c017a57) ^
+                             fixture->revision_base * UINT64_C(0x9e3779b97f4a7c15);
         intent.beats[0].kind = EIDOLON_EPR_BEAT_CONTRAST;
         intent.beats[0].stability = EIDOLON_EPR_EVIDENCE_STABLE_PREFIX;
         intent.beats[0].source_start = 18U;
         intent.beats[0].source_end = 36U;
-        intent.beats[0].anchor_tick = 3520;
+        intent.beats[0].anchor_tick = fixture->tick_offset + 3520;
         intent.beat_count = 1U;
     }
     return intent;
@@ -57,10 +60,28 @@ void eidolon_performance_fixture_init(EidolonPerformanceFixture *fixture) {
     }
 }
 
+bool eidolon_performance_fixture_restart(EidolonPerformanceFixture *fixture,
+                                         const EidolonPerformanceRuntime *runtime,
+                                         uint64_t now_ms) {
+    if (fixture == NULL || runtime == NULL || fixture->failed || !fixture->started ||
+        fixture->stage != sizeof(STAGES) / sizeof(STAGES[0]) || !runtime->has_intent ||
+        !runtime->has_tick || runtime->last_tick > INT64_MAX - FIXTURE_CONTROL_STEP_MS ||
+        runtime->intent.revision > UINT64_MAX - sizeof(STAGES) / sizeof(STAGES[0])) {
+        return false;
+    }
+    fixture->start_ms = now_ms;
+    fixture->tick_offset = runtime->last_tick + FIXTURE_CONTROL_STEP_MS;
+    fixture->next_tick = fixture->tick_offset;
+    fixture->revision_base = runtime->intent.revision;
+    fixture->stage = 0U;
+    return true;
+}
+
 bool eidolon_performance_fixture_update(EidolonPerformanceFixture *fixture,
                                         EidolonPerformanceRuntime *runtime, uint64_t now_ms) {
     unsigned int steps = 0U;
     EidolonEprTick available_tick;
+    uint64_t elapsed_ms;
     if (fixture == NULL || runtime == NULL || fixture->failed) {
         return false;
     }
@@ -69,11 +90,21 @@ bool eidolon_performance_fixture_update(EidolonPerformanceFixture *fixture,
         fixture->start_ms = now_ms;
         fixture->next_tick = 0;
     }
-    available_tick = (EidolonEprTick)(now_ms - fixture->start_ms);
+    if (now_ms < fixture->start_ms) {
+        fixture->failed = true;
+        return false;
+    }
+    elapsed_ms = now_ms - fixture->start_ms;
+    if (elapsed_ms > (uint64_t)INT64_MAX ||
+        fixture->tick_offset > INT64_MAX - (EidolonEprTick)elapsed_ms) {
+        fixture->failed = true;
+        return false;
+    }
+    available_tick = fixture->tick_offset + (EidolonEprTick)elapsed_ms;
     while (fixture->next_tick <= available_tick && steps < FIXTURE_MAX_STEPS_PER_UPDATE) {
         while (fixture->stage < sizeof(STAGES) / sizeof(STAGES[0]) &&
-               STAGES[fixture->stage].tick <= fixture->next_tick) {
-            EidolonPerformanceIntent intent = make_intent(fixture->stage);
+               fixture->tick_offset + STAGES[fixture->stage].tick <= fixture->next_tick) {
+            EidolonPerformanceIntent intent = make_intent(fixture, fixture->stage);
             if (!eidolon_epr_runtime_accept(runtime, &intent)) {
                 fixture->failed = true;
                 return false;

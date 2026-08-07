@@ -23,19 +23,19 @@ if ($FxcPath.Length -gt 0) {
     $candidates = [System.Collections.Generic.List[string]]::new()
     $pathCommand = Get-Command fxc.exe -ErrorAction SilentlyContinue
     if ($null -ne $pathCommand) {
-        $candidates.Add($pathCommand.Source)
+        $candidates.Add($pathCommand.Source) | Out-Null
     }
     if ($null -ne ${env:WindowsSdkDir} -and $null -ne ${env:WindowsSDKVersion}) {
         $sdkVersion = ${env:WindowsSDKVersion}.TrimEnd("\")
-        $candidates.Add((Join-Path ${env:WindowsSdkDir} "bin\$sdkVersion\x64\fxc.exe"))
+        $candidates.Add((Join-Path ${env:WindowsSdkDir} "bin\$sdkVersion\x64\fxc.exe")) | Out-Null
     }
 
     $sdkRoots = [System.Collections.Generic.List[string]]::new()
     if ($null -ne ${env:WindowsSdkDir}) {
-        $sdkRoots.Add((Join-Path ${env:WindowsSdkDir} "bin"))
+        $sdkRoots.Add((Join-Path ${env:WindowsSdkDir} "bin")) | Out-Null
     }
     if ($null -ne ${env:ProgramFiles(x86)}) {
-        $sdkRoots.Add((Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"))
+        $sdkRoots.Add((Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin")) | Out-Null
     }
     foreach ($root in $sdkRoots) {
         if (-not (Test-Path $root)) {
@@ -48,12 +48,12 @@ if ($FxcPath.Length -gt 0) {
             }
         } | Sort-Object Version -Descending
         foreach ($version in $versions) {
-            $candidates.Add((Join-Path $version.Path "x64\fxc.exe"))
+            $candidates.Add((Join-Path $version.Path "x64\fxc.exe")) | Out-Null
         }
     }
 
     $fxcPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if ($null -eq $fxcPath) {
+    if ([string]::IsNullOrWhiteSpace([string]$fxcPath)) {
         throw "Windows SDK fxc.exe was not found; pass FXC=/path/to/fxc.exe to make"
     }
 }

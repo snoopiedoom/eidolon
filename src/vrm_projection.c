@@ -13,7 +13,7 @@ static float dot3(const float left[3], const float right[3]) {
 
 static bool normalize3(float vector[3]) {
     const float length = SDL_sqrtf(dot3(vector, vector));
-    if (length <= VRM_PROJECTION_EPSILON) {
+    if (!isfinite(length) || length <= VRM_PROJECTION_EPSILON) {
         return false;
     }
     for (size_t axis = 0; axis < 3U; ++axis) {
@@ -28,19 +28,18 @@ static void cross3(const float left[3], const float right[3], float result[3]) {
     result[2] = left[0] * right[1] - left[1] * right[0];
 }
 
-static void quaternion_normalize(float quaternion[4]) {
-    const float length = SDL_sqrtf(quaternion[0] * quaternion[0] + quaternion[1] * quaternion[1] +
-                                   quaternion[2] * quaternion[2] + quaternion[3] * quaternion[3]);
-    if (length <= VRM_PROJECTION_EPSILON) {
-        quaternion[0] = 0.0F;
-        quaternion[1] = 0.0F;
-        quaternion[2] = 0.0F;
-        quaternion[3] = 1.0F;
-        return;
+static bool quaternion_normalize(float quaternion[4]) {
+    const float length = SDL_sqrtf(quaternion[0] * quaternion[0] +
+                                   quaternion[1] * quaternion[1] +
+                                   quaternion[2] * quaternion[2] +
+                                   quaternion[3] * quaternion[3]);
+    if (!isfinite(length) || length <= VRM_PROJECTION_EPSILON) {
+        return false;
     }
     for (size_t component = 0; component < 4U; ++component) {
         quaternion[component] /= length;
     }
+    return true;
 }
 
 static void quaternion_multiply(const float left[4], const float right[4], float result[4]) {
@@ -87,8 +86,7 @@ static bool quaternion_from_to(const float from_value[3], const float to_value[3
     quaternion[1] = cross[1];
     quaternion[2] = cross[2];
     quaternion[3] = 1.0F + dot;
-    quaternion_normalize(quaternion);
-    return true;
+    return quaternion_normalize(quaternion);
 }
 
 static bool node_world_rotation(const EidolonMotionRig *rig, int node, float rotation[4],
@@ -100,8 +98,7 @@ static bool node_world_rotation(const EidolonMotionRig *rig, int node, float rot
     motion_node = &rig->nodes[(size_t)node];
     if (motion_node->parent < 0) {
         memcpy(rotation, motion_node->rotation, sizeof(float) * 4U);
-        quaternion_normalize(rotation);
-        return true;
+        return quaternion_normalize(rotation);
     }
     {
         float parent[4];
@@ -109,8 +106,7 @@ static bool node_world_rotation(const EidolonMotionRig *rig, int node, float rot
             return false;
         }
         quaternion_multiply(parent, motion_node->rotation, rotation);
-        quaternion_normalize(rotation);
-        return true;
+        return quaternion_normalize(rotation);
     }
 }
 
@@ -137,7 +133,9 @@ static bool rotate_node_toward(EidolonMotionRig *rig, int node, const float curr
     } else {
         memcpy(target_local, target_world, sizeof(target_local));
     }
-    quaternion_normalize(target_local);
+    if (!quaternion_normalize(target_local)) {
+        return false;
+    }
     memcpy(rig->nodes[(size_t)node].rotation, target_local, sizeof(target_local));
     return eidolon_motion_rebuild_world(rig);
 }
@@ -155,40 +153,50 @@ static void subtract3(const float left[3], const float right[3], float result[3]
     result[2] = left[2] - right[2];
 }
 
-static void quaternion_axis(float x, float y, float z, float radians, float result[4]) {
+static void quaternion_axis(const float axis[3], float radians, float result[4]) {
     const float half = radians * 0.5F;
     const float sine = SDL_sinf(half);
-    result[0] = x * sine;
-    result[1] = y * sine;
-    result[2] = z * sine;
+    result[0] = axis[0] * sine;
+    result[1] = axis[1] * sine;
+    result[2] = axis[2] * sine;
     result[3] = SDL_cosf(half);
 }
 
-static void apply_euler(EidolonMotionNode *node, float pitch, float yaw, float roll) {
-    float x_rotation[4];
-    float y_rotation[4];
-    float z_rotation[4];
-    float xy[4];
-    float delta[4];
+static bool apply_corrected_euler(const EidolonVrmProjection *projection, EidolonMotionNode *node,
+                                  EidolonVrmHumanBone bone, float pitch, float yaw, float roll) {
+    float pitch_rotation[4];
+    float yaw_rotation[4];
+    float roll_rotation[4];
+    float yaw_pitch[4];
+    float world_delta[4];
+    float correction_delta[4];
+    float local_delta[4];
     float result[4];
-    quaternion_axis(1.0F, 0.0F, 0.0F, pitch, x_rotation);
-    quaternion_axis(0.0F, 1.0F, 0.0F, yaw, y_rotation);
-    quaternion_axis(0.0F, 0.0F, 1.0F, roll, z_rotation);
-    quaternion_multiply(y_rotation, x_rotation, xy);
-    quaternion_multiply(xy, z_rotation, delta);
-    quaternion_multiply(node->bind_rotation, delta, result);
-    quaternion_normalize(result);
+    quaternion_axis(projection->right, pitch, pitch_rotation);
+    quaternion_axis(projection->up, yaw, yaw_rotation);
+    quaternion_axis(projection->forward, roll, roll_rotation);
+    quaternion_multiply(yaw_rotation, pitch_rotation, yaw_pitch);
+    quaternion_multiply(yaw_pitch, roll_rotation, world_delta);
+    quaternion_multiply(projection->inverse_bind_world_rotations[(size_t)bone], world_delta,
+                        correction_delta);
+    quaternion_multiply(correction_delta, projection->bind_world_rotations[(size_t)bone],
+                        local_delta);
+    quaternion_multiply(node->rotation, local_delta, result);
+    if (!quaternion_normalize(result)) {
+        return false;
+    }
     memcpy(node->rotation, result, sizeof(result));
+    return true;
 }
 
-static bool reset_to_bind(EidolonMotionRig *rig) {
-    for (size_t index = 0; index < rig->node_count; ++index) {
-        EidolonMotionNode *node = &rig->nodes[index];
-        memcpy(node->translation, node->bind_translation, sizeof(node->translation));
-        memcpy(node->rotation, node->bind_rotation, sizeof(node->rotation));
-        memcpy(node->scale, node->bind_scale, sizeof(node->scale));
+static EidolonVrmHumanBone chest_bone(const EidolonVrmProjection *projection) {
+    if (projection->nodes[EIDOLON_VRM_BONE_UPPER_CHEST] >= 0) {
+        return EIDOLON_VRM_BONE_UPPER_CHEST;
     }
-    return eidolon_motion_rebuild_world(rig);
+    if (projection->nodes[EIDOLON_VRM_BONE_CHEST] >= 0) {
+        return EIDOLON_VRM_BONE_CHEST;
+    }
+    return EIDOLON_VRM_BONE_SPINE;
 }
 
 static bool apply_right_arm(EidolonMotionRig *rig, const EidolonVrmProjection *projection,
@@ -212,79 +220,43 @@ static bool apply_right_arm(EidolonMotionRig *rig, const EidolonVrmProjection *p
     node_position(rig, hand, hand_position);
     subtract3(hand_position, lower_position, current_direction);
     subtract3(control->right_hand_position, lower_position, desired_direction);
-    if (!rotate_node_toward(rig, lower, current_direction, desired_direction)) {
+    if (!rotate_node_toward(rig, lower, current_direction, desired_direction) ||
+        !apply_corrected_euler(projection, &rig->nodes[(size_t)hand],
+                               EIDOLON_VRM_BONE_RIGHT_HAND, control->right_wrist_euler[0],
+                               control->right_wrist_euler[1], control->right_wrist_euler[2])) {
         return false;
     }
-    apply_euler(&rig->nodes[(size_t)hand], control->right_wrist_euler[0],
-                control->right_wrist_euler[1], control->right_wrist_euler[2]);
     return eidolon_motion_rebuild_world(rig);
 }
 
-static bool apply_relaxed_left_arm(EidolonMotionRig *rig, const EidolonVrmProjection *projection) {
-    const int upper = projection->nodes[EIDOLON_VRM_BONE_LEFT_UPPER_ARM];
-    const int lower = projection->nodes[EIDOLON_VRM_BONE_LEFT_LOWER_ARM];
-    const int hand = projection->nodes[EIDOLON_VRM_BONE_LEFT_HAND];
-    float upper_position[3];
-    float lower_position[3];
-    float hand_position[3];
-    float current_direction[3];
-    float desired_direction[3];
-    node_position(rig, upper, upper_position);
-    node_position(rig, lower, lower_position);
-    subtract3(lower_position, upper_position, current_direction);
-    desired_direction[0] = current_direction[0] * 0.18F;
-    desired_direction[1] = -1.0F;
-    desired_direction[2] = 0.08F;
-    if (!rotate_node_toward(rig, upper, current_direction, desired_direction)) {
-        return false;
+static bool control_finite(const EidolonCanonicalControl *control) {
+    const float scalars[] = {
+        control->torso_pitch,
+        control->torso_yaw,
+        control->torso_roll,
+        control->head_pitch,
+        control->head_yaw,
+        control->head_roll,
+        control->eye_yaw,
+        control->eye_pitch,
+        control->eye_weight,
+        control->head_gaze_weight,
+        control->focused_expression_weight,
+    };
+    const float *vectors[] = {
+        control->gaze_target,        control->right_hand_target,
+        control->right_elbow_pole,   control->right_elbow_position,
+        control->right_hand_position, control->right_wrist_euler,
+        control->right_arm_velocity,
+    };
+    for (size_t index = 0U; index < SDL_arraysize(scalars); ++index) {
+        if (!isfinite(scalars[index])) {
+            return false;
+        }
     }
-    node_position(rig, lower, lower_position);
-    node_position(rig, hand, hand_position);
-    subtract3(hand_position, lower_position, current_direction);
-    desired_direction[0] = current_direction[0] * 0.08F;
-    desired_direction[1] = -1.0F;
-    desired_direction[2] = 0.04F;
-    if (!rotate_node_toward(rig, lower, current_direction, desired_direction)) {
-        return false;
-    }
-    apply_euler(&rig->nodes[(size_t)hand], 0.0F, 0.0F, 0.0F);
-    return eidolon_motion_rebuild_world(rig);
-}
-
-static bool apply_control(EidolonVrmProjection *projection, EidolonMotionRig *rig,
-                          const EidolonCanonicalControl *control) {
-    const int chest = projection->nodes[EIDOLON_VRM_BONE_UPPER_CHEST] >= 0
-                          ? projection->nodes[EIDOLON_VRM_BONE_UPPER_CHEST]
-                      : projection->nodes[EIDOLON_VRM_BONE_CHEST] >= 0
-                          ? projection->nodes[EIDOLON_VRM_BONE_CHEST]
-                          : projection->nodes[EIDOLON_VRM_BONE_SPINE];
-    const int head = projection->nodes[EIDOLON_VRM_BONE_HEAD];
-    const int left_eye = projection->nodes[EIDOLON_VRM_BONE_LEFT_EYE];
-    const int right_eye = projection->nodes[EIDOLON_VRM_BONE_RIGHT_EYE];
-    if (!reset_to_bind(rig)) {
-        return false;
-    }
-    apply_euler(&rig->nodes[(size_t)chest], control->torso_pitch, control->torso_yaw,
-                control->torso_roll);
-    apply_euler(&rig->nodes[(size_t)head], control->head_pitch, control->head_yaw,
-                control->head_roll);
-    if (left_eye >= 0 && right_eye >= 0 && control->eye_weight > 0.0F) {
-        apply_euler(&rig->nodes[(size_t)left_eye], control->eye_pitch, control->eye_yaw, 0.0F);
-        apply_euler(&rig->nodes[(size_t)right_eye], control->eye_pitch, control->eye_yaw, 0.0F);
-    }
-    if (!eidolon_motion_rebuild_world(rig) || !apply_relaxed_left_arm(rig, projection) ||
-        !apply_right_arm(rig, projection, control)) {
-        return false;
-    }
-    projection->focused_expression_weight =
-        SDL_clamp(control->focused_expression_weight, 0.0F, 1.0F);
-    return true;
-}
-
-static bool rotations_finite(const EidolonMotionRig *rig) {
-    for (size_t index = 0; index < rig->node_count; ++index) {
-        for (size_t component = 0; component < 4U; ++component) {
-            if (!isfinite(rig->nodes[index].rotation[component])) {
+    for (size_t vector = 0U; vector < SDL_arraysize(vectors); ++vector) {
+        for (size_t axis = 0U; axis < 3U; ++axis) {
+            if (!isfinite(vectors[vector][axis])) {
                 return false;
             }
         }
@@ -292,21 +264,149 @@ static bool rotations_finite(const EidolonMotionRig *rig) {
     return true;
 }
 
-static bool restore_last_valid(EidolonVrmProjection *projection, EidolonMotionRig *rig) {
-    for (size_t index = 0; index < rig->node_count; ++index) {
-        memcpy(rig->nodes[index].rotation, projection->last_valid_rotations[index],
-               sizeof(rig->nodes[index].rotation));
+static bool pose_finite(const EidolonMotionRig *rig) {
+    for (size_t index = 0U; index < rig->node_count; ++index) {
+        const EidolonMotionNode *node = &rig->nodes[index];
+        float length_squared = 0.0F;
+        for (size_t axis = 0U; axis < 3U; ++axis) {
+            if (!isfinite(node->translation[axis]) || !isfinite(node->scale[axis])) {
+                return false;
+            }
+        }
+        for (size_t component = 0U; component < 4U; ++component) {
+            if (!isfinite(node->rotation[component])) {
+                return false;
+            }
+            length_squared += node->rotation[component] * node->rotation[component];
+        }
+        if (!isfinite(length_squared) || length_squared <= VRM_PROJECTION_EPSILON) {
+            return false;
+        }
+        for (size_t component = 0U; component < 16U; ++component) {
+            if (!isfinite(node->world[component])) {
+                return false;
+            }
+        }
     }
-    return eidolon_motion_rebuild_world(rig);
+    return true;
+}
+
+static void copy_local_pose(EidolonMotionRig *destination, const EidolonMotionRig *source) {
+    for (size_t index = 0U; index < source->node_count; ++index) {
+        memcpy(destination->nodes[index].translation, source->nodes[index].translation,
+               sizeof(destination->nodes[index].translation));
+        memcpy(destination->nodes[index].rotation, source->nodes[index].rotation,
+               sizeof(destination->nodes[index].rotation));
+        memcpy(destination->nodes[index].scale, source->nodes[index].scale,
+               sizeof(destination->nodes[index].scale));
+        destination->nodes[index].world_state = 0U;
+    }
+}
+
+static void stage_base_pose(EidolonVrmProjection *projection, const EidolonMotionRig *rig) {
+    copy_local_pose(&projection->scratch, rig);
+    for (size_t index = 0U; index < projection->node_count; ++index) {
+        if (!projection->owned_nodes[index]) {
+            continue;
+        }
+        memcpy(projection->scratch.nodes[index].translation, projection->base_translations[index],
+               sizeof(projection->scratch.nodes[index].translation));
+        memcpy(projection->scratch.nodes[index].rotation, projection->base_rotations[index],
+               sizeof(projection->scratch.nodes[index].rotation));
+        memcpy(projection->scratch.nodes[index].scale, projection->base_scales[index],
+               sizeof(projection->scratch.nodes[index].scale));
+    }
+}
+
+static bool apply_control(const EidolonVrmProjection *projection, EidolonMotionRig *rig,
+                          const EidolonCanonicalControl *control, float *expression_weight) {
+    const EidolonVrmHumanBone torso_bone = chest_bone(projection);
+    const int torso = projection->nodes[(size_t)torso_bone];
+    const int head = projection->nodes[EIDOLON_VRM_BONE_HEAD];
+    const int left_eye = projection->nodes[EIDOLON_VRM_BONE_LEFT_EYE];
+    const int right_eye = projection->nodes[EIDOLON_VRM_BONE_RIGHT_EYE];
+    if (!apply_corrected_euler(projection, &rig->nodes[(size_t)torso], torso_bone,
+                               control->torso_pitch, control->torso_yaw,
+                               control->torso_roll) ||
+        !apply_corrected_euler(projection, &rig->nodes[(size_t)head], EIDOLON_VRM_BONE_HEAD,
+                               control->head_pitch, control->head_yaw, control->head_roll)) {
+        return false;
+    }
+    if (projection->look_at_executable && left_eye >= 0 && right_eye >= 0 &&
+        control->eye_weight > 0.0F) {
+        if (!apply_corrected_euler(projection, &rig->nodes[(size_t)left_eye],
+                                   EIDOLON_VRM_BONE_LEFT_EYE, control->eye_pitch,
+                                   control->eye_yaw, 0.0F) ||
+            !apply_corrected_euler(projection, &rig->nodes[(size_t)right_eye],
+                                   EIDOLON_VRM_BONE_RIGHT_EYE, control->eye_pitch,
+                                   control->eye_yaw, 0.0F)) {
+            return false;
+        }
+    }
+    if (!eidolon_motion_rebuild_world(rig) || !apply_right_arm(rig, projection, control)) {
+        return false;
+    }
+    *expression_weight = projection->expression_executable
+                             ? SDL_clamp(control->focused_expression_weight, 0.0F, 1.0F)
+                             : 0.0F;
+    if (projection->expression_is_binary) {
+        *expression_weight = *expression_weight > 0.5F ? 1.0F : 0.0F;
+    }
+    return true;
+}
+
+static void mark_owned_node(EidolonVrmProjection *projection, int node) {
+    if (node >= 0 && (size_t)node < projection->node_count) {
+        projection->owned_nodes[(size_t)node] = true;
+    }
+}
+
+static bool initialize_bind_frames(EidolonVrmProjection *projection,
+                                   const EidolonMotionRig *rig) {
+    copy_local_pose(&projection->scratch, rig);
+    for (size_t index = 0U; index < projection->node_count; ++index) {
+        EidolonMotionNode *node = &projection->scratch.nodes[index];
+        memcpy(node->translation, node->bind_translation, sizeof(node->translation));
+        memcpy(node->rotation, node->bind_rotation, sizeof(node->rotation));
+        memcpy(node->scale, node->bind_scale, sizeof(node->scale));
+        node->world_state = 0U;
+    }
+    if (!eidolon_motion_rebuild_world(&projection->scratch)) {
+        return false;
+    }
+    for (size_t bone = 0U; bone < EIDOLON_VRM_BONE_COUNT; ++bone) {
+        const int node = projection->nodes[bone];
+        if (node < 0) {
+            projection->bind_world_rotations[bone][3] = 1.0F;
+            projection->inverse_bind_world_rotations[bone][3] = 1.0F;
+            continue;
+        }
+        if (!node_world_rotation(&projection->scratch, node,
+                                 projection->bind_world_rotations[bone],
+                                 projection->node_count + 1U)) {
+            return false;
+        }
+        quaternion_inverse(projection->bind_world_rotations[bone],
+                           projection->inverse_bind_world_rotations[bone]);
+    }
+    return true;
 }
 
 bool eidolon_vrm_projection_init(EidolonVrmProjection *projection, const EidolonVrmBody *body,
+                                 const EidolonEprBodyProfile *profile,
                                  const EidolonMotionRig *rig) {
-    if (projection == NULL || body == NULL || rig == NULL || rig->node_count == 0U) {
+    EidolonMotionNode *scratch_nodes;
+    if (projection == NULL || body == NULL || profile == NULL || rig == NULL ||
+        rig->node_count == 0U || profile->version != EIDOLON_EPR_BODY_PROFILE_VERSION) {
         return false;
     }
     memset(projection, 0, sizeof(*projection));
     memcpy(projection->nodes, body->node_by_bone, sizeof(projection->nodes));
+    projection->look_at_executable =
+        body->look_at.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    projection->expression_executable =
+        body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    projection->expression_is_binary = body->relaxed_expression.is_binary;
     if (projection->nodes[EIDOLON_VRM_BONE_HEAD] < 0 ||
         projection->nodes[EIDOLON_VRM_BONE_SPINE] < 0 ||
         projection->nodes[EIDOLON_VRM_BONE_LEFT_UPPER_ARM] < 0 ||
@@ -317,38 +417,89 @@ bool eidolon_vrm_projection_init(EidolonVrmProjection *projection, const Eidolon
         projection->nodes[EIDOLON_VRM_BONE_RIGHT_HAND] < 0) {
         return false;
     }
-    projection->last_valid_rotations =
-        SDL_calloc(rig->node_count, sizeof(*projection->last_valid_rotations));
-    if (projection->last_valid_rotations == NULL) {
+    projection->node_count = rig->node_count;
+    projection->base_translations =
+        SDL_calloc(rig->node_count, sizeof(*projection->base_translations));
+    projection->base_rotations = SDL_calloc(rig->node_count, sizeof(*projection->base_rotations));
+    projection->base_scales = SDL_calloc(rig->node_count, sizeof(*projection->base_scales));
+    projection->owned_nodes = SDL_calloc(rig->node_count, sizeof(*projection->owned_nodes));
+    scratch_nodes = SDL_calloc(rig->node_count, sizeof(*scratch_nodes));
+    if (projection->base_translations == NULL || projection->base_rotations == NULL ||
+        projection->base_scales == NULL || projection->owned_nodes == NULL ||
+        scratch_nodes == NULL) {
+        SDL_free(scratch_nodes);
+        eidolon_vrm_projection_destroy(projection);
         return false;
     }
-    projection->node_count = rig->node_count;
-    for (size_t index = 0; index < rig->node_count; ++index) {
-        memcpy(projection->last_valid_rotations[index], rig->nodes[index].rotation,
-               sizeof(rig->nodes[index].rotation));
+    projection->scratch = *rig;
+    projection->scratch.nodes = scratch_nodes;
+    memcpy(projection->scratch.nodes, rig->nodes, rig->node_count * sizeof(*rig->nodes));
+    memcpy(projection->right, profile->right, sizeof(projection->right));
+    memcpy(projection->up, profile->up, sizeof(projection->up));
+    memcpy(projection->forward, profile->forward, sizeof(projection->forward));
+    if (!normalize3(projection->right) || !normalize3(projection->up) ||
+        !normalize3(projection->forward)) {
+        eidolon_vrm_projection_destroy(projection);
+        return false;
+    }
+    mark_owned_node(projection, projection->nodes[(size_t)chest_bone(projection)]);
+    mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_HEAD]);
+    if (projection->look_at_executable) {
+        mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_LEFT_EYE]);
+        mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_RIGHT_EYE]);
+    }
+    mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_RIGHT_UPPER_ARM]);
+    mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_RIGHT_LOWER_ARM]);
+    mark_owned_node(projection, projection->nodes[EIDOLON_VRM_BONE_RIGHT_HAND]);
+    if (!initialize_bind_frames(projection, rig) ||
+        !eidolon_vrm_projection_capture_base(projection, rig)) {
+        eidolon_vrm_projection_destroy(projection);
+        return false;
     }
     projection->ready = true;
     return true;
 }
 
+bool eidolon_vrm_projection_capture_base(EidolonVrmProjection *projection,
+                                         const EidolonMotionRig *rig) {
+    if (projection == NULL || rig == NULL || rig->node_count != projection->node_count ||
+        projection->base_translations == NULL || projection->base_rotations == NULL ||
+        projection->base_scales == NULL || !pose_finite(rig)) {
+        return false;
+    }
+    for (size_t index = 0U; index < rig->node_count; ++index) {
+        memcpy(projection->base_translations[index], rig->nodes[index].translation,
+               sizeof(projection->base_translations[index]));
+        memcpy(projection->base_rotations[index], rig->nodes[index].rotation,
+               sizeof(projection->base_rotations[index]));
+        memcpy(projection->base_scales[index], rig->nodes[index].scale,
+               sizeof(projection->base_scales[index]));
+    }
+    return true;
+}
+
 bool eidolon_vrm_projection_apply(EidolonVrmProjection *projection, EidolonMotionRig *rig,
                                   const EidolonCanonicalControl *control) {
-    float previous_expression;
+    float expression_weight = 0.0F;
     if (projection == NULL || rig == NULL || control == NULL || !projection->ready ||
-        !control->valid || rig->node_count != projection->node_count ||
+        !control->valid || control->version != EIDOLON_EPR_CONTROL_VERSION ||
+        !control_finite(control) || rig->node_count != projection->node_count ||
         control->revision <= projection->control_revision) {
         return false;
     }
-    previous_expression = projection->focused_expression_weight;
-    if (!apply_control(projection, rig, control) || !rotations_finite(rig)) {
-        projection->focused_expression_weight = previous_expression;
-        (void)restore_last_valid(projection, rig);
+    stage_base_pose(projection, rig);
+    if (!eidolon_motion_rebuild_world(&projection->scratch) ||
+        !apply_control(projection, &projection->scratch, control, &expression_weight) ||
+        !pose_finite(&projection->scratch)) {
         return false;
     }
-    for (size_t index = 0; index < rig->node_count; ++index) {
-        memcpy(projection->last_valid_rotations[index], rig->nodes[index].rotation,
-               sizeof(rig->nodes[index].rotation));
+    copy_local_pose(rig, &projection->scratch);
+    for (size_t index = 0U; index < rig->node_count; ++index) {
+        memcpy(rig->nodes[index].world, projection->scratch.nodes[index].world,
+               sizeof(rig->nodes[index].world));
+        rig->nodes[index].world_state = projection->scratch.nodes[index].world_state;
     }
+    projection->focused_expression_weight = expression_weight;
     projection->control_revision = control->revision;
     return true;
 }
@@ -357,6 +508,10 @@ void eidolon_vrm_projection_destroy(EidolonVrmProjection *projection) {
     if (projection == NULL) {
         return;
     }
-    SDL_free(projection->last_valid_rotations);
+    SDL_free(projection->scratch.nodes);
+    SDL_free(projection->base_translations);
+    SDL_free(projection->base_rotations);
+    SDL_free(projection->base_scales);
+    SDL_free(projection->owned_nodes);
     memset(projection, 0, sizeof(*projection));
 }
