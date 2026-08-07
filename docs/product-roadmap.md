@@ -159,8 +159,9 @@ support. Its owning contract is the
 Landing order:
 
 Items 1-5 are implemented for the supported DECAGRAMMATON reference path. Item 6 is active: its
-measurement/profile and first interactive task-space calibration/save slices are implemented;
-calibrated program generation remains. Vampire Cat (`2349235869624830263.vrm`) is the current
+measurement/profile, interactive task-space calibration/save, and shared native-presentation
+slices are implemented and owner-accepted; calibrated program generation and ordinary-playback
+application remain. Vampire Cat (`2349235869624830263.vrm`) is the current
 owner-selected private development default after separately passing both gates; its restrictive
 embedded permissions prevent treating that local selection as a public reference recommendation.
 Item 7 is the subsequent owner-controlled gate. None of these results broadens the compatibility
@@ -202,8 +203,9 @@ subsequent scoped milestones. Compatibility broadening must keep the other body 
 
 **3D extension checkpoint (2026-08-07):** the experimental rigged-3D body now uses the same
 `win32_dcomp` scene/presentation path, direct D3D11 target submission, projected click-through mask,
-and captured pointer routing. Automated and hidden live checks pass; visible owner acceptance and
-the legacy-only sprite target remain outside the already-closed 2D gate.
+and captured pointer routing. Automated, hidden-live, and owner-visible checks pass, including
+borderless transparent composition, wheel scaling, inspection rotation, and middle-drag beyond the
+host bounds. The legacy-only sprite target remains outside the already-closed 2D gate.
 
 Complete the current presentation migration for the 2D daily-driver path:
 

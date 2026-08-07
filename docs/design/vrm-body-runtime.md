@@ -4,8 +4,9 @@
 
 The current EPR/VRM path is an **experimental supported-reference-avatar vertical slice**. It proves
 that Eidolon's 3D performance runtime can drive one manually selected VRM 1.0 body through the
-existing SDL 3D presentation path. It is not general VRM 1.0 support, and no user-facing surface may
-describe it as "load a VRM" or imply compatibility with arbitrary conforming avatars.
+shared native DirectComposition presentation path, with the SDL path retained as a fallback. It is
+not general VRM 1.0 support, and no user-facing surface may describe it as "load a VRM" or imply
+compatibility with arbitrary conforming avatars.
 
 The experiment may land only behind an explicit experimental/reference-body boundary. Broad VRM
 support requires the correctness and compatibility gates in this document rather than more models
@@ -61,7 +62,8 @@ The implementation currently exercises a deliberately narrow asset dialect:
   runtime channel; `neutral` is parsed independently and is never activated implicitly;
 - base-color factor/texture and opaque, mask, or ordinary alpha blending;
 - embedded PNG images and one renderer-global linear clamp sampler;
-- the existing SDL/D3D11 or SDL_GPU 3D presentation path.
+- the D3D11 model renderer submitted either directly to the native DirectComposition body target or
+  through the explicit SDL legacy fallback.
 
 This list describes the current implementation, not a valid definition of VRM compatibility.
 Unsupported or untested glTF/VRM features must not be reported as executable merely because their
@@ -281,7 +283,8 @@ body target and remains distinct from headless snapshot mode. Wheel scaling resi
 around the body instead of magnifying into a fixed render rectangle, while the orthographic depth
 range contains the model's rotation-safe bind volume. The renderer submits directly to the native
 D3D11 target; projected skinned geometry supplies click-through without framebuffer readback. This
-is presentation integration around the reference slice, not new EPR or broad VRM ownership.
+presentation integration is owner-accepted around the reference slice; it is not new EPR or broad
+VRM ownership.
 
 Only then broaden compatibility through JPEG/URI decoding, authored samplers, material-color and
 texture-transform expressions, deliberate MToon fallback/shading, constraints, spring bones,

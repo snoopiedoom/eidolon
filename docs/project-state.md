@@ -40,9 +40,10 @@ Bunny Asuna is the alpha-driving portrait body: ten full-canvas expressions, ful
 Unicode JRPG dialogue, local semantic expression planning, and one bubble per visible agent
 session. The Mutsuki Dress v2 sprite remains a fallback. Rio's procedural 3D renderer remains
 selectable and is deliberately initialized only when requested. One manually selected reference
-VRM can run the first EPR vertical slice through that existing SDL 3D presentation path. This is an
-experimental supported-reference-avatar path, not general VRM 1.0 support; the portrait remains the
-shipped default.
+VRM can run the first EPR vertical slice through the shared native DirectComposition presentation
+path, with SDL retained as an explicit or failure fallback. This is an experimental
+supported-reference-avatar path, not general VRM 1.0 support; the portrait remains the shipped
+default.
 
 The portrait director and EPR/VRM runtime are separate body-performance systems. They coexist behind
 shared session, dialogue, selection, scene, and presentation boundaries, but neither owns the
@@ -132,6 +133,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   framebuffer readback; a CPU-projected skinned-mesh mask preserves transparent click-through;
 - deterministic performance snapshots, the hidden runtime gate, the five-second native 3D review
   command, and extended wheel/out-of-host native smoke pass with the portrait default unchanged;
+- the owner accepted the native VRM target's borderless transparency, wheel scaling, inspection
+  rotation, and captured middle-drag continuity beyond the render bounds;
 - the Blue Archive wiki downloader groups the complete category into character/variant portrait
   directories, resumes downloads, and emits a source manifest.
 
@@ -153,9 +156,10 @@ delivery, native bubble-bound selection, bubble retirement/fade, and the seam-fr
 raster. The owner also accepted routed SDL 3D middle-drag rotation outside the host bounds,
 `Shift`+middle roll, double-middle reset, preserved left dragging, fallback launch, clicks,
 settings, mixed-DPI/output placement, post-drag resumption, and persisted native/legacy restart
-selection. Deterministic active-output retirement proves stable fallback selection, usable-bounds
-placement, and application-state continuity; a physical display disconnect remains optional
-hardware evidence.
+selection. The subsequent native 3D extension is owner-accepted for transparent desktop
+composition, scaling, inspection rotation, and captured out-of-host dragging. Deterministic
+active-output retirement proves stable fallback selection, usable-bounds placement, and
+application-state continuity; a physical display disconnect remains optional hardware evidence.
 Deterministic hidden probes confirm both same-process DirectComposition reconstruction and forced
 runtime fallback to `sdl_window_legacy`. The owner accepted visible placement, continuity, and
 interaction after both injected recovery branches.
@@ -238,6 +242,11 @@ authorship, so the workstream is now implementing calibration-derived realizatio
 the native scene/presentation path without sharing the portrait performance system; making 3D the
 default remains downstream and does not alter A2 or portrait ownership.
 
+The current development goal is to finish calibration-derived EPR realization for the supported
+reference body: compile anatomy-bound, owner-approved semantic anchors into composable posture and
+gesture programs; replace the provisional hard-coded fixture endpoints; degrade missing anchors
+locally; and pass deterministic runtime checks plus an owner-approved complete performance.
+
 Primary daily-driver priorities:
 
 1. add source-instance identity and migrate registry ownership from legacy
@@ -267,8 +276,8 @@ Parallel EPR/VRM reference-body priorities:
 
 ## Deferred by the active roadmap
 
-- visible acceptance of native DirectComposition 3D, production-path EPR tuning, and making 3D the
-  default body remain downstream of owner acceptance of the calibrated EPR performance;
+- native DirectComposition 3D is owner-accepted; making 3D the default body remains downstream of
+  owner acceptance of the calibrated EPR performance;
 - the EPR/VRM workstream's correctness gates are not deferred by the 2D roadmap; they are required
   before the experimental reference body is treated as landed;
 - portrait-catalog expression annotation remains downstream of current Expression Director tuning
