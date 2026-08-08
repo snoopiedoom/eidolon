@@ -707,9 +707,9 @@ layers resolve to independently generated presentation targets. Portrait and dia
 be authored without an SDL window renderer, premultiplied, and uploaded directly into
 compositor-owned D3D11 targets without readback. Rigged-3D bodies now render directly into the same
 class of compositor-owned target and publish a CPU-projected animated-mesh hit mask. The persisted
-`native` preference selects DirectComposition for portrait and 3D bodies; explicit legacy preference, sprite bodies, native
-creation failure, and snapshots select `sdl_window_legacy` with local, logged degradation. Its
-Win32 adapter owns transformed
+`native` preference selects DirectComposition for sprite, portrait, and 3D bodies; explicit legacy
+preference, native creation failure, and snapshots select `sdl_window_legacy` with local, logged
+degradation. Its Win32 adapter owns transformed
 per-pixel hit testing, body dragging, and bounded activation/move events. The owner accepted native
 visual output, transparent click-through, dialogue activation and cancellation, smooth dragging,
 cross-monitor behavior, body-context settings without focus theft, final reflow, revisioned Win32
@@ -718,10 +718,11 @@ Host close and graphics-reset requests now cross the same bounded presentation e
 both Windows backends. Target reset requests invalidate cached hit testing and request a redraw;
 device/backend reset requests stop submissions and transient capture, preserve product state, and
 attempt one fresh DirectComposition reconstruction. A candidate must commit and present the newest
-complete scene before acceptance; otherwise the runtime explicitly rebinds portrait/text raster
-resources to a new `sdl_window_legacy` backend. Hidden deterministic probes pass for both native
-reconstruction and forced SDL fallback; the owner accepted visible placement, continuity, and
-interaction after both injected branches.
+complete scene before acceptance; otherwise the runtime explicitly rebinds CPU-backed
+sprite/portrait and text raster resources to a new `sdl_window_legacy` backend and recreates an
+active 3D renderer on that backend. Hidden deterministic probes pass for both native reconstruction
+and forced SDL fallback for every body; the owner accepted visible placement, continuity, and
+interaction after both injected branches for the established portrait and VRM paths.
 
 The behavior-preserving SDL gate retains its established Windows modal-drag limitation. Owner
 observation confirmed that application-driven animation pauses during that native top-level move
@@ -785,14 +786,24 @@ output are accepted.
 Gate: all three bodies work through the same scene and presentation contract; inactive renderers stay
 uninitialized.
 
-**Current checkpoint:** the rigged-3D/VRM renderer borrows the DirectComposition backend's D3D11
+**Status: complete for the Windows body-host contract (2026-08-08).** The rigged-3D/VRM renderer
+borrows the DirectComposition backend's D3D11
 device and renders straight into the generation-bound premultiplied body swapchain. Scene content
 revisions schedule animated redraws; transforms and overlay scaling remain presentation state. A
 coarse CPU projection of the current skinned mesh supplies the native alpha/input plane without a
 GPU readback. Wheel, middle down/motion/up/cancel, out-of-host capture, and double-click reset cross
-the common presentation event contract. Hidden live review and the extended native backend smoke
-pass; visible owner acceptance is the remaining checkpoint. The sprite atlas is still legacy-only,
-so the complete all-three-body Phase 4 gate is not yet closed.
+the common presentation event contract. Sprite retains its validated CPU atlas independently from
+an SDL renderer, rasterizes the selected cell into the native body target with nearest sampling,
+and publishes the same generation-bound alpha mask used for transformed hit testing. Portrait uses
+its independent CPU expression surfaces; none of these body-local representations are shared.
+
+Body switches are transactional at the application boundary: initialize only the requested body,
+cancel stale input capture, retain the presentation instance/backend, preserve lifecycle/session
+state and global body center, then publish the new body content revision. `make body-host-check`
+executes sprite -> portrait -> VRM -> sprite on both Windows backends and exercises native recovery
+plus forced SDL recovery for every body. This closes the automated all-three-body Phase 4 gate on
+Windows. Native sprite feel remains an optional visible checkpoint; Linux Wayland/X11 and macOS
+Metal/Core Animation are explicitly Phase 6 work.
 
 ### Phase 5: graphics-backend spike — complete for Windows
 

@@ -47,7 +47,7 @@ static void draw_render_mode_metadata(EidolonApp *app) {
         app->user_settings.render_mode >= 0 &&
         app->user_settings.render_mode < (int)EIDOLON_RENDER_MODE_COUNT &&
         app->user_settings.render_mode != (int)app->render_mode) {
-        ImGui_Text("next launch: %s via sdl_window_legacy",
+        ImGui_Text("saved preference unavailable this run: %s",
                    eidolon_render_mode_name(
                        (EidolonRenderMode)app->user_settings.render_mode));
     }
@@ -102,8 +102,8 @@ static void select_presentation_preference(EidolonApp *app) {
                    ? eidolon_presentation_backend_name(app->presentation)
                    : "none");
     ImGui_TextWrapped(
-        "presentation changes apply at next launch. unsupported bodies and native failures "
-        "fall back explicitly to sdl_window_legacy.");
+        "presentation changes apply at next launch. body changes apply immediately on the active "
+        "host; native failures fall back explicitly to sdl_window_legacy.");
 }
 
 static void select_state(EidolonApp *app) {

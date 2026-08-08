@@ -1,6 +1,6 @@
 # Project state
 
-Updated 2026-08-07. This file records the current implementation frontier and restart checklist.
+Updated 2026-08-08. This file records the current implementation frontier and restart checklist.
 Stable design and operating knowledge belongs in the other documents; this file may change as
 milestones move.
 
@@ -86,8 +86,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
 - Windows 3D shares the selected presentation backend's D3D11 device: legacy composition samples an
   SDL-owned GPU texture, while native composition renders directly into its body swapchain;
 - pixel alpha drives click-through while coarse Win32 regions keep DWM region cost bounded;
-- the shipped `native` presentation preference selects `win32_dcomp` for portrait and 3D bodies on
-  Windows; an explicit legacy preference, sprite body, or native startup failure selects
+- the shipped `native` presentation preference selects `win32_dcomp` for sprite, portrait, and 3D
+  bodies on Windows; an explicit legacy preference or native startup failure selects
   `sdl_window_legacy` with a logged reason;
 - `win32_dcomp` owns a no-redirection host, independent body/dialogue targets, premultiplied D3D11
   submission, DirectComposition transforms/opacity/z-order, cached-alpha hit testing, native body
@@ -134,6 +134,14 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   keeps middle-drag routing alive beyond the host bounds;
 - native VRM frames submit directly into the DirectComposition swapchain with no animated
   framebuffer readback; a CPU-projected skinned-mesh mask preserves transparent click-through;
+- the sprite renderer retains a validated CPU atlas independently from SDL, publishes nearest-sampled
+  frame cells and alpha masks into native DirectComposition body targets, and binds an SDL texture
+  only for the compatibility backend;
+- sprite, portrait, and VRM switch live on one presentation host while preserving application
+  lifecycle, visible-session count, global body center, and backend identity; switching cancels
+  stale input capture without merging renderer-local animation or pose semantics;
+- `make body-host-check` proves the all-three-body live matrix on DirectComposition and SDL, then
+  proves same-backend native reconstruction and forced SDL recovery for every body;
 - deterministic performance snapshots, the hidden runtime gate, the five-second native 3D review
   command, and extended wheel/out-of-host native smoke pass with the portrait default unchanged;
 - the owner accepted the native VRM target's borderless transparency, wheel scaling, inspection
@@ -145,8 +153,8 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
 
 - Confirm hard-cut expression art plus merged semantic fragments against another mixed-emotion
   response and retain the new performance log if timing still feels wrong.
-- Switch all three body renderers through settings and confirm scale, framing, rotation, and restart
-  persistence.
+- Optionally inspect native sprite scaling, drag, and click-through visually; the automated
+  all-three-body switching/recovery matrix is complete.
 - Use the in-runtime calibration surface to approve the selected local body's neutral, attentive,
   thinking, responding, contrast, and interrupted/guarded anchors, then judge the derived complete
   sequence. The first review accepted camera/rig/harness correctness and rejected the provisional
@@ -238,9 +246,10 @@ interaction after both injected recovery branches.
 The active roadmap gate is
 [A2: make Codex session truth dependable](product-roadmap.md#a2-make-codex-session-truth-dependable).
 [A1: finish the native presentation foundation](product-roadmap.md#a1-finish-the-native-presentation-foundation)
-is complete and owner-accepted for the Windows 2D daily-driver path. DirectComposition is the
-normal portrait/3D selection; `sdl_window_legacy` remains the explicit, sprite-capability, and failure
-fallback with its accepted modal-drag limitation.
+is complete and owner-accepted for the Windows 2D daily-driver path. Its all-body extension now has
+automated Windows parity: DirectComposition is the normal sprite/portrait/3D selection, and
+`sdl_window_legacy` remains the explicit and failure fallback with its accepted modal-drag
+limitation. macOS Metal/Core Animation and Linux Wayland/X11 are not part of this milestone.
 
 The separate EPR/VRM workstream has closed its corrective implementation/runtime gates. Its first
 owner-feel review accepted the camera, rig, and harness but rejected the provisional pose

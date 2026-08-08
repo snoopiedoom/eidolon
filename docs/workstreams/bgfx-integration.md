@@ -166,13 +166,12 @@ exposes a public external-resource contract that removes the animated CPU bridge
 - [x] enable the Win32 DirectComposition backend as a normal/default path after its snapshots,
   interaction, environment handling, and recovery are accepted and fallback is explicit.
 
-This gate is the production migration, not another graphics experiment. Windows portrait/3D startup
-normally uses the DirectComposition backend. Body, portrait, dialogue, and snapshot renderers still
+This gate is the production migration, not another graphics experiment. Windows sprite/portrait/3D
+startup normally uses the DirectComposition backend. Body, portrait, dialogue, and snapshot renderers still
 borrow the SDL renderer explicitly where the legacy backend is selected; the presentation object
-owns and destroys that renderer and its host. Persisted `native` preference resolves by body
-capability: portrait and 3D use DirectComposition, while sprite bodies and native failure select
-`sdl_window_legacy` with a logged reason. Snapshots and explicit compatibility selection also use
-the legacy backend.
+owns and destroys that renderer and its host. Persisted `native` preference resolves to
+DirectComposition for every current body; native failure selects `sdl_window_legacy` with a logged
+reason. Snapshots and explicit compatibility selection also use the legacy backend.
 
 #### Completed backend-owned target checkpoint
 
@@ -287,8 +286,8 @@ thresholds. Gate 5 owns comparative performance policy.
 ## Current checkpoint
 
 Gates 0 through 5 are complete. Gate 6 completed the A1 Windows 2D production slice. The later
-direct-D3D11 3D target extension is now implemented; sprite targets and removal of transitional SDL
-aliases remain separate migration work.
+direct-D3D11 3D target and CPU-backed sprite-target extensions are now implemented; removal of
+transitional SDL aliases remains separate migration work.
 Gate 5 selected direct D3D11 for the Windows compositor backend.
 bgfx proved technically valid zero-copy interop, but its measured footprint and dependency cost did
 not buy a cross-platform native-target contract. SDL_GPU remained renderer-portable but required an
@@ -338,7 +337,8 @@ post-drag resumption, persisted presentation selection, and body-capability fall
 - a portable persisted `presentation_preference` now selects `native` or
   `sdl_window_legacy` without encoding a Windows backend into user state;
 - startup originally resolved portrait to DirectComposition while sprite/3D selected SDL. The
-  subsequent 2026-08-07 extension added direct native 3D targets; sprite remains unsupported;
+  2026-08-07 extension added direct native 3D targets, and the 2026-08-08 extension added a
+  CPU-backed native sprite target plus live all-body switching;
 - native creation or environment bootstrap failure retains the existing explicit SDL fallback;
 - the settings UI exposes inherited preference, active backend, restart semantics, and queued
   unsupported body selection instead of silently coercing the body to portrait;

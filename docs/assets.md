@@ -66,9 +66,11 @@ Run the offline grouping tests with `make character-sprites-check`.
 
 ## Generic sprite-atlas requirements
 
-The fallback body renderer consumes Codex-compatible v2 8x11 sprite sheets. `animation.c` owns atlas
-rows, frame timing, and lifecycle state selection. A sprite package is presentation-only and cannot
-restyle dialogue surfaces owned by Eidolon.
+The sprite body renderer consumes Codex-compatible v2 8x11 sprite sheets. `animation.c` owns atlas
+rows, frame timing, and lifecycle state selection. `sprite.c` retains a validated CPU atlas, binds
+an SDL texture only for the compatibility backend, and can rasterize the current cell into a native
+presentation target. A sprite package is presentation-only and cannot restyle dialogue surfaces
+owned by Eidolon.
 
 ## Generic portrait-set requirements
 

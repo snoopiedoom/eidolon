@@ -154,6 +154,9 @@ static bool publish_scene_snapshot(EidolonApp *app, uint64_t now_ms,
             pivot_x = portrait_transform->pivot_x;
             pivot_y = portrait_transform->pivot_y;
             (void)eidolon_portrait_content_size(app->portrait, &content_width, &content_height);
+        } else if (app->render_mode == EIDOLON_RENDER_MODE_SPRITE &&
+                   eidolon_sprite_ready(app->sprite)) {
+            (void)eidolon_sprite_content_size(app->sprite, &content_width, &content_height);
         } else if (app->render_mode == EIDOLON_RENDER_MODE_MODEL_3D &&
                    eidolon_model_ready(app->model)) {
             content_width = (uint32_t)eidolon_model_render_resolution(app->model);
@@ -326,6 +329,45 @@ static bool draw_model_target(EidolonApp *app) {
     return eidolon_presentation_target_for_layer(app->presentation, body->id, &update);
 }
 
+static bool draw_sprite_target(EidolonApp *app) {
+    const EidolonSceneLayerSnapshot *body =
+        eidolon_scene_snapshot_layer(&app->scene_snapshot, SCENE_BODY_KEY);
+    if (body == NULL || !eidolon_sprite_ready(app->sprite)) {
+        return false;
+    }
+    EidolonPresentationTargetUpdate update;
+    if (!eidolon_presentation_begin_target_update(
+            app->presentation, body->id, body->content_width, body->content_height,
+            EIDOLON_PRESENTATION_ALPHA_PREMULTIPLIED, body->content_revision, &update)) {
+        return false;
+    }
+    if (!update.redraw_required) {
+        return true;
+    }
+#if defined(_WIN32)
+    const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
+    const bool content_valid =
+        eidolon_d3d11_raster_sprite(app->presentation, app->sprite, &update, &source);
+    if (!eidolon_presentation_finish_target_update(app->presentation, &update, content_valid)) {
+        return false;
+    }
+    if (content_valid) {
+        eidolon_log_write("renderer",
+                          "sprite target redraw target=%u generation=%llu "
+                          "content_revision=%llu extent=%ux%u row=%d frame=%d",
+                          update.target.value, (unsigned long long)update.generation,
+                          (unsigned long long)update.content_revision, update.width, update.height,
+                          app->animation.row, app->animation.frame);
+        return true;
+    }
+    return eidolon_presentation_target_for_layer(app->presentation, body->id, &update);
+#else
+    (void)update;
+    SDL_SetError("native sprite targets are unavailable on this platform");
+    return false;
+#endif
+}
+
 static bool draw_dialogue_bubble(EidolonApp *app, const SDL_FRect *bubble,
                                  const EidolonDialogue *dialogue, const char *title,
                                  size_t title_slot, size_t body_slot, uint64_t stable_key,
@@ -495,13 +537,16 @@ static bool draw_scene(EidolonApp *app) {
             model_draw_reported = true;
         }
         scene_drawn = rendered && scene_drawn;
-    } else if (!native_targets && app->render_mode == EIDOLON_RENDER_MODE_SPRITE &&
-               app->atlas != NULL) {
+    } else if (app->render_mode == EIDOLON_RENDER_MODE_SPRITE &&
+               eidolon_sprite_ready(app->sprite)) {
         const SDL_FRect source = eidolon_animation_source_rect(&app->animation);
-        scene_drawn =
-            eidolon_sdl_legacy_draw_sprite(app->presentation, app->atlas, &source,
-                                           &app->body_rect) &&
-            scene_drawn;
+        const bool rendered =
+            native_targets
+                ? draw_sprite_target(app)
+                : eidolon_sdl_legacy_draw_sprite(
+                      app->presentation, eidolon_sprite_texture(app->sprite), &source,
+                      &app->body_rect);
+        scene_drawn = rendered && scene_drawn;
     } else {
         scene_drawn = false;
     }

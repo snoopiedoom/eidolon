@@ -6,6 +6,7 @@
 #include "dialogue.h"
 #include "portrait.h"
 #include "presentation.h"
+#include "sprite.h"
 #include "text_renderer.h"
 
 #if defined(_WIN32)
@@ -16,6 +17,10 @@ bool eidolon_d3d11_upload_straight_alpha(EidolonPresentation *presentation,
 bool eidolon_d3d11_raster_portrait(EidolonPresentation *presentation,
                                    EidolonPortraitRenderer *portrait,
                                    const EidolonPresentationTargetUpdate *update);
+bool eidolon_d3d11_raster_sprite(EidolonPresentation *presentation,
+                                 EidolonSpriteRenderer *sprite,
+                                 const EidolonPresentationTargetUpdate *update,
+                                 const SDL_FRect *source);
 bool eidolon_d3d11_raster_dialogue(EidolonPresentation *presentation,
                                    EidolonTextRenderer *text_renderer, EidolonDialogueTheme theme,
                                    const EidolonPresentationTargetUpdate *update,

@@ -21,6 +21,7 @@
 #include "presentation.h"
 #include "scene.h"
 #include "session_registry.h"
+#include "sprite.h"
 #include "state.h"
 #include "text_renderer.h"
 #include "user_settings.h"
@@ -70,7 +71,7 @@ typedef struct EidolonApp {
        SDL_Renderer until native targets replace this migration bridge. */
     SDL_Window *window;
     SDL_Renderer *renderer;
-    SDL_Texture *atlas;
+    EidolonSpriteRenderer *sprite;
     EidolonTextRenderer *text_renderer;
     EidolonModelRenderer *model;
     EidolonPerformanceRuntime performance_runtime;

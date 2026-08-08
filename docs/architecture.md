@@ -25,14 +25,16 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-native-preferred win32_dcomp portrait/3D | explicit/capability sdl_window_legacy fallback
+Windows-native win32_dcomp sprite/portrait/3D | explicit/failure sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```
 
 This is the current implementation. Its presentation boundary is real, but the legacy path still
-retains transitional SDL renderer aliases. The native path supports independent portrait/dialogue
-targets and direct D3D11 rigged-3D body targets; the sprite atlas remains legacy-only.
+retains transitional SDL renderer aliases. The Windows-native path supports independent
+sprite/portrait/dialogue targets and direct D3D11 rigged-3D body targets. Sprite and portrait keep
+CPU-backed art resources and publish premultiplied target pixels plus alpha masks; VRM renders
+directly into the same target contract.
 The first EPR slice inserts a renderer-neutral control boundary for the explicitly selected
 supported reference VRM without changing source, session, scene, or presentation ownership:
 
@@ -133,7 +135,9 @@ snapshots and prepared expression tracks.
   activation, expression stabilization, and performance cues;
 - `affect` / `affect_client`: lifecycle fallback, GoEmotions projection, continuous affect axes,
   asynchronous worker transport, and stale-result rejection;
-- `animation`: adapter-independent v2 sprite-atlas playback;
+- `animation`: adapter-independent v2 sprite-atlas timing and lifecycle playback;
+- `sprite`: validated CPU atlas ownership, native frame rasterization, and optional SDL texture
+  binding for the compatibility backend;
 - `portrait`: portrait textures, expression selection, framing, and composed whole-image acting;
 - `portrait_motion`: bounded spring state for delivery impulses, independent from classifier latency;
 - `model`: GLB resources, hierarchy evaluation, D3D11 drawing, and GPU skinning;
@@ -254,9 +258,9 @@ are attached to source offsets, not rendered lines.
 ## Windows rendering
 
 Windows interactive startup uses the persisted, platform-neutral `presentation_preference`.
-`native` is shipped: portrait and 3D bodies select `win32_dcomp`; the unsupported sprite body or
-native startup failure selects `sdl_window_legacy` and logs the exact fallback reason. Explicit
-`sdl_window_legacy` preference bypasses the native attempt. Snapshots remain on the legacy backend.
+`native` is shipped: sprite, portrait, and 3D bodies select `win32_dcomp`; native startup failure
+selects `sdl_window_legacy` and logs the exact fallback reason. Explicit `sdl_window_legacy`
+preference bypasses the native attempt. Snapshots remain on the legacy backend.
 
 The legacy backend owns the transparent SDL window, D3D11 device, context, and swapchain. When
 explicitly selected, the 3D renderer borrows that device and draws into an SDL-owned target texture;
@@ -265,20 +269,22 @@ transfer, staging-map loop, or upload. Its Windows character drag delegates to t
 pause application-driven animation until release. That accepted fallback limitation is not a
 DirectComposition parity target.
 
-The normal portrait/3D `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
+The normal `win32_dcomp` backend owns a no-redirection Win32 host, D3D11 device, independent
 premultiplied body/dialogue swapchains, DirectComposition visuals, transforms, opacity, z-order,
 commits, cached CPU alpha planes, transformed native hit testing, and Win32-owned body dragging.
-Portraits/dialogue upload prepared pixels; animated VRM bodies render directly into the body
+Sprite frames, portraits, and dialogue upload prepared pixels; animated VRM bodies render directly into the body
 swapchain and publish a CPU-projected mesh mask without framebuffer readback. Native dialogue activation, body-context settings,
 and move completion cross the bounded presentation-event queue and are owner-confirmed. Revisioned
 Win32 environment publication, topology copying, and one application-owned environment transaction
 are implemented; mixed-DPI cross-monitor behavior is owner-confirmed. Deterministic active-output
 retirement proves opaque-id removal, stable fallback selection, output-local body migration,
 usable-bounds clamping, and dialogue/expression/motion continuity through the replacement frame.
-Output-local host migration, sprite targets, and real hardware display-disconnect evidence remain
-unfinished. Device/backend reset preserves application state through one fresh
+Output-local host migration and real hardware display-disconnect evidence remain unfinished.
+Device/backend reset preserves application state through one fresh
 DirectComposition reconstruction and an explicitly logged SDL fallback; deterministic hidden
-probes cover both paths, while visible continuity and the resulting interaction are owner-accepted.
+probes cover both paths for every body renderer. Live body switches retain the presentation host,
+application/session state, body center, and renderer-local semantics. Visible portrait/VRM
+continuity and interaction are owner-accepted; the native sprite path has automated coverage.
 Real device loss still requires optional hardware evidence. The owner accepted native and legacy
 interaction, output/DPI behavior, persisted selection, body-capability fallback, and restart
 behavior; the 2D A1 presentation gate is complete.

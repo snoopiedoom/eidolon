@@ -57,6 +57,7 @@ COMMON_SOURCES := \
 	src/provider_config.c \
 	src/session_registry.c \
 	src/settings_ui.c \
+	src/sprite.c \
 	src/state.c \
 	src/text_renderer.c \
 	src/user_settings.c \
@@ -207,7 +208,7 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-deps sdl-clean sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check vrm-structure-check vrm-runtime-check vrm-calibrate vrm-performance-review model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check body-host-check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-deps sdl-clean sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check vrm-structure-check vrm-runtime-check vrm-calibrate vrm-performance-review model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
 
 all: $(TARGET)
@@ -263,7 +264,7 @@ $(WIN32_DCOMP_BACKEND_SMOKE): $(WIN32_DCOMP_BACKEND_SMOKE_OBJECT) \
 	$(copy-runtime)
 
 win32-dcomp-backend-smoke: $(WIN32_DCOMP_BACKEND_SMOKE)
-	"$(WIN32_DCOMP_BACKEND_SMOKE)"
+	$(WIN32_DCOMP_BACKEND_SMOKE)
 
 affect: $(AFFECT_WORKER)
 
@@ -575,6 +576,7 @@ IK_TEST := $(TEST_DIR)/ik_test$(EXE)
 HUMANOID_TEST := $(TEST_DIR)/humanoid_test$(EXE)
 POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
 PORTRAIT_TEST := $(TEST_DIR)/portrait_test$(EXE)
+SPRITE_TEST := $(TEST_DIR)/sprite_test$(EXE)
 PORTRAIT_MOTION_TEST := $(TEST_DIR)/portrait_motion_test$(EXE)
 AFFECT_TEST := $(TEST_DIR)/affect_test$(EXE)
 AFFECT_TOKENIZER_TEST := $(TEST_DIR)/affect_tokenizer_test$(EXE)
@@ -664,6 +666,12 @@ $(PORTRAIT_TEST): tests/portrait_test.c src/portrait.c src/portrait_motion.c src
 		src/state.c src/log.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(SPRITE_TEST): tests/sprite_test.c src/sprite.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) \
+		-DEIDOLON_TEST_SPRITE_PATH=\"$(abspath $(TEST_DIR)/sprite-test-atlas.png)\" \
+		$(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(PORTRAIT_MOTION_TEST): tests/portrait_motion_test.c src/portrait_motion.c | $(TEST_RUNTIME)
 	$(make-dir)
@@ -783,9 +791,26 @@ codex-relay-test: $(CODEX_RELAY_TEST)
 epr-boundary-check:
 	$(PYTHON) tests/epr_boundary_test.py src/epr
 
+ifeq ($(OS),Windows_NT)
+ifeq ($(MODE),debug)
+body-host-check: $(TARGET)
+	powershell.exe -NoProfile -ExecutionPolicy Bypass \
+		-File "$(CURDIR)/tools/test_body_host_windows.ps1" \
+		-ApplicationPath "$(abspath $(TARGET))" \
+		-PortraitConfigPath "$(abspath tests/fixtures/portrait-native-smoke.cfg)"
+else
+body-host-check:
+	@echo "body-host-check requires MODE=debug because its deterministic hooks are omitted from release builds."
+	@false
+endif
+else
+body-host-check:
+	@echo "The body-host acceptance matrix currently covers Windows DirectComposition and SDL fallback."
+endif
+
 check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
 	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
-	$(PORTRAIT_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
+	$(PORTRAIT_TEST) $(SPRITE_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
 	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST) $(VRM_BODY_TEST) \
@@ -803,6 +828,7 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(HUMANOID_TEST)
 	$(POSE_SOLVER_TEST)
 	$(PORTRAIT_TEST)
+	$(SPRITE_TEST)
 	$(PORTRAIT_MOTION_TEST)
 	$(AFFECT_TEST)
 	$(AFFECT_TOKENIZER_TEST)
@@ -927,6 +953,7 @@ help:
 	@echo "make MODE=release    build optimized Eidolon with clang"
 	@echo "make check           build and run unit tests"
 	@echo "make editor-config   regenerate compile_commands.json for clangd/VS Code"
+	@echo "make body-host-check verify live sprite/portrait/VRM switching and Windows recovery"
 	@echo "make imgui-smoke     build and run Dear ImGui through its generated C API"
 	@echo "make bgfx-smoke      build pinned bgfx submodules and run the hidden C99/D3D11 probe"
 	@echo "make bgfx-interop-smoke  verify bgfx renders into an Eidolon-owned D3D11 texture"

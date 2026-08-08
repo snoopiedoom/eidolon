@@ -295,8 +295,8 @@ physical display disconnect remain hardware evidence gaps.
 The SDL fallback publishes equivalent environment state, but its Windows modal drag may pause
 application consumption until release; native cadence acceptance belongs to `win32_dcomp`. Its
 mixed-DPI/output/placement and post-drag resumption are owner-accepted. Native presentation is now
-the normal Windows portrait/3D selection; sprite bodies, explicit legacy preference, and native
-failure select the fallback without changing environment meaning.
+the normal Windows sprite/portrait/3D selection; explicit legacy preference and native failure
+select the fallback without changing environment meaning.
 
 ## Data flow
 

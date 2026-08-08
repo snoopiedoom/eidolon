@@ -206,7 +206,15 @@ subsequent scoped milestones. Compatibility broadening must keep the other body 
 `win32_dcomp` scene/presentation path, direct D3D11 target submission, projected click-through mask,
 and captured pointer routing. Automated, hidden-live, and owner-visible checks pass, including
 borderless transparent composition, wheel scaling, inspection rotation, and middle-drag beyond the
-host bounds. The legacy-only sprite target remains outside the already-closed 2D gate.
+host bounds.
+
+**Windows all-body extension checkpoint (2026-08-08):** sprite now owns a CPU-backed atlas and
+publishes frame-local pixels and alpha through the same generation-bound DirectComposition body
+target as portrait and VRM. Sprite, portrait, and VRM switch live on one native host without
+restarting or changing application/session state; renderer-local semantics remain separate. The
+repeatable `make body-host-check` matrix covers native and SDL switching plus native reconstruction
+and forced SDL recovery for every body. macOS Metal/Core Animation and Linux Wayland/X11 remain
+separate future platform work, not part of this Windows checkpoint.
 
 Complete the current presentation migration for the 2D daily-driver path:
 

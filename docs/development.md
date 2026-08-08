@@ -69,6 +69,7 @@ machines; use `make editor-config MODE=release` when release-only definitions ma
 make                       # debug build and stable launch path
 make MODE=release          # optimized mode-specific build
 make check                 # ordinary unit/regression suite
+make body-host-check       # Windows live-body, DirectComposition recovery, and SDL fallback matrix
 make imgui-smoke           # generated C API + SDL backends
 make affect-check          # worker inference + async client
 make affect-benchmark      # cold/warm beat inference profile
@@ -89,6 +90,7 @@ Before handing off a code change, run checks proportional to its risk. The norma
 
 ```powershell
 make check
+make body-host-check
 make affect-check
 make build/windows/bin/debug/eidolon.exe
 make MODE=release build/windows/bin/release/eidolon.exe

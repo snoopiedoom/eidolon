@@ -32,11 +32,11 @@ V1 proves that an agent doing real work can visibly feel like one persistent per
   motion accents;
 - atomic expression swaps—no crossfade or previous-frame ghosting;
 - pixel-exact click-through on Windows and a separate Dear ImGui settings window;
-- DirectComposition portrait/dialogue presentation by default on Windows, with persisted
+- DirectComposition sprite/portrait/VRM and dialogue presentation by default on Windows, with persisted
   `sdl_window_legacy` compatibility selection and explicit capability/failure fallback;
 - a native D3D11 3D path with GLB loading, GPU skinning, semantic poses, and analytic arm IK;
-- an experimental EPR/VRM vertical slice for one supported reference avatar through the legacy SDL
-  3D path, including anatomy measurement and versioned semantic-calibration profiles; this is not
+- an experimental EPR/VRM vertical slice for one supported reference avatar through the native or
+  legacy 3D path, including anatomy measurement and versioned semantic-calibration profiles; this is not
   general VRM 1.0 compatibility;
 - hidden snapshot commands for visual QA without stealing focus.
 
@@ -80,6 +80,7 @@ Install the optional local expression classifier and verify the complete build w
 make affect-setup
 make affect-check
 make check
+make body-host-check
 ```
 
 `make text-setup` remains a compatibility alias for `make sdl-deps`. SDL source arrives only through
@@ -149,8 +150,8 @@ fallback sprite path.
 - press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
   host deliberately does not capture global keyboard shortcuts.
 
-On Windows, portrait and 3D bodies normally use `win32_dcomp`. Sprite bodies, explicit compatibility
-selection, and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
+On Windows, sprite, portrait, and 3D bodies normally use `win32_dcomp`. Explicit compatibility
+selection and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
 backend delegates dragging to the native top-level move loop, which can pause animation and dialogue
 presentation until the mouse button is released; presentation resumes after the drag.
 The visible VRM calibration and performance-review commands use the same borderless, transparent
@@ -182,7 +183,7 @@ selected sprite | portrait | 3D body renderer
                     ↓
 renderer-neutral scene + body/dialogue content
                     ↓
-native-preferred win32_dcomp portrait/3D | explicit/capability sdl_window_legacy fallback
+Windows-native win32_dcomp sprite/portrait/3D | explicit/failure sdl_window_legacy fallback
                     ↓
 transparent desktop presentation + native hit testing
 ```

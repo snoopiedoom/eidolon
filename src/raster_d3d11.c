@@ -73,6 +73,24 @@ bool eidolon_d3d11_raster_portrait(EidolonPresentation *presentation,
     return rendered;
 }
 
+bool eidolon_d3d11_raster_sprite(EidolonPresentation *presentation,
+                                 EidolonSpriteRenderer *sprite,
+                                 const EidolonPresentationTargetUpdate *update,
+                                 const SDL_FRect *source) {
+    if (!eidolon_sprite_ready(sprite) || source == NULL) {
+        SDL_SetError("missing sprite for D3D11 raster");
+        return false;
+    }
+    SDL_Surface *surface = create_target_surface(update);
+    if (surface == NULL) {
+        return false;
+    }
+    const bool rendered = eidolon_sprite_blit_content(sprite, source, surface) &&
+                          eidolon_d3d11_upload_straight_alpha(presentation, update, surface);
+    SDL_DestroySurface(surface);
+    return rendered;
+}
+
 bool eidolon_d3d11_raster_dialogue(EidolonPresentation *presentation,
                                    EidolonTextRenderer *text_renderer, EidolonDialogueTheme theme,
                                    const EidolonPresentationTargetUpdate *update,

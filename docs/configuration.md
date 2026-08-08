@@ -62,9 +62,8 @@ returns the complete policy to its inherited default.
 ## Presentation selection
 
 The shipped `native` preference selects the best supported platform presentation at startup. On
-Windows, portrait and 3D bodies normally select `win32_dcomp`. Sprite bodies select
-`sdl_window_legacy`. Native host, graphics, or environment-bootstrap
-failure also selects `sdl_window_legacy` and records the exact reason. Explicit
+Windows, sprite, portrait, and 3D bodies normally select `win32_dcomp`. Native host, graphics, or
+environment-bootstrap failure selects `sdl_window_legacy` and records the exact reason. Explicit
 `sdl_window_legacy` preference skips the native attempt. Snapshots always use the legacy backend.
 
 The Display settings tab persists this portable preference; changes apply at the next launch.
@@ -79,11 +78,10 @@ $env:EIDOLON_PRESENTATION_BACKEND = "win32_dcomp"
 ```
 
 Accepted override values are `native`, `win32_dcomp`, `sdl_legacy`, and `sdl_window_legacy`.
-Invalid values are logged and ignored. An override cannot make an unsupported body native: the
-body-capability decision still falls back explicitly. The preference UI continues to show the
-persisted choice rather than rewriting it from a temporary environment override.
+Invalid values are logged and ignored. The preference UI continues to show the persisted choice
+rather than rewriting it from a temporary environment override.
 
-The DirectComposition backend supports portrait, dialogue, and direct D3D11 rigged-3D layers;
+The DirectComposition backend supports sprite, portrait, dialogue, and direct D3D11 rigged-3D layers;
 generation-bound CPU/projected-geometry alpha masks; transformed per-pixel hit testing; routed
 wheel and captured middle-drag input; dialogue activation; body-context settings; Win32-owned body
 dragging; revisioned output/DPI state; deterministic active-output retirement; and bounded
