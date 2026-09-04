@@ -17,8 +17,11 @@ __pycache__/
 # Source-asset archives are local inputs, not repository history.
 *.zip
 
-# Downloaded VRM bodies are licensed local inputs. Calibration sidecars may remain reviewable.
-/assets/*.vrm
+# Downloaded bodies and model-specific calibration are private local inputs.
+/assets/**/*.vrm
+/assets/**/*.epr-calibration
+/assets/blue-archivekasumizawa-miyu/
+/assets/初音ミク/
 
 # Extracted character art is a local runtime input. Manifests live under config/.
 /assets/characters/

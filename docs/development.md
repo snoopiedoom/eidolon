@@ -119,30 +119,92 @@ exit:
 
 `--snapshot-performance` accepts a fixed logical tick from 0 through 5000 milliseconds in 20 ms
 increments. It drives the synthetic EPR evidence fixture, projects the resulting canonical control
-through the supported reference VRM, and captures the deterministic legacy snapshot path. The
-visible calibration and review commands use the native desktop target. This does not make 3D the
-default, claim arbitrary VRM compatibility, or route the portrait renderer through EPR.
-The VRM must first be acquired manually and pass `make vrm-structure-check VRM_PATH=...`; set
-`EIDOLON_VRM_PATH` before invoking the snapshot. The runtime never performs VRoid Hub/Pixiv
-authentication or asset download.
+through the selected reference VRM, and captures the deterministic legacy snapshot path. This does
+not make 3D the default, claim arbitrary VRM compatibility, or route the portrait renderer through
+EPR. The VRM must be acquired manually and pass `make vrm-structure-check VRM_PATH=...`; the runtime
+never performs VRoid Hub/Pixiv authentication or asset download.
 
-Use `make vrm-performance-review VRM_PATH=...` to open the stable reference-body camera, play the
-complete scene in real time, and hold the final settled pose for one second. The manual harness
-then starts another pass after a one-second idle pre-roll; it remains open until the owner stops
-the command with Ctrl+C. It refuses incomplete calibration, and a pass containing a realizer
-fallback or solve/projection rejection is not counted. Stopping before one clean five-second pass
-reports failure.
+`make vrm-performance-review VRM_PATH=...` still opens the native reference-body camera and loops
+the existing calibrated five-second fixture. It remains useful for renderer/projection regression,
+but its calibration gate is not the new compatibility gate and it does not prove automatic
+retargeting.
 
-The first DECAGRAMMATON review accepted this camera/rig/harness path and rejected the provisional
-hard-coded pose authorship. Do not tune those poses from screenshots. The active workflow is to
-measure the loaded humanoid, freeze the live EPR sequence at named semantic anchors, let the owner
-adjust task-space handles, and save a matching `<model>.epr-calibration` sidecar. The measurement
-and sidecar parser, frozen-anchor session, live task-space editor, deterministic serializer, and
-atomic save are implemented. Run `make vrm-calibrate VRM_PATH=...`. The calibrated-program compiler
-and ordinary-playback application are also implemented: a matching neutral anchor enables playback,
-approved state/gesture anchors replace the synthetic fixture endpoints, and missing anchors emit a
-typed resource-local fallback without inventing a model-specific posture.
-The calibration body runs in a visible authoring mode on the same borderless transparent
+The first DECAGRAMMATON review accepted the camera/rig/harness and rejected provisional hard-coded
+pose authorship. The later manual-anchor experiment proved measurement, transactional sidecars,
+scratch projection, and resource-local composition, but manual calibration was rejected as the
+ordinary user workflow. The active direction is shared normalized motion, automatic source-to-
+destination T-pose conversion, imported base-pose playback, and then EPR layers. R1 includes a
+complete 55-role vocabulary, owned VRMA tracks, deterministic STEP/LINEAR/CUBICSPLINE sampling,
+and focused GNU Make checks. Run `make vrma-sampler-check`, or preflight a real clip with `make
+vrma-check VRMA_PATH=...`; the latter reports exact per-track variation and aggregate humanoid-chain
+coverage so a parser fixture cannot be mistaken for a whole-body diagnostic. R2 adds transactional
+destination rest-frame conversion, optional-role composition, scaled hips motion, and in-place/full
+root policy; run `make vrm-retarget-check`.
+R3 adds model-owned clip/player lifetime, deterministic clocked sampling, pause/seek/loop/rate
+controls, phase and failure reporting, and atomic imported-base publication before retained EPR;
+run `make vrm-playback-check`. Set `EIDOLON_VRMA_PATH` to a local preflighted clip to exercise that
+runtime path. `make vrma-idle-fixture` fetches the pinned, hash-verified MIT idle into ignored build
+storage. `make vrma-walk-fixture` fetches a pinned CMU neutral-walk BVH and usage-rights file, then
+uses the tested deterministic converter to build and preflight a hash-locked 2.5-second VRMA loop.
+Run `make vrm-animation-runtime-check VRM_PATH=... VRMA_PATH=...` for the five-second sidecar-free
+parser, sampler, retargeter, projection, skinning, shader, and hidden-frame gate. Both pinned clips
+pass that gate on Vampire Cat. The owner accepted both idle and walk through the native visible-
+review harness, closing R3. R4 begins with renderer-neutral masked pose composition; run
+`make humanoid-pose-check` for deterministic layer order, shortest-arc quaternion blending,
+unowned-channel preservation, hips ownership, and transactional rejection.
+Realization Program version 4 also emits validated semantic generator references. EPR torso, head,
+eyes, and arm resources map to disjoint normalized humanoid channels; imported motion keeps legs and
+all other unclaimed channels. `make check` covers descriptor names, takeover policies, bounds,
+procedural `none` references, disjoint ownership, and invalid-mask rollback.
+Run `make epr-motion-catalog-check` for fixed-capacity unique registration, stable source provenance,
+typed missing/procedural/incompatible/sample failures, requested/declared/actual ownership
+intersection, hips ownership, repeatable normalized samples, and transactional rollback.
+Run `make vrma-motion-source-check` for the concrete borrowed-clip adapter: complete clip validation,
+authored-rest-invariant normalized rotation, rest-relative hips-height normalization, actual-track
+ownership, semantic resource narrowing, loop sampling, malformed-source rejection, and atomic
+rollback.
+Run `make epr-motion-execution-check` for exact program phase validation, fixed-tick source and
+normalized time, minimum-jerk entrances/exits, live-grant narrowing, deterministic base/additive/
+override ordering, intensity-scaled residual composition, typed local failures, and whole-frame
+rollback. Run `make semantic-motion-pack-check` for atomic multi-binding publication, stable-context
+rebasing, ownership transfer, and whole-batch rollback. The
+[semantic motion-pack contract](design/epr-motion-pack.md) owns the file/clip lifetime boundary. The
+model embeds one pack, registers the pinned verified idle as `idle.neutral` when its ignored fixture
+is present, and lends the pack's validated catalog to each EPR runtime.
+Complete fixed-tick frames publish through one imported-base/normalized-frame/residual/procedural-
+owner transaction; missing active semantics clear stale motion and fall back locally to the complete
+accepted controller. Canonical-control version 4 publishes explicit head-gaze deltas, weighted
+right-arm IK, tokenized arm continuity, and live procedural resource ownership. Settle carries no
+catalog source: projection captures the exact outgoing model-local arm pose once per behavior token,
+shortest-arc blends toward normalized motion, then applies weighted IK. The pose and capture commit
+together or both roll back. Legacy posture and right-arm anchors cannot leak into a normalized frame.
+Runtime lifecycle, all-or-fallback publication, retained-frame replay, destination projection,
+continuity, weighted IK, and rollback are covered by `make check`.
+
+`make vrm-animation-review VRM_PATH=... VRMA_PATH=...` opens the same clip on the transparent,
+borderless native body target and never times out. Let one complete loop play, then close the window
+or press Escape. Middle-drag rotates, Shift+middle-drag rolls, the wheel resizes the character, and
+double-middle resets the view. Visible VRM review and calibration targets build and launch optimized
+release binaries by default even when ordinary development uses `MODE=debug`; this keeps debug-only
+CPU costs from invalidating acting and cadence review. Set `REVIEW_MODE=debug` only when explicitly
+diagnosing those tools.
+
+`make vrma-semantic-candidate` reproducibly builds and preflights the full pinned CMU `18_08`
+conversation take in ignored storage. The owner accepted the full capture as useful source
+material, not as one semantic motion. `make vrma-semantic-candidate-review VRM_PATH=...` now opens
+the native range-selection harness: `Space` pauses, arrows scrub, `I`/`O` mark, `R` loops the range,
+and `Enter` writes the ignored selection artifact. `make vrma-semantic-slice` validates that
+artifact against the pinned BVH cadence, emits exact frame evidence, builds the deterministic VRMA,
+and preflights it. `make vrma-semantic-slice-review VRM_PATH=...` reviews the derived clip. The
+bounded clip remains unlabeled until that second visible acceptance; it is never substituted for a
+missing semantic generator. `make vrma-review-selection-check` and `make bvh-to-vrma-check` cover
+range state, strict artifact parsing, duration binding, frame snapping, and generated provenance.
+
+`make vrm-calibrate VRM_PATH=...` remains an optional package-author/debug tool. Its anatomy-bound
+sidecars may repair unusual frames, deformation, limits, or contact, but baseline playback must not
+depend on them. See [the durable workstream](workstreams/epr-automatic-retargeting.md).
+
+The optional calibration body runs in a visible authoring mode on the same borderless transparent
 DirectComposition target as the desktop 3D path. It retains middle-drag/Shift+middle camera rotation;
 the wheel resizes the overlay and its model together so zoom cannot crop against a fixed host.
 Double-middle resets both rotation and overlay size. The model depth projection encloses the full
@@ -163,19 +225,27 @@ body profile. `make vrm-check` remains its compatibility alias.
 The executable half uses the product renderer rather than a second importer:
 
 ```text
-vrm-structure-check  implemented: schema, humanoid semantics, metadata, capability truth
-vrm-runtime-check    implemented: complete eight-anchor calibration, buffers, geometry, textures,
-                     skinning, projection, shaders, hidden GPU frame, clean deterministic trace,
-                     and projected five-second endpoint
-vrm calibration      implemented authoring slice: measurements, anatomy fingerprint, named fixture
-                     capture, live task-space projection, partial sidecar parse/write, atomic save
+vrm-structure-check implemented: schema, humanoid semantics, metadata, capability truth
+bvh-to-vrma-check  implemented fixture tool: deterministic hierarchy collapse and hash-locked GLB
+vrma-sampler-check  implemented R1: 55 roles, strict VRMA parsing, owned deterministic sampling
+vrma-check          implemented R1: load, validate, and sample a real VRM Animation file
+vrm-retarget-check  implemented R2: rest conversion, optional roles, root policy, atomic rollback
+vrm-playback-check  implemented R3: lifecycle, scratch retarget, atomic imported-base/EPR publish
+vrm-animation-runtime-check implemented R3: sidecar-free full-body idle/walk and hidden GPU frames
+epr-motion-catalog-check implemented R4: semantic resolution and sampled channel ownership
+vrma-motion-source-check implemented R4: authored-rest normalization and catalog source adapter
+epr-motion-execution-check implemented R4: fixed-tick transitions and normalized frame composition
+semantic-motion-pack-check implemented R4: atomic owned-clip loading and catalog publication
+vrm-runtime-check   implemented legacy gate: calibrated fixture, renderer, projection, hidden frame
+vrm calibration     optional authoring/debug: anatomy-bound anchors and residual repair
 ```
 
-Passing both targets is evidence for the selected reference body on the current machine; it is not
-a broad compatibility claim. Retain the focused unit tests, deterministic EPR trace, hidden
-performance snapshots, and explicit owner-controlled visible review. The
-[VRM reference-body contract](design/vrm-body-runtime.md) owns the required adversarial fixture
-corpus and compatibility gates.
+Each target is evidence only for the boundary it names; none alone is a broad compatibility claim.
+Retain focused unit tests, deterministic EPR traces, hidden performance snapshots, and explicit
+owner-controlled visible review. The [automatic-retargeting
+workstream](workstreams/epr-automatic-retargeting.md) owns the implementation sequence, while the
+[VRM reference-body contract](design/vrm-body-runtime.md) owns the adversarial fixture corpus and
+compatibility gates.
 
 Automated Blender inspection must use `--background`. `make model-mouth-calibrate` is the sole
 intentional live exception because it is an explicitly user-operated calibration tool.

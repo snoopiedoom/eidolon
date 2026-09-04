@@ -1,7 +1,13 @@
 # Character and asset pipeline
 
 Eidolon treats downloaded or extracted character art as local runtime input. Reusable manifests,
-import/export tools, and renderer code belong in Git; game assets do not.
+import/export tools, and renderer code belong in Git; new game-asset downloads do not.
+
+Legacy Rio source material is already tracked under `assets/blue-archive-rio-battle-full-rip-rig`
+and exists in repository history. That is historical content, not a grant of redistribution rights
+or the template for new imports. Private VRMs, model-specific calibration sidecars, and the local
+Miyu/Miku downloads are excluded from the current publication. History cleanup, if desired, is a
+separate operation; excluding new assets does not erase old commits.
 
 This document separates the generic body contract from project-specific acquisition and repair:
 
@@ -116,11 +122,85 @@ Large third-party VRM files remain local and uncommitted. A distributable charac
 carry compatible rights metadata before it can ship. See the
 [experimental VRM reference-body contract](design/vrm-body-runtime.md).
 
-For calibration-first EPR work, the runtime measures every mapped humanoid bind position and
-nearest-semantic-parent segment length, then associates user-approved semantic anchors with the
-resulting anatomy fingerprint. The default sidecar path is `<model>.epr-calibration`; an explicit
-`EIDOLON_VRM_CALIBRATION_PATH` may select another file. A calibration for a nonredistributable
-reference model remains local until its own distribution and derivative-data status is reviewed.
+For automatic-retargeting EPR work, the runtime measures mapped humanoid bind positions, authored
+rest frames, segment lengths, and hips height, then converts shared normalized motion into the
+destination body. A supported body must not require a `.epr-calibration` sidecar for baseline
+playback. Sidecars and `EIDOLON_VRM_CALIBRATION_PATH` remain optional package-author residual tools;
+any override for a nonredistributable reference model stays local until its distribution and
+derivative-data status is reviewed. Motion assets independently require explicit provenance and
+redistribution/use evidence.
+
+`make vrma-check VRMA_PATH=...` reports each owned humanoid track's role, path, interpolation,
+key count, whether it actually varies, and aggregate root/torso/head/arm/leg coverage. A clip that
+parses is not therefore a useful whole-body retargeting diagnostic. Pixiv's MIT-licensed
+[three-vrm animation example](https://github.com/pixiv/three-vrm/tree/dev/packages/three-vrm-animation/examples/models)
+is an official parser-conformance input, but its `test.vrma` currently carries only one humanoid
+motion track and could not serve as R3's full-body visible evidence.
+
+The first full-body idle fixture is `standard_idle.vrma` from Virtual Avatar SDK commit
+[`ab8f0d4`](https://github.com/hirokazuniimoto/virtual-avatar-sdk/commit/ab8f0d4d2ee5bdfa2321b7ac94bfbf4f0a6547eb).
+That repository includes the animation as a default package asset under its MIT license. Eidolon
+pins both source URLs and SHA-256 values; `make vrma-idle-fixture` downloads the animation and its
+matching license into ignored `build/fixtures/vrma/standard-idle`. It never enters Git. The pinned
+animation hash is `42eec1c51cf3978f783d782272e2beac7eb5f945d0f4969de076c569b0f0220b`.
+Its current preflight reports 8.217 seconds, 23 humanoid tracks, 20 varying rotation tracks, and
+varying root, torso, head, both arm, and both leg chains.
+
+When this ignored fixture is present at build/runtime setup, the model owns its clip lifetime and
+registers it immutably as the first EPR semantic generator, `idle.neutral`. Its stable runtime source
+identity is `0x42eec1c51cf3978f`, the leading 64 bits of the pinned SHA-256. The fetch target performs
+the cryptographic verification; runtime loading validates the VRMA structure and tracks. Other
+clips are never inferred or relabeled as missing posture/gesture semantics.
+
+`make vrma-walk-fixture` fetches CMU trial `104_02` (neutral male walk with exact footfalls) from
+the BVH mirror at commit
+[`09a07f5`](https://github.com/una-dinosauria/cmu-mocap/commit/09a07f54f3bbb58797325f009282d0b2048a2871),
+alongside that release's usage-rights file. Both inputs are hash-verified before Eidolon's
+deterministic BVH-to-VRMA compiler collapses auxiliary joints into the 22 mapped humanoid roles.
+Frame zero supplies the authored T-pose; frames 141 through 441 form the selected 2.5-second
+steady-state loop. The generated fixture has 23 tracks, 20 varying rotations, and all seven varying
+humanoid chains. Its source SHA-256 is
+`c7b350504477fc77e890dad93f700af0c98228dd02e16a9f489b37a6fc32cf62`; its generated VRMA SHA-256
+is `81806d6eb858524d38cd7a8c4de9ed11cba3e26002bf9a82e8da89faf6636eb3`. The source, rights, and
+derived VRMA remain in ignored build storage because CMU permits project use but prohibits direct
+resale of the motion data, including converted data.
+
+`make vrma-semantic-candidate` fetches CMU trial `18_08` from the same pinned mirror and
+verifies the matching usage-rights file. The pinned CMU index describes it as a two-subject
+conversation in which subject A explains with hand gestures. The deterministic full-take conversion
+is 17.375 seconds with 23 tracks, 20 varying rotations, and all seven varying humanoid chains. Its
+source SHA-256 is
+`b57e6ba15cf2bde4e6e4233da53425dde6d91952fb2bff17a89c5fce18a1a0ce`; the generated VRMA
+SHA-256 is `c80760542b587de13f02e81176f88a5148769103bf7e891bf7ce89ee1298982c`.
+The source, rights, and output remain ignored. The complete take is review material, not a semantic
+binding. The owner accepted it as viable source material, without assigning one meaning to the
+whole conversation. `make vrma-semantic-candidate-review VRM_PATH=...` opens it in the native
+visible harness and writes an ignored selection only after `I`/`O` marks are replayed and accepted
+with `Enter`. `make vrma-semantic-slice` validates and snaps those millisecond marks to exact pinned
+BVH frames, builds a deterministic derived VRMA, and preflights it. `make
+vrma-semantic-slice-review VRM_PATH=...` is the separate visible acceptance gate for that exact
+slice. No slice receives a generator name, source identity, resource mask, phase behavior, or loop
+policy before that gate. See the
+[semantic motion-pack contract](design/epr-motion-pack.md).
+
+`make vrm-animation-runtime-check VRM_PATH=... VRMA_PATH=...` clears any loaded calibration,
+requires all seven varying humanoid chains, publishes 251 deterministic samples across five
+seconds, and renders hidden endpoint GPU frames. This is objective sidecar-free execution evidence;
+it does not replace visible judgement of deformation, contact, weight, or acting quality. Both the
+pinned idle and CMU walk passed this gate and were owner-accepted through the native visible harness
+on Vampire Cat, closing R3.
+
+`make vrm-animation-review VRM_PATH=... VRMA_PATH=...` prepares the same sidecar-free playback on
+Eidolon's transparent, borderless native body target and loops until the owner closes it. Closing
+before one complete loop reports failure. Middle-drag rotates, Shift+middle-drag rolls, the wheel
+zooms the character, and double-middle resets the view.
+
+The official [VRoid Project animation pack](https://booth.pm/ja/items/5512385) is a candidate
+local diagnostic source. Its seven gestures may be used for testing and commercial work with
+credit, but the posted terms prohibit redistribution in an extractable form. It must therefore be
+downloaded by the operator, remain ignored, and be preflighted locally; it cannot be vendored or
+treated as Eidolon package content. The pack does not supply the required idle/walk pair, so it can
+expand local gesture coverage but is not a redistributable R5 motion pack.
 
 The current owner-selected local development default is
 `assets/2349235869624830263.vrm` (Vampire Cat by Touko Asada). It passes the supported VRM 1.0

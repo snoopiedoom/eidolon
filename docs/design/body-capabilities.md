@@ -90,10 +90,10 @@ state animation, subject to the atlas's declared rows and timing.
 
 ### Rigged 3D model
 
-A hierarchy, skin, materials, and semantic humanoid mapping. It may add gaze, IK, semantic poses,
-procedural motion, and secondary physics. Skeleton presence alone does not advertise every semantic
-pose: a calibration-first body reports only the pose families backed by matching user-approved
-anchors or another declared realization generator.
+A hierarchy, skin, materials, and semantic humanoid mapping. It may add gaze, IK, normalized motion,
+procedural control, and secondary physics. Skeleton presence alone does not advertise every semantic
+pose family: capability truth comes from compatible motion generators and optional package overrides,
+not from requiring every user to author calibration anchors.
 
 Future renderers such as Live2D fit the same contract by advertising capabilities rather than
 creating another session or persona pathway.

@@ -791,11 +791,15 @@ borrows the DirectComposition backend's D3D11
 device and renders straight into the generation-bound premultiplied body swapchain. Scene content
 revisions schedule animated redraws; transforms and overlay scaling remain presentation state. A
 coarse CPU projection of the current skinned mesh supplies the native alpha/input plane without a
-GPU readback. Wheel, middle down/motion/up/cancel, out-of-host capture, and double-click reset cross
-the common presentation event contract. Sprite retains its validated CPU atlas independently from
-an SDL renderer, rasterizes the selected cell into the native body target with nearest sampling,
-and publishes the same generation-bound alpha mask used for transformed hit testing. Portrait uses
-its independent CPU expression surfaces; none of these body-local representations are shared.
+GPU readback. The model keeps that plane at 128x128; the presentation backend maps target-local
+pointer coordinates into the compact mask instead of expanding and copying a full 1024x1024 CPU
+plane. Native model frame eligibility is 16 ms rather than the former hidden 33 ms cap, while VRMA
+track sampling uses logarithmic key lookup. Wheel, middle down/motion/up/cancel, out-of-host capture,
+and double-click reset cross the common presentation event contract. Sprite retains its validated
+CPU atlas independently from an SDL renderer, rasterizes the selected cell into the native body
+target with nearest sampling, and publishes the same generation-bound alpha mask used for
+transformed hit testing. Portrait uses its independent CPU expression surfaces; none of these
+body-local representations are shared.
 
 Body switches are transactional at the application boundary: initialize only the requested body,
 cancel stale input capture, retain the presentation instance/backend, preserve lifecycle/session

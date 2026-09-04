@@ -1,5 +1,13 @@
 # Eidolon Performance Runtime overview
 
+> The active 3D realization plan is the durable [automatic-retargeting
+> workstream](../workstreams/epr-automatic-retargeting.md). Any calibration-first status language
+> below describes the existing reference-body vertical slice, not the product compatibility
+> requirement.
+
+For a concise implementation tour with source and test evidence, read the
+[EPR engineering walkthrough](../epr-engineering.md).
+
 ## Purpose
 
 The Eidolon Performance Runtime (EPR) turns accepted operational and semantic evidence into a
@@ -108,12 +116,40 @@ portrait presentation or source/session observation.
 The first slice contains neutral idle, listening/attention, thinking, streamed-response posture,
 eye-first/head-follow gaze, one restrained right-arm contrast gesture, interruption, explicit
 resource transfer, current-state cleanup, settling, deterministic trace, and the supported VRM 1.0
-reference body through the shared 3D body renderer. The current calibration-first extension measures
-the complete mapped semantic skeleton and transactionally loads partial user-approved anchor
-profiles. Interactive capture, live projection, calibrated program compilation, minimum-jerk
-posture/gesture sampling, resource-local fallback, model-local residual composition, and
-ordinary-playback application are implemented. Owner calibration and performance approval of the
-selected reference body are the remaining gate.
+reference body through the shared 3D body renderer. The runtime measures the complete mapped
+humanoid skeleton, imports owned normalized VRMA tracks, converts source rest frames into the
+destination, and publishes retargeted base poses beneath EPR transactionally. Optional partial
+calibration profiles, live projection, calibrated program compilation, minimum-jerk sampling,
+resource-local fallback, and model-local residual composition remain available. The remaining gates
+are accepted semantic motion vocabulary and multi-body performance approval without
+required calibration. The provenance-safe idle/walk base-motion diagnostic is owner-accepted. R4
+now has deterministic normalized-pose composition plus versioned semantic generator references and
+explicit EPR-resource-to-humanoid-channel mapping. Its bounded semantic catalog resolves borrowed
+normalized sources and transactionally narrows requested ownership against declared and actual
+sampled channels. Its concrete VRMA adapter validates source clips, derives actual-track ownership,
+and converts authored rotations and hips displacement into canonical normalized space through the
+same rest-frame contract used by destination retargeting. Its fixed-tick executor now validates
+phase shapes, derives source time, applies minimum-jerk transitions, narrows against live grants,
+and transactionally composes deterministic frames with distinct absolute and additive semantics.
+The model now embeds a versioned semantic motion pack that atomically publishes owned clips and
+rebased borrowed catalog contexts only after the whole requested batch validates. It registers the
+pinned verified idle as `idle.neutral` when present and lends the resulting catalog to the EPR
+runtime. Only complete plans publish a normalized frame; unresolved active semantics clear stale
+motion and fall back locally to the
+accepted canonical controller. Projection atomically commits imported base, normalized frame,
+optional residuals, and explicit procedural owners, and retains the frame across subsequent
+base-motion samples. Canonical-control version 4 exposes live-granted head/eye gaze, expression,
+weighted right-arm IK, and tokenized arm continuity above normalized posture/gesture without leaking
+legacy posture, combined head control, or arm anchors into the transaction. Settle owns no catalog
+source: projection captures the exact outgoing model-local arm pose once per behavior token, blends
+it into the normalized pose, applies weighted IK afterward, and commits capture state only with the
+whole scratch pose. R4 now also accepts a versioned right-arm task-target stream that remains
+separate from Performance Intent. Publication proves a monotonic producer chain, current plan
+generation, exact active behavior, and a base/override arm claim covering the complete short
+validity interval. Only the exact live grant can apply it; expiry, plan replacement, rejection,
+solve rollback, and accepted/applied/released trace evidence are explicit. A reproducible pinned CMU
+conversation take is now unlabeled review material. The remaining R4 work is to visibly select,
+slice, and atomically bind its provenance-safe vocabulary, not calibrate models one by one.
 
 DirectComposition target submission is now presentation integration around this slice, not EPR
 ownership. The EPR slice still excludes default-3D selection, locomotion, balance/contact planning,
@@ -130,5 +166,8 @@ portrait runtime or makes 2D acceptance depend on 3D progress.
 - [behavior plan and temporal dispatch](epr-behavior-plan.md)
 - [body resources](epr-body-resources.md)
 - [Realization Programs](epr-realization-program.md)
+- [semantic motion catalog](epr-motion-catalog.md)
+- [semantic motion-pack ownership](epr-motion-pack.md)
+- [dynamic task targets](epr-task-targets.md)
 - [VRM body runtime](vrm-body-runtime.md)
 - [tracing and validation](epr-tracing-validation.md)

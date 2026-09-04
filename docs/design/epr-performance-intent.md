@@ -75,6 +75,15 @@ The EPR adapter consumes immutable accepted snapshots/deltas and emits Performan
 also accept body-neutral semantic beats and dialogue reveal anchors from their current owners. It
 must not infer missing source truth from renderer state or transcript tailing.
 
+## Geometric controller streams
+
+Performance Intent never carries joint angles, task-space coordinates, tracked-object positions,
+or model bone data. Short-lived geometric evidence enters through a separate versioned controller
+stream after the plan has selected a behavior and claimed a body resource. The current
+[dynamic task-target contract](epr-task-targets.md) binds right-arm samples to an exact plan
+generation, behavior, and live grant. Rejecting or expiring those samples cannot revise semantic
+truth.
+
 ## Frame-path rule
 
 Intent construction and validation occur before publication. The control loop reads a bounded

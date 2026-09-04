@@ -19,11 +19,13 @@ A realizer receives:
 - fixed configuration and seed;
 - current canonical state when cleanup continuity requires it.
 
-For rigged bodies, the normalized body profile may expose a matching set of user-approved semantic
-calibration anchors. A posture/gesture realizer selects semantic endpoints from that set and derives
-phase-local strength and trajectories; it does not copy model-local rotations into the
-renderer-neutral IR. If a required anchor is absent, realization fails locally through a declared
-fallback instead of substituting a hard-coded model-specific pose.
+For rigged bodies, a motion-producing realizer now emits a versioned semantic generator reference.
+The reference names the body-independent generator and declares its resource mask, exact normalized
+humanoid rotation channels, hips-translation ownership, blend weight, intensity, playback rate,
+and takeover policy. Gaze, expression, right-arm settling, and dynamic IK remain explicit
+procedural modalities and therefore carry
+the validated `none` generator reference. No reference contains model-local rotations, a body
+fingerprint, or an asset path.
 
 It emits one versioned bounded program or a typed local failure. It does not mutate the plan,
 grant resources, inspect sessions/classifier labels, parse files, or draw.
@@ -41,9 +43,9 @@ First-slice realizers are:
 
 A first-slice program contains a schema version, stable behavior/program ids, semantic cause, plan
 generation, modality, resource and capability masks, copied phase anchors, normalized semantic
-targets, and bounded scalar parameters. Integer logical ticks and deterministic interpolation own
-all curve timing. The program set is compiled transactionally with a plan generation and is
-immutable while sampled.
+targets, bounded scalar parameters, and the versioned generator reference described above. Integer
+logical ticks and deterministic interpolation own all curve timing. The program set is compiled
+transactionally with a plan generation and is immutable while sampled.
 
 Programs contain no glTF node index, VRM JSON property, SDL type, D3D type, DirectComposition type,
 Win32 handle, scene layer, or presentation target.
@@ -61,7 +63,9 @@ The first-slice canonical state owns:
 - semantic torso and head orientations;
 - normalized eye and head gaze contributions plus semantic target;
 - a right-hand task-space target, elbow pole, solved elbow/hand positions, and wrist orientation;
-- right-arm velocity used for interruption continuity;
+- right-arm velocity retained as task-space evidence;
+- an independent right-arm IK weight;
+- a settle-behavior continuity token and decay weight;
 - focused-expression weight;
 - resource-local semantic-anchor weights used only to select calibrated model-local residuals;
 - validity and capability-degradation flags.
@@ -70,9 +74,9 @@ It does not contain left-arm pose, model-local bone orientations, matrices, or G
 A projection that receives no left-arm resource preserves the incoming base/imported left-arm pose;
 it may not invent a body-local relaxed baseline. The reference projection now preserves that
 unowned chain. Controlled anatomical rotations pass through precomputed bind-world correction
-frames, and the accepted projection commits from a complete scratch TRS pose. A future animation
-owner publishes its fresh base pose through the explicit capture seam before EPR projection;
-constraints and secondary physics then compose after the atomic EPR commit.
+frames, and the accepted projection commits from a complete scratch TRS pose. The model-owned VRMA
+player now publishes each retargeted base through that seam and reapplies retained EPR control in
+the same transaction; constraints and secondary physics compose after the atomic EPR commit.
 
 ## Composition order
 
@@ -89,9 +93,12 @@ At each fixed control tick:
 8. atomically commit the complete candidate and revision, or retain the last valid state;
 9. publish the immutable snapshot and deterministic normalized hash.
 
-Cleanup is the exception that deliberately receives captured current canonical state: the settle
-program begins from the actually solved hand and wrist at interruption, then transfers the arm to
-the new posture. There is no partial joint commit.
+Cleanup is the exception that deliberately carries a continuity token. The settle program owns the
+right-arm resource and interrupt-to-settle envelope but emits no normalized clip and no IK target.
+During projection, a new token captures the exact outgoing model-local shoulder, upper-arm,
+lower-arm, and hand rotations. Later frames with that token reuse the capture while its weight
+decays into the current normalized pose. Capture and rig publication share one scratch transaction,
+so a failed frame changes neither.
 
 ## Physical solving
 
@@ -105,6 +112,50 @@ channels. Missing required humanoid structure rejects the body profile before co
 Typed realizer, composition, solve, and capability feedback is attached to the current plan
 generation and trace. It may select a declared deterministic fallback. It cannot mutate source
 truth, resurrect stale behavior, or start an unbounded replan inside the control tick.
+
+## R4 semantic-generator transition
+
+Realization Program version 4 assigns stable canonical identifiers to neutral idle, attentive,
+thinking, responding, interrupted/guarded, right-arm contrast, and right-arm settle. The compiler
+derives channel ownership solely from the program's semantic EPR resources and rejects a descriptor
+whose explicit humanoid mask or hips ownership disagrees with that mapping. Base, additive, and
+override takeover remain explicit; weights and rates are finite and bounded.
+
+The fixed-capacity [semantic motion catalog](epr-motion-catalog.md) now resolves each active
+reference to one borrowed canonical normalized source. It rejects duplicates and missing or
+channel-incompatible sources explicitly, then narrows requested ownership against both the source's
+declared maximum and the pose actually sampled. Sampling preserves source identity/time evidence
+and commits only a complete valid result.
+
+The concrete VRMA source adapter now supplies that canonical source contract: it validates each
+borrowed clip, normalizes authored rest-relative rotations and hips displacement, and publishes only
+the channels backed by actual tracks. `motion_execution` validates the compiled behavior/generator
+pair and exact anchor shape, derives source time from fixed ticks, applies minimum-jerk transition
+envelopes, narrows against current grants, and submits a deterministic ordered layer set to the
+normalized compositor. Intensity scales a normalized contribution; blend weight controls its
+influence, and additive generators compose residual quaternions/hips instead of replacing the base.
+The model now embeds a versioned semantic motion pack and lends its validated catalog to the runtime.
+A requested batch preflights every file, binding, and source before clip ownership moves; catalog
+callbacks are then rebased onto stable pack storage and published atomically. The pinned verified
+idle becomes `idle.neutral` when present; complete normalized frames are published through one
+imported-base/normalized-frame/residual/procedural-owner transaction and retained across base
+playback updates. Missing active posture or gesture bindings fail locally to the accepted canonical
+controller and clear stale normalized output.
+
+Canonical-control version 4 publishes explicit head-gaze deltas plus a resource mask derived from
+live procedural grants. Head/eye gaze and expression therefore compose after normalized
+posture/gesture without admitting the legacy combined head or posture controls. The same contract
+now carries weighted right-arm IK plus a tokenized continuity envelope. Projection captures exact
+outgoing model-local arm rotations once per token, shortest-arc blends them into the normalized
+pose, then applies weighted IK, all transactionally. Settle has no catalog source and revised intent
+with the same behavior token cannot rebase its capture. The full canonical solve remains a
+complete-frame fallback. A separate versioned dynamic task-target ingress now publishes bounded
+right-arm samples against an exact plan generation, behavior, and base/override claim. A sample is
+eligible only under that behavior's live grant and its revision becomes applied only after the
+canonical solve commits. R4 now has a provenance-pinned but deliberately unlabeled captured-motion
+candidate; it still needs visible slice selection and complete atomic gesture/posture binding before
+the legacy task-space anchor payload can stop being an ordinary behavior dependency.
+Optional package residual calibration remains a downstream body-adapter concern.
 
 ## Implemented calibration compiler
 

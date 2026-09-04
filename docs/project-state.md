@@ -1,8 +1,16 @@
 # Project state
 
-Updated 2026-08-08. This file records the current implementation frontier and restart checklist.
+Updated 2026-09-04. This file records the current implementation frontier and restart checklist.
 Stable design and operating knowledge belongs in the other documents; this file may change as
 milestones move.
+
+EPR is the current engineering and portfolio focus; the portrait remains the shipped default.
+The [EPR engineering walkthrough](epr-engineering.md) maps implemented capabilities to source and
+tests. Automatic idle/walk playback is owner-accepted on the development reference body. The
+native conversation-review performance fix is also owner-accepted: optimized review builds,
+16 ms model-update eligibility, binary keyframe lookup, and compact projected input masks are
+implemented. This is visible smoothness acceptance, not a measured cross-machine FPS guarantee.
+The first bounded semantic gesture slice is still awaiting explicit selection and review.
 
 ## V1 scorecard
 
@@ -133,7 +141,12 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
   rotation-safe depth fitting prevents orbit inspection from clipping the rig, and Win32 capture
   keeps middle-drag routing alive beyond the host bounds;
 - native VRM frames submit directly into the DirectComposition swapchain with no animated
-  framebuffer readback; a CPU-projected skinned-mesh mask preserves transparent click-through;
+  framebuffer readback; a CPU-projected 128x128 skinned-mesh mask preserves transparent
+  click-through, and the backend samples that compact coverage in target coordinates without
+  expanding or copying a 1024x1024 CPU mask;
+- native model presentation no longer carries a hidden 33 ms cadence cap: frame eligibility is 16
+  ms, long VRMA tracks use logarithmic key lookup, and visible VRM review/calibration targets launch
+  optimized release binaries by default while retaining an explicit `REVIEW_MODE=debug` override;
 - the sprite renderer retains a validated CPU atlas independently from SDL, publishes nearest-sampled
   frame cells and alpha masks into native DirectComposition body targets, and binds an SDL texture
   only for the compatibility backend;
@@ -151,16 +164,13 @@ behavior persist through sparse per-user overrides with reset-to-inheritance sem
 
 ## Awaiting interactive confirmation
 
+- Mark one intentional range in the accepted CMU conversation capture with
+  `make vrma-semantic-candidate-review VRM_PATH=...`, build it with `make vrma-semantic-slice`,
+  then accept or reject that exact clip through `make vrma-semantic-slice-review VRM_PATH=...`.
 - Confirm hard-cut expression art plus merged semantic fragments against another mixed-emotion
   response and retain the new performance log if timing still feels wrong.
 - Optionally inspect native sprite scaling, drag, and click-through visually; the automated
   all-three-body switching/recovery matrix is complete.
-- Use the in-runtime calibration surface to approve the selected local body's neutral, attentive,
-  thinking, responding, contrast, and interrupted/guarded anchors, then judge the derived complete
-  sequence. The first review accepted camera/rig/harness correctness and rejected the provisional
-  hard-coded poses; calibrated compilation, EPR trace, control, projection, and fallback
-  verification are automated. Acceptance commands now refuse partial sidecars and fail any traced
-  fallback or solve/projection rejection rather than silently reviewing degraded motion.
 
 The owner accepted ordinary no-environment DirectComposition portrait/dialogue startup, transparent
 per-pixel click-through, smooth native body dragging, cross-monitor movement, dialogue activation,
@@ -243,7 +253,8 @@ interaction after both injected recovery branches.
 
 ## Next priorities
 
-The active roadmap gate is
+The active engineering priority is EPR R4 and its reviewed semantic-motion vocabulary. The
+next daily-driver product gate remains
 [A2: make Codex session truth dependable](product-roadmap.md#a2-make-codex-session-truth-dependable).
 [A1: finish the native presentation foundation](product-roadmap.md#a1-finish-the-native-presentation-foundation)
 is complete and owner-accepted for the Windows 2D daily-driver path. Its all-body extension now has
@@ -252,16 +263,59 @@ automated Windows parity: DirectComposition is the normal sprite/portrait/3D sel
 limitation. macOS Metal/Core Animation and Linux Wayland/X11 are not part of this milestone.
 
 The separate EPR/VRM workstream has closed its corrective implementation/runtime gates. Its first
-owner-feel review accepted the camera, rig, and harness but rejected the provisional pose
-authorship. Calibration-derived realization is now implemented and awaiting Vampire Cat anchor
-authoring plus the complete owner-visible performance review. It shares
-the native scene/presentation path without sharing the portrait performance system; making 3D the
-default remains downstream and does not alter A2 or portrait ownership.
+owner-feel review accepted the camera, rig, and harness but rejected both provisional pose
+authorship and mandatory per-body semantic calibration as the ordinary product path. Existing
+anatomy, bind-correction, transactional projection, optional residual calibration, and native
+presentation remain the substrate. The durable contract is
+[EPR automatic humanoid motion and retargeting](workstreams/epr-automatic-retargeting.md).
 
-The current development goal is to finish calibration-derived EPR realization for the supported
-reference body: compile anatomy-bound, owner-approved semantic anchors into composable posture and
-gesture programs; replace the provisional hard-coded fixture endpoints; degrade missing anchors
-locally; and pass deterministic runtime checks plus an owner-approved complete performance.
+R1 and R2 are complete: Eidolon owns and samples strict VRMA tracks into the complete normalized
+humanoid vocabulary, then converts them transactionally through destination rest frames with
+optional-role composition and scaled root motion. R3 is complete: the model
+owns imported clip/player lifetime, exposes deterministic playback controls and diagnostics, samples
+and retargets before EPR, and atomically publishes the accepted base with retained EPR reapplied.
+A pinned MIT idle covers every humanoid chain, passes a five-second, 251-sample sidecar-free hidden
+GPU gate on Vampire Cat, and is owner-accepted through the native visible harness. A pinned,
+hash-locked CMU neutral walk is deterministically compiled from a T-pose-prefixed BVH into a
+2.5-second full-body loop and passes the same preflight and hidden GPU gate without calibration.
+The owner accepted that walk's visible deformation, contact, weight, and loop, closing R3. R4 is
+active; its first renderer-neutral slice composes explicitly masked normalized-pose layers with
+deterministic shortest-arc blending, byte-preserved unowned channels, hips ownership, and atomic
+rollback on invalid input. Realization Program version 4 now adds bounded semantic generator
+references and maps semantic torso/head/eyes/arm ownership to disjoint normalized humanoid channels;
+procedural gaze/expression carry an explicit `none` reference. A fixed-capacity catalog now resolves
+those identifiers to borrowed normalized sources with stable provenance, typed local failure, and
+requested/declared/actual pose-ownership intersection. A transactional VRMA source adapter now
+validates borrowed clips, derives ownership from actual tracks, and normalizes authored local
+rotations and hips displacement through a rest-space contract shared with destination retargeting.
+A fixed-tick motion executor now validates exact behavior phase shapes, derives source-local and
+normalized time, applies minimum-jerk enter/hold/exit envelopes, narrows each program to live grants,
+and transactionally composes one normalized frame in stable base/cooperative/additive/override
+order. Additive normalized clips now contribute intensity-scaled rotation and hips residuals rather
+than acting as absolute overrides. The model now embeds one versioned semantic motion pack whose
+owned clips back the catalog borrowed by EPR. Multi-asset loading preflights every binding and source,
+then rebases borrowed contexts and publishes atomically; any duplicate, missing, or malformed member
+leaves the previous pack and caller ownership unchanged. The pack binds the pinned verified idle as
+`idle.neutral` when its ignored fixture is present. The EPR runtime publishes only complete
+normalized frames; absent plans idle, while missing active posture or gesture semantics clear stale
+motion and fail locally to the accepted controller. A hash-verified full CMU `18_08` conversation
+take is now reproducible review material but has no semantic label or runtime binding yet.
+Projection atomically commits imported base, normalized frame, optional calibration residuals, and
+explicit procedural owners, then reapplies the retained frame over successive imported-base samples.
+Canonical-control version 4 publishes live-grant evidence plus separate head-gaze deltas, weighted
+right-arm IK, and tokenized arm continuity. Head/eye gaze, expression, and procedural arm refinement
+now survive normalized posture/gesture, while legacy canonical posture, combined head control, and
+right-arm anchors are excluded from normalized transactions. A versioned body-relative right-arm
+task-target stream is now separate from Performance Intent and bound to a monotonic producer,
+current plan generation, exact behavior, and complete base/override claim interval. Only its exact
+live grant can apply it; invalid/stale samples preserve the accepted stream, expiry and plan
+replacement release explicitly, and a rejected solve preserves the last control and applied target
+revision. Trace version 3 records the full target lifecycle. Settle captures the exact outgoing
+model-local arm rotations once per behavior token and transactionally blends them into the new
+normalized pose without revised-intent rebasing. The complete legacy controller remains the
+all-or-fallback path. R4 next visibly reviews and slices the pinned captured-motion candidate, then
+loads accepted posture/gesture bindings through the atomic pack before removing ordinary anchor
+fallback.
 
 Primary daily-driver priorities:
 
@@ -280,20 +334,19 @@ Primary daily-driver priorities:
 
 Parallel EPR/VRM reference-body priorities:
 
-1. use the implemented in-runtime calibration session to author the selected local body's named task-space
-   anchors; bounded residual and left-arm controls remain follow-up authoring tools;
-2. compile posture/gesture programs from approved anchors and degrade
-   missing anchors locally without guessed fallback poses;
-3. calibrate the selected local body and repeat the owner-controlled visible performance judgement;
-4. extend the hostile corpus with renderer-level JPEG/URI/sampler/skin-palette fixtures and official
-   sample models;
-5. retain the imported-animation -> EPR -> look-at -> constraints -> spring seams before adding any
-   downstream pose owners; VRMA remains optional rather than the primary calibration path.
+1. visibly review the pinned CMU conversation candidate and select bounded frame ranges that read as
+   the required posture/gesture semantics on the reference body;
+2. hash, bind, and publish accepted slices as one atomic semantic pack, then remove the legacy anchor
+   payload as an ordinary behavior dependency;
+3. acquire or author any remaining provenance-safe vocabulary and repeat owner-controlled visible
+   performance judgement on multiple VRM 1.0 bodies without sidecars;
+4. extend the hostile corpus with animation/accessor/interpolation cases and renderer-level
+   failure/recovery coverage before broadening the compatibility claim.
 
 ## Deferred by the active roadmap
 
 - native DirectComposition 3D is owner-accepted; making 3D the default body remains downstream of
-  owner acceptance of the calibrated EPR performance;
+  owner acceptance of automatically retargeted EPR performance;
 - the EPR/VRM workstream's correctness gates are not deferred by the 2D roadmap; they are required
   before the experimental reference body is treated as landed;
 - portrait-catalog expression annotation remains downstream of current Expression Director tuning

@@ -22,7 +22,8 @@ Each normalized record contains:
 Records are semantic decisions, not per-frame debug spam. Required kinds include intent accepted or
 rejected, plan published or rejected, behavior transition, anchor observed/committed, resource
 grant/deny/preempt/transfer/release, realizer selected/fallback/failed, solve committed/rejected,
-capability degraded, projection committed/rejected, and control published.
+capability degraded, task target accepted/rejected/applied/released, projection committed/rejected,
+and control published.
 
 ## Normalization
 
@@ -50,6 +51,9 @@ records are semantic checkpoints rather than one record per 20 ms sample.
 - explicit grants for every non-neutral control contribution;
 - stale intent/plan rejection;
 - whole-state rollback on injected realizer/solve/projection failure;
+- target producer/predecessor continuity, finite bounds, and maximum validity;
+- exact target plan/behavior/claim ownership, expiry, and plan-revision release;
+- target applied-revision rollback when the canonical solve rejects;
 - local optional-capability degradation;
 - required-body failure isolation from portrait and session observation;
 - static absence of SDL, D3D11, DirectComposition, Win32, scene, and presentation ownership in EPR;

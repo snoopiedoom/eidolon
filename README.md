@@ -1,229 +1,169 @@
 # Eidolon
 
-**The embodiment layer for your agent.**
+**Native agent embodiment, powered by the Eidolon Performance Runtime.**
 
-Eidolon gives existing agents a native, persistent presence while real work happens.
+Eidolon gives working agents a persistent desktop presence. The terminal remains the interface to
+the work; Eidolon becomes the interface to the worker.
 
-The terminal remains the interface to the work.
-Eidolon becomes the interface to the worker.
+The centerpiece is **EPR**, a deterministic character-performance runtime written in C. It turns
+accepted intent into timed behavior, arbitrates ownership of the body, composes motion, and handles
+interruption without replaying completed gestures or publishing half-valid poses. A VRM adapter
+retargets normalized humanoid motion into an avatar's authored skeleton; Windows DirectComposition
+puts the result on the desktop.
 
-Today, Eidolon observes Codex sessions and turns their real activity into dialogue, expression, and
-motion. An OpenCode SSE adapter is implemented and transport-tested, but its ordinary local
-end-to-end workflow is not yet accepted. Eidolon does not replace the agent runtime or the
-terminal.
+This repository contains the runtime, native host, animation tools, design contracts, and executable
+regression tests—not just a character viewer.
 
-![Bunny Asuna presenting two active Codex sessions](screen0.png)
+[Engineering walkthrough](docs/epr-engineering.md) ·
+[EPR architecture](docs/design/epr-overview.md) ·
+[Implementation status](docs/project-state.md) ·
+[Build guide](docs/development.md)
 
-V1 proves that an agent doing real work can visibly feel like one persistent persona. See the
-[canonical V1 goal](docs/v1-goal.md) for the acceptance sequence.
+## EPR: the engineering focus
 
-## What works
+- **Deterministic behavior.** Versioned intent, plan generations, fixed logical ticks, explicit
+  phases, and causal traces separate behavior decisions from frame timing.
+- **Resource-owned motion.** Posture, gesture, gaze, and procedural arm control receive explicit
+  body-resource grants. Sampled channels are narrowed to actual ownership before composition.
+- **Automatic retargeting.** Owned VRMA tracks, a 55-role humanoid vocabulary, authored-rest
+  conversion, optional-bone composition, and scaled root motion support shared animation without
+  mandatory per-model pose calibration.
+- **Transactional pose publication.** Imported animation, normalized EPR motion, optional residuals,
+  and procedural owners compose in scratch state. Invalid candidates retain the last valid state.
+- **Interruption and continuity.** Completed phases cannot replay; right-arm settling captures the
+  actual outgoing pose once per behavior and blends into the next pose.
+- **Provenance-aware motion tools.** Pinned, hash-verified captures become exact reviewed frame
+  slices. Motion packs own their clips and publish complete binding batches atomically.
 
-- three body renderers: v2 sprite atlases, full-canvas 2D portraits, and skinned 3D models;
-- one independently scrolling dialogue bubble per active agent session, with stable placement
-  and real session titles;
-- normalized agent adapters, a transport-tested OpenCode SSE path, a live in-path Codex CLI relay,
-  and optional completion-only Codex transcript and hook fallbacks;
-- semantic expression planning over stable streamed prefixes, deterministic delivery timing,
-  completion repair, and a local GoEmotions worker with lifecycle fallback;
-- Unicode dialogue through SDL_ttf with bundled MesloLGS Nerd Font Mono and Windows CJK/emoji
-  fallbacks;
-- procedural portrait acting: breathing, semantic posture, speech beats, attention, and damped
-  motion accents;
-- atomic expression swaps—no crossfade or previous-frame ghosting;
-- pixel-exact click-through on Windows and a separate Dear ImGui settings window;
-- DirectComposition sprite/portrait/VRM and dialogue presentation by default on Windows, with persisted
-  `sdl_window_legacy` compatibility selection and explicit capability/failure fallback;
-- a native D3D11 3D path with GLB loading, GPU skinning, semantic poses, and analytic arm IK;
-- an experimental EPR/VRM vertical slice for one supported reference avatar through the native or
-  legacy 3D path, including anatomy measurement and versioned semantic-calibration profiles; this is not
-  general VRM 1.0 compatibility;
-- hidden snapshot commands for visual QA without stealing focus.
+The interesting boundary is between *what a character should communicate* and *how a particular
+skeleton can perform it*. EPR does not parse agent transports, own dialogue, call the graphics API,
+or move native windows. Those remain separate systems.
 
-The 2D portrait director and EPR/VRM runtime are separate body-performance systems. They coexist in
-the same application and may consume shared body-neutral evidence, but neither owns the other's
-expression labels, motion/pose state, or assets. The portrait remains the default and does not run
-through EPR.
+### What is implemented—and what is not
 
-Windows is the active implementation target. Linux support exists, but currently follows the
-legacy SDL_GPU path and may lag behind Windows features.
+| Area | Current evidence |
+| --- | --- |
+| Behavior runtime | Deterministic planning, resource arbitration, realization, interruption, rollback, and trace tests |
+| Automatic animation | Sidecar-free idle and walk accepted on the development reference body; parser-to-hidden-GPU checks |
+| Semantic motion composition | Catalog, executor, motion-pack ownership, procedural overlays, and dynamic right-arm targets implemented |
+| Motion vocabulary | Pinned idle binding available; conversation capture review/slicing implemented; first bounded semantic gesture not yet accepted |
+| Native presentation | Windows D3D11/DirectComposition path shared by sprite, portrait, and 3D; captured dragging, transparent composition, and fallback checks |
+| End-to-end EPR input | Deterministic synthetic fixture today; dependable live source/session-to-EPR integration remains future work |
 
-## Quick start
+EPR is the active engineering focus, not a claim of finished production animation. VRM support is
+an experimental reference-body subset of **VRM 1.0**, not arbitrary-avatar compatibility. VRM 0.x,
+full MToon shading, spring bones, constraints, contact/balance planning, a complete gesture library,
+and broader multi-body acceptance remain unfinished. The renderer's current material path is a
+documented base-color fallback.
 
-Requirements:
+See the [automatic-retargeting contract](docs/workstreams/epr-automatic-retargeting.md) for completed
+R1–R3 work and the active R4 semantic-motion milestone.
 
-- LLVM/Clang, GNU Make, CMake, and Ninja;
-- a MinGW-w64 toolchain supplying the Windows headers and import libraries used by Clang;
-- a Windows SDK containing `fxc.exe`;
-- the pinned dependency trees under `lib/`.
+## Inspect the implementation
 
-Initialize dependency submodules after cloning:
+Start with the [EPR engineering walkthrough](docs/epr-engineering.md): it explains the design
+tradeoffs and links each mechanism to its implementation and regression evidence.
 
-```powershell
-git submodule update --init --recursive
-```
+A short source tour:
 
-On Windows, the normal build configures the pinned SDL3 and SDL3_ttf submodules with their
-upstream CMake projects, then installs the generated headers, libraries, and DLLs under the ignored
-`.cache/sdl` tree. Eidolon itself remains a GNU Make build. Build the dependency layer explicitly
-when useful, or let the first ordinary build do it:
+| Concern | Entry point |
+| --- | --- |
+| Runtime orchestration and accepted state | [performance_runtime.c](src/epr/performance_runtime.c) |
+| Behavior phases and interruption | [behavior_plan.c](src/epr/behavior_plan.c) |
+| Resource arbitration | [body_resources.c](src/epr/body_resources.c) |
+| Fixed-tick motion composition | [motion_execution.c](src/epr/motion_execution.c) |
+| Clip lifetime and atomic catalog publication | [semantic_motion_pack.c](src/semantic_motion_pack.c) |
+| Source/destination rest conversion | [vrma_motion_source.c](src/vrma_motion_source.c), [vrm_retarget.c](src/vrm_retarget.c) |
+| Whole-pose projection | [vrm_projection.c](src/vrm_projection.c) |
+| Native desktop composition | [windows_dcomp.cpp](src/platform/windows_dcomp.cpp) |
 
-```powershell
-make sdl-deps
-make
-./build/windows/eidolon.exe
-```
+## Build and verify
 
-Install the optional local expression classifier and verify the complete build with:
-
-```powershell
-make affect-setup
-make affect-check
-make check
-make body-host-check
-```
-
-`make text-setup` remains a compatibility alias for `make sdl-deps`. SDL source arrives only through
-`git submodule update`; ordinary builds do not download it. `make affect-setup` remains the explicit,
-checksum-verified setup step for the optional classifier.
-
-The optional EPR/VRM performance body is also not downloaded or redistributed by Eidolon. Sign in
-to VRoid Hub with Pixiv, manually acquire the
-[reference VRM 1.0 model](https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654),
-and run the current structural/profile preflight before using it:
+Windows is the actively validated platform. Install Git, LLVM/Clang, GNU Make, Python 3, CMake,
+Ninja, MinGW-w64 headers/import libraries, and a Windows SDK containing `fxc.exe`.
+See [toolchain setup](docs/development.md) for paths and overrides.
 
 ```powershell
-make vrm-structure-check VRM_PATH="C:\local-assets\character.vrm"
-make vrm-runtime-check VRM_PATH="C:\local-assets\character.vrm"
-make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"
-make vrm-performance-review VRM_PATH="C:\local-assets\character.vrm"
-$env:EIDOLON_VRM_PATH = "C:\local-assets\character.vrm"
-# Optional once a matching calibration sidecar exists:
-$env:EIDOLON_VRM_CALIBRATION_PATH = "C:\local-assets\character.epr-calibration"
+git clone --recurse-submodules https://github.com/snoopiedoom/eidolon.git
+cd eidolon
+gmake MODE=release
+gmake check
+gmake epr-trace
 ```
 
-This development checkout currently selects `assets/2349235869624830263.vrm` (Vampire Cat by
-Touko Asada) as its compiled 3D default. The file remains ignored and local. Its embedded metadata
-permits avatar use only by the author, prohibits redistribution and modification, and requires
-credit; this selection is therefore a private owner-directed test fixture, not a distributable
-Eidolon asset or public reference-model recommendation. `EIDOLON_VRM_PATH` still overrides it.
+Use `make` if that is your GNU Make executable's name. Eidolon itself is built with GNU Make;
+upstream CMake builds are confined to dependencies. Pinned SDL3/SDL3_ttf sources arrive through
+submodules, and the first Windows build installs their generated outputs under ignored
+`.cache/sdl`. Ordinary builds do not download SDL sources.
 
-The linked DECAGRAMMATON model page currently permits avatar use but forbids redistribution and modification and
-requires credit. Do not add the downloaded file to this repository. Eidolon never receives or
-stores Pixiv credentials.
+`gmake check` runs the ordinary regression suite without a private VRM or model inference.
+`gmake epr-trace` prints causal JSONL from the synthetic five-second EPR fixture without opening a
+window. It proves runtime behavior, not the visual quality of a completed motion pack.
 
-`make vrm-structure-check` is the schema/profile preflight; `make vrm-check` remains its compatibility
-alias. `make vrm-runtime-check` drives the complete five-second fixture through buffer loading,
-geometry, textures, skinning, projection, shaders, and a hidden GPU frame. Unlike ordinary partial
-playback, this acceptance command requires all eight calibrated anchors, rejects any realizer
-fallback or solve/projection rejection, requires an undropped trace and projected five-second
-endpoint, and reports the actual trace/control hashes. Passing both proves the selected reference
-path on that machine, not arbitrary VRM compatibility. The visible review target
-opens the native desktop 3D path for owner judgement. It repeats a one-second idle pre-roll, the complete
-five-second performance, and a one-second settled hold until the command is stopped with Ctrl+C.
-`make vrm-calibrate` freezes the same deterministic fixture at eight named semantic
-anchors. Adjust the task-space torso, head, hand, elbow-pole, and wrist controls, accept each anchor,
-and use **save sidecar**; stop the command with Ctrl+C when finished. Ordinary VRM playback now
-requires a matching sidecar with at least a calibrated `neutral` right-arm anchor. EPR compiles
-approved anchors into body-relative posture and gesture programs, uses minimum-jerk transitions,
-and degrades only the behavior family whose anchor is absent; it never substitutes the synthetic
-fixture poses. The remaining compatibility gates stay in the
-[VRM reference-body contract](docs/design/vrm-body-runtime.md).
+### Try automatic animation on a local VRM
 
-The bundled Bunny Asuna manifest expects ten transparent portraits under
-`assets/characters/asuna-bunny/portraits`. Extracted game art and the Rio source rip are deliberately
-excluded from Git; a fresh checkout without those assets still retains the reusable engines and
-fallback sprite path.
+Supply a VRM 1.0 model you are permitted to use. No private development VRM is included or
+downloaded by these commands. First validate the supported renderer subset, then fetch the pinned
+idle motion into ignored build storage:
 
-## Use
-
-- left-drag the character to move Eidolon;
-- left-click a dialogue bubble to advance manual dialogue;
-- right-click the character to open settings; `F1` is also available when an Eidolon SDL window
-  owns keyboard focus;
-- middle-drag a 3D model to rotate yaw/pitch;
-- hold `Shift` while middle-dragging to rotate roll;
-- use the mouse wheel over a 3D model to resize its transparent overlay without cropping it;
-- double middle-click to reset 3D rotation and overlay size;
-- press `F5` to reload character and motion configuration when the legacy SDL pet window owns
-  keyboard focus;
-- press `Escape` to quit when the legacy SDL pet window owns keyboard focus. The no-activate native
-  host deliberately does not capture global keyboard shortcuts.
-
-On Windows, sprite, portrait, and 3D bodies normally use `win32_dcomp`. Explicit compatibility
-selection and native startup failure select `sdl_window_legacy` with a logged reason. The legacy
-backend delegates dragging to the native top-level move loop, which can pause animation and dialogue
-presentation until the mouse button is released; presentation resumes after the drag.
-The visible VRM calibration and performance-review commands use the same borderless, transparent
-DirectComposition body target as the desktop runtime. The VRM renderer submits directly into that
-target, publishes a projected animated-mesh input mask without GPU readback, and receives wheel and
-captured middle-drag input through the shared presentation event boundary. Snapshots and explicit
-compatibility selection retain the SDL backend.
-
-Settings persist as sparse per-user overrides. Every field can return to its shipped or
-character-defined default without freezing a copy of that default into the user file. Presentation
-preference changes apply at the next launch.
-
-## Design
-
-The current runtime is:
-
-```text
-configured Codex / OpenCode session source
-                    ↓
-vendor-specific agent adapter
-                    ↓
-normalized source + session events
-                    ↓
-session registry
-                    ↓
-lifecycle state + semantic expression + delivery cues
-                    ↓
-selected sprite | portrait | 3D body renderer
-                    ↓
-renderer-neutral scene + body/dialogue content
-                    ↓
-Windows-native win32_dcomp sprite/portrait/3D | explicit/failure sdl_window_legacy fallback
-                    ↓
-transparent desktop presentation + native hit testing
+```powershell
+gmake vrm-structure-check VRM_PATH="C:/local-assets/character.vrm"
+gmake vrma-idle-fixture
+gmake vrm-animation-runtime-check VRM_PATH="C:/local-assets/character.vrm" VRMA_PATH="build/fixtures/vrma/standard-idle/standard_idle.vrma"
+gmake vrm-animation-review VRM_PATH="C:/local-assets/character.vrm" VRMA_PATH="build/fixtures/vrma/standard-idle/standard_idle.vrma"
 ```
 
-The target stack separates body/dialogue rendering from native presentation so compositor layers can
-move and fade without rerendering their content. See the
-[native presentation and graphics plan](docs/design/native-presentation.md). Body renderers never
-own conversation semantics; presentation backends never own session state. Slow language decisions
-stay separate from frame-rate motion and drawing.
+The animation runtime check exercises five seconds of sidecar-free sampling, retargeting,
+projection, skinning, shaders, and hidden endpoint GPU frames. The visible review loops until
+closed and uses an optimized release build by default.
 
-Portrait/sprite realization and EPR/rigged-3D realization remain independent branches between the
-shared evidence and scene boundaries. Renderer-neutral evidence enables coherent character behavior
-across bodies; it does not collapse them into one implementation.
+Middle-drag rotates; Shift + middle-drag rolls; the wheel resizes the transparent overlay;
+double middle-click resets the view. Drag capture continues beyond the rendered character.
+Unsupported models should fail preflight rather than silently claim compatibility.
+
+The older `vrm-performance-review` / `vrm-runtime-check` commands exercise the calibrated
+reference-body fixture. They are retained regression tools, not the automatic-retargeting
+acceptance path. Manual calibration is optional advanced authoring, not normal onboarding.
+
+## One native host, independent bodies
+
+EPR coexists with the 2D portrait director and sprite playback. They share session/dialogue,
+selection, scene, and presentation boundaries—not pose state, expression labels, or one universal
+animation runtime. The portrait remains the shipped default while EPR matures.
+
+The desktop application also provides independently timed session bubbles, Unicode dialogue,
+streamed-prefix expression planning, a live Codex CLI relay, and optional transcript/hook
+fallbacks. The OpenCode SSE adapter is transport-tested; its ordinary end-to-end workflow has not
+been accepted. These integration capabilities do not imply that live sessions already drive the
+new EPR motion vocabulary.
+
+The [existing 2D desktop screenshot](screen0.png) shows this separate portrait/session path, not an
+EPR demonstration. On Windows, all three bodies use DirectComposition by default, with an explicit
+or failure-selected SDL fallback. Linux currently follows the legacy SDL graphics path; native
+Wayland/X11 and macOS presentation are not implemented.
+
+`gmake body-host-check` exercises Windows body switching and native/SDL recovery.
+The [development guide](docs/development.md), [configuration reference](docs/configuration.md), and
+[integration guide](docs/integrations.md) cover the rest of the application.
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
-- [Product brief](docs/product-brief.md)
-- [V1 goal](docs/v1-goal.md)
-- [Product roadmap](docs/product-roadmap.md)
-- [Current project state](docs/project-state.md)
-- [Architecture](docs/architecture.md)
-- [Building, testing, and debugging](docs/development.md)
-- [Configuration](docs/configuration.md)
-- [Agent adapters and session integration](docs/integrations.md)
-- [Character and asset pipeline](docs/assets.md)
-- [Design specifications](docs/design/README.md)
-- [Native presentation and graphics plan](docs/design/native-presentation.md)
-- [Experimental VRM reference-body contract](docs/design/vrm-body-runtime.md)
-- [Backend-neutral presentation event contract](docs/design/presentation-events.md)
-- [Presentation environment and output topology contract](docs/design/presentation-environment.md)
+- [EPR engineering walkthrough](docs/epr-engineering.md): problem, architecture, code, and evidence.
+- [EPR contracts](docs/design/epr-overview.md): intent, plans, resources, realization, and projection.
+- [Automatic humanoid motion](docs/workstreams/epr-automatic-retargeting.md): active implementation contract.
+- [Motion-pack authoring](docs/design/epr-motion-pack.md): capture provenance, review, and atomic binding.
+- [Project state](docs/project-state.md): completed work, limitations, and next checkpoints.
+- [Product brief](docs/product-brief.md), [V1 goal](docs/v1-goal.md), and [roadmap](docs/product-roadmap.md): product direction and release gates.
+- [Full documentation index](docs/README.md).
 
-Eidolon is an early-stage native project with a working Windows development path; the
-[daily-driver alpha](docs/product-roadmap.md#gate-a-daily-driver-alpha) is the next product gate,
-not a capability already claimed. Character assets remain the responsibility of the local user and
-are not part of the reusable engine repository.
+## License and assets
 
-## License
+The project's existing notice dedicates Eidolon's original work to the public domain.
+Dependencies, motion sources, fonts, and character assets retain their own terms. The project
+license does not grant rights to third-party characters.
 
-Public domain. Do whatever.
-
-This applies to Eidolon's original work only. Vendored dependencies and local character assets
-retain their respective terms.
+Private development VRMs and newly downloaded character assets remain local and are not part of
+this publication. Legacy third-party Rio source material already exists in the repository/history;
+do not mistake it for original Eidolon work or a freely licensed reference character. See
+[asset provenance and boundaries](docs/assets.md). No installer-grade package or generally
+redistributable 3D reference character is claimed.

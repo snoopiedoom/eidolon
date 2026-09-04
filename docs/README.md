@@ -3,6 +3,17 @@
 The main README is the project showcase and shortest path to a running build. These documents own
 the details needed to change Eidolon without rediscovering its boundaries.
 
+## Start with EPR
+
+- [EPR engineering walkthrough](epr-engineering.md) — the problem, architectural decisions,
+  implementation tour, reproducible checks, and honest completion boundary.
+- [EPR architecture and contracts](design/epr-overview.md) — ownership of intent, plans, resources,
+  realization, and body projection.
+- [Automatic humanoid motion and retargeting](workstreams/epr-automatic-retargeting.md) — completed
+  R1–R3 and the active R4 semantic-motion workstream.
+- [Motion catalog](design/epr-motion-catalog.md), [motion-pack ownership](design/epr-motion-pack.md),
+  and [dynamic task targets](design/epr-task-targets.md) — the newer runtime and authoring boundaries.
+
 ## Product direction
 
 - [Product brief](product-brief.md) — positioning, audience, product boundary, and long-term
@@ -46,6 +57,8 @@ particular implementation changes.
 
 ## Active workstreams
 
+- [EPR automatic retargeting and semantic motion](workstreams/epr-automatic-retargeting.md) — the
+  current engineering focus; shared normalized motion replaces required per-body pose calibration.
 - [bgfx and native-presentation workstream](workstreams/bgfx-integration.md) — completed graphics
   evaluation plus the current production-presentation gate, evidence, and restart checklist.
 - [Experimental EPR/VRM reference-body workstream](design/vrm-body-runtime.md) — the separate 3D

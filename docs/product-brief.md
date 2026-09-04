@@ -86,12 +86,14 @@ Shared art direction and renderer-neutral evidence do not require one universal 
 the same persona, session, dialogue, selection, scene, and presentation boundaries. Making a 3D
 body the eventual default must not retire or internally absorb the 2D bodies.
 
-Rigged-3D character adaptation is calibration-first. Eidolon should measure the selected body's
-humanoid axes, segment lengths, and proportions, then let the user approve a small semantic pose
-vocabulary inside the live performance runtime. EPR derives timing, strength, transition,
-interruption, and settling from that body-relative evidence. This avoids promising that one table
-of hard-coded poses will act correctly on every model; optional authored motion remains available
-for genuinely distinct motion families.
+Rigged-3D character adaptation is automatic-retargeting-first. Eidolon measures the selected
+body's humanoid axes, segment lengths, and proportions, then converts shared normalized humanoid
+motion through the body's authored rest frames. EPR owns semantic scheduling, masking, timing,
+strength, interruption, gaze, dynamic targets, and settling. A valid supported humanoid must reach
+a credible baseline without asking the user to author poses. Optional package calibration remains
+available for unusual limits, deformation, contacts, or signature acting; it is not onboarding.
+The durable implementation contract is
+[EPR automatic humanoid motion and retargeting](workstreams/epr-automatic-retargeting.md).
 
 The current implementation still selects a global renderer and does not yet implement the complete
 character-package abstraction. See the

@@ -36,6 +36,11 @@ The daily-driver alpha proves that Eidolon is worth keeping open every day. Publ
 another technical user can obtain the same experience without the repository authors standing
 behind them.
 
+EPR is the current engineering and public showcase priority. That focus does not change the
+shipped portrait default, make live EPR integration complete, or collapse the independent 2D/3D
+systems. The parallel designation below describes release-gate independence, not secondary
+engineering priority. A2 remains the next daily-driver product gate while EPR R4 advances.
+
 Post-V1 horizons constrain architectural decisions but do not authorize their implementation
 before the earlier product gates are complete.
 
@@ -158,15 +163,44 @@ support. Its owning contract is the
 
 Landing order:
 
-Items 1-6 are implemented for the supported reference-body path. Item 6 now includes measured-body
-profile binding, interactive task-space calibration/save, calibrated Realization Program
-compilation, minimum-jerk sampling, resource-local fallback, residual composition, ordinary
-playback, and shared native presentation. Vampire Cat (`2349235869624830263.vrm`) is the current
-owner-selected private development default after separately passing both gates; its restrictive
-embedded permissions prevent treating that local selection as a public reference recommendation.
-Item 7 is active and requires its complete calibrated sidecar plus the subsequent owner-controlled
-performance review. None of these results broadens the compatibility
-claim.
+Automatic retargeting R1-R3 are complete and owner-accepted on the private development body. They
+add owned VRMA sampling, destination-rest conversion, model-owned playback, atomic imported-base/
+EPR composition, and sidecar-free visible idle/walk evidence. R4 is active: its first bounded slice
+adds renderer-neutral, explicitly masked normalized-pose composition before EPR realization moves
+from body-specific anchors to semantic motion generators. Versioned generator references and the
+semantic-resource-to-humanoid-channel mapping are now compiled. Fixed-capacity catalog resolution
+and sampled ownership narrowing are implemented. Authored-rest-invariant VRMA source normalization
+is the concrete catalog boundary. Fixed logical ticks now drive deterministic source time,
+minimum-jerk transitions, live-grant narrowing, and transactional normalized-frame composition.
+The model now embeds a versioned semantic motion pack. It preflights whole binding batches, moves
+clip ownership only on success, rebases catalog callbacks to stable pack storage, and publishes
+atomically. The pack installs the pinned verified idle as the first `idle.neutral` binding when
+present and lends its catalog to the EPR runtime. Projection now
+atomically orders imported motion, complete normalized frames, optional residuals, and explicit
+procedural owners. Live head/eye gaze, expression, weighted right-arm IK, and tokenized arm
+continuity survive normalized posture/gesture while legacy canonical posture and right-arm anchors
+cannot contaminate it. Settle captures the exact outgoing model-local arm pose once per behavior
+token and transactionally decays it into the new normalized pose; revised intent cannot rebase the
+capture. Partial active vocabularies fail locally back to the complete accepted controller instead
+of publishing mixed or stale motion. A separate versioned right-arm target stream now admits real
+dynamic task-space samples only after validating a monotonic producer chain, current plan, exact
+active behavior, complete base/override claim interval, and short finite validity. Exact live-grant
+sampling, explicit expiry/plan release, solve rollback, and target lifecycle tracing are covered.
+A pinned, hash-verified CMU conversation take is now reproducible full-body review material but has
+no inferred semantic bindings. The full capture is owner-accepted as viable source material, and
+the native harness plus deterministic converter now turn explicit reviewed time marks into exact
+pinned-BVH frame slices with strict provenance. R4 next accepts the first exact slice, hashes and
+binds the required vocabulary as one pack, then removes ordinary anchor fallback.
+
+Items 1-6 produced the supported reference-body substrate: measured anatomy, bind-space
+correction, transactional projection, resource-local control, deterministic validation, optional
+calibration/residual tooling, and shared native presentation. The owner review then established
+that mandatory per-body semantic anchor authorship is not a viable product path. Vampire Cat
+(`2349235869624830263.vrm`) remains the current owner-selected private development default; its
+restrictive embedded permissions prevent treating that local selection as a public reference
+recommendation. Item 7 is replaced by the active automatic-retargeting workstream in
+[EPR automatic humanoid motion and retargeting](workstreams/epr-automatic-retargeting.md). None of
+these results broadens the compatibility claim.
 
 1. **Truthful experiment boundary:** use experimental/reference-avatar language in configuration,
    logs, validation, and user documentation; do not expose an unrestricted "load a VRM" promise.
@@ -177,19 +211,18 @@ claim.
    independently, parse authored look-at type/ranges or report head-only execution, and distinguish
    absent, declared, parsed, and executable capabilities.
 4. **Composable pose ownership:** replace whole-rig bind reset and invented unowned channels with
-   resource-owned pose deltas, bind-space correction frames, and a complete scratch-pose
-   transaction before imported animation, constraints, or secondary motion are added.
+   resource-owned pose deltas, bind-space correction frames, and the complete scratch transaction
+   now used to compose imported animation before constraints or secondary motion.
 5. **Executable validation:** separate structural/profile validation from actual buffer, geometry,
    texture, sampler, projection, shader, and hidden-frame validation; add adversarial and official
    sample fixtures rather than validating only the selected reference model.
-6. **Calibration-derived realization:** measure authoritative humanoid bind positions, axes,
-   segment lengths, and proportions; bind a versioned partial sidecar to that anatomy; let the user
-   approve semantic anchors inside the running EPR scenario; and derive intensity, transitions,
-   interruption, and settling from those anchors instead of accumulating model-specific guessed
-   poses. VRMA remains an optional later generator, not the prerequisite for ordinary posture.
-7. **Reference-body acceptance:** retain deterministic EPR traces and complete an owner-controlled
-   visible performance review of the calibrated performance without changing the portrait default
-   or presentation selection.
+6. **Composable realization substrate:** measure authoritative humanoid bind positions, axes,
+   segment lengths, and proportions; preserve imported-base -> EPR -> downstream-owner ordering;
+   retain versioned package calibration only as an optional residual mechanism.
+7. **Automatic humanoid motion and reference-body acceptance:** import shared VRMA motion into a
+   normalized humanoid representation, retarget through arbitrary VRM 1.0 rest rotations, compose
+   EPR motion/procedural layers, and complete an owner-controlled multi-body visible review without
+   any required calibration sidecar or change to the portrait default.
 
 Only after those gates may the workstream claim a broader compatibility tier. JPEG/URI images,
 authored samplers, material and texture-transform expressions, deliberate MToon shading/fallback,

@@ -21,6 +21,23 @@ body
 The hierarchy is semantic and body-neutral. VRM bone names, node indexes, renderer layers, and
 session slots are forbidden resource identifiers.
 
+## Normalized humanoid channel projection
+
+R4 projects a granted semantic resource mask into the renderer-neutral humanoid vocabulary:
+
+- torso owns hips, spine, chest, and upper-chest rotations plus hips translation;
+- head owns neck and head rotations;
+- eyes own the two eye rotations;
+- each arm owns its shoulder-through-hand chain and same-side fingers;
+- face expression owns no humanoid rotation channel because its output remains semantic expression
+  weight, not an invented jaw rotation.
+
+These groups are disjoint. Legs, toes, jaw, and any other unclaimed channels remain owned by the
+imported base motion. The mapping declares the maximum channels a granted generator may affect;
+the semantic motion catalog intersects it first with declared source coverage and again with
+channels actually supplied by each sampled pose. Invalid resource bits and incompatible sources
+reject transactionally without changing the caller's prior masks or samples.
+
 ## Claims and grants
 
 A claim names:
@@ -36,6 +53,13 @@ A claim names:
 
 No non-neutral controller contribution may reach canonical composition without a live grant.
 
+A dynamic task target names the exact behavior whose right-arm base or override claim covers its
+complete validity interval. Publication against a gaze, expression, additive/cooperative claim,
+retired behavior, or stale plan is rejected. At sampling time the target contributes only while
+that exact behavior is granted; it never attaches to an implicit "current arm owner." This keeps a
+posture target dormant while a gesture override owns the chain and prevents delayed geometry from
+escaping plan arbitration. See [dynamic task targets](epr-task-targets.md).
+
 The arbiter produces immutable grants, denials, preemptions, transfers, and releases. It ranks
 claims using the same explicit total order as the plan dispatcher plus resource specificity. Tests
 permute input and storage order and require identical outcomes.
@@ -43,7 +67,8 @@ permute input and storage order and require identical outcomes.
 ## Composition modes
 
 - `base` establishes the reference state for a resource.
-- `additive` contributes bounded residual motion around a compatible base.
+- `additive` contributes an intensity-scaled normalized quaternion/hips residual around a compatible
+  base; blend weight controls how much of that residual is applied.
 - `cooperative` combines through a named rule, such as head aim over posture.
 - `override` owns task control for the interval and suppresses incompatible contributions.
 

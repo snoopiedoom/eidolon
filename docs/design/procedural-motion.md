@@ -1,5 +1,11 @@
 # Procedural motion specification
 
+> **Active direction (2026-08-14):** [EPR automatic humanoid motion and
+> retargeting](../workstreams/epr-automatic-retargeting.md) replaces the calibration-first strategy
+> below. Shared normalized motion plus automatic T-pose conversion is the ordinary baseline;
+> anchors and sidecars survive only as optional package-author overrides and historical description
+> of the implemented vertical slice.
+
 This specification owns the rigged-3D motion system. It does not own portrait face selection or
 whole-image 2D motion. The systems may consume common body-neutral evidence and must coexist behind
 the same selection, scene, dialogue, and presentation boundaries without sharing renderer-local
@@ -20,14 +26,23 @@ bounded lifecycle history compaction after terminal trace
         ↓
 explicit body-resource grants + modality Realization Programs
         ↓
-canonical composition + transactional IK/joint limits, fixed control ticks
+fixed-tick normalized execution + canonical procedural control
         ↓
-experimental VRM/rigged-body capability projection
+transactional VRM/rigged-body projection + IK/joint limits
         ↓
 bone matrices → GPU skinning
         ↓
 shared GPU texture → transparent SDL composition
 ```
+
+The active R4 projection transaction is `imported base -> normalized posture/gesture -> optional
+calibration residuals -> explicit procedural owners`. Canonical-control version 4 publishes separate
+head-gaze deltas, weighted right-arm IK, tokenized arm continuity, and a live-grant resource mask.
+Head/eye gaze and expression compose above a normalized frame. A settle token captures the exact
+outgoing model-local arm rotations once and decays them into the new normalized pose before weighted
+IK; rejected scratch transactions publish neither pose nor capture. Legacy canonical posture,
+combined head control, and right-arm anchors are applied only by the complete fallback.
+
 
 The presentation loop uses measured frame time and follows the configured VSync/FPS policy. Future
 solver or secondary-physics stages may use a fixed internal timestep when their stability requires
@@ -100,12 +115,13 @@ sine-wave bouncing is not physics.
 - yaw/pitch/roll inspection controls.
 
 The old hard-coded EPR posture/gesture endpoints remain only in the explicit deterministic test
-fixture. Ordinary VRM playback cannot select them. The measurement/profile, interactive authoring,
-calibrated-program compilation, and ordinary-playback slices are implemented. `make vrm-calibrate
-VRM_PATH=...` freezes the actual fixture at each named tick and projects every draft edit through
-the normal scratch transaction. A matching `neutral` right-arm anchor enables calibrated playback;
-approved state and gesture anchors then drive the corresponding programs. Missing anchors degrade
-only their resource/behavior family and emit typed trace evidence.
+fixture. Ordinary VRM playback cannot select them. Automatic normalized-motion playback does not
+require a calibration sidecar or neutral right-arm anchor. The measurement/profile, interactive
+authoring, and calibrated-program compiler remain optional repair and package-author tools.
+`make vrm-calibrate VRM_PATH=...` freezes the actual fixture at each named tick and projects every
+draft edit through the normal scratch transaction. Matching anchors may supply versioned body-local
+residuals for difficult deformation, contact, or signature acting; their absence is not an ordinary
+playback failure.
 
 ## Calibration model
 
@@ -197,19 +213,14 @@ authoring format.
 - render target resolution and motion simulation cadence remain independent;
 - authored clips may become optional motifs, but the controller never requires them for idle life.
 
-## Milestones
+## Optional calibration tooling status
 
-1. extract and validate the semantic skeleton measurements and versioned partial sidecar — done;
-2. add calibration-session state and anchor capture to the running EPR review harness — done;
-3. add first-slice task-space editing controls and transactional sidecar save — done;
-4. compile posture/gesture Realization Programs from approved anchors with minimum-jerk transition
-   curves, exact resource-local fallback traces, and non-accumulating transactional residuals —
-   done;
-5. calibrate the selected local reference body and repeat the complete owner performance review;
-6. derive mesh/skinning clearance volumes, joint comfort ranges, wrist orientation, and arm twist;
-7. add planted-foot stance and lower-body IK;
-8. add eye-first/head-follow attention, blinking, and bounded secondary physics;
-9. retain VRMA as an optional generator for motion families that calibrated anchors cannot derive.
+Measurement, the versioned partial sidecar, the running calibration session, first-slice task-space
+editing, atomic save, and residual compilation are implemented. Future optional tooling may derive
+mesh/skinning clearance volumes, comfort ranges, wrist/twist repair, contact volumes, and signature
+acting overrides. Ordinary playback priorities and acceptance are owned by
+[EPR automatic humanoid motion and retargeting](../workstreams/epr-automatic-retargeting.md), not by
+completion of a calibration session.
 
 ## Acceptance criteria
 
@@ -228,8 +239,9 @@ authoring format.
 - secondary motion settles after an impulse;
 - a missing or unmapped optional bone degrades locally rather than breaking the model.
 
-Ordinary playback deliberately accepts partial progress under those degradation rules. Acceptance
-is stricter: both the hidden runtime gate and visible performance review require all eight anchors
-with the resources owned by their behavior family. The hidden gate additionally rejects dropped
-trace records, realizer fallback/failure, solve/projection rejection, an incomplete five-second
-clock, or a final control revision that was not projected.
+Ordinary playback deliberately accepts partial optional-capability progress under those degradation
+rules, but it must not require any anchors. Acceptance instead requires the provenance-safe semantic
+motion vocabulary to run sidecar-free on structurally different VRM 1.0 bodies. The hidden gate also
+rejects dropped trace records, unexpected realizer fallback/failure, solve/projection rejection, an
+incomplete five-second clock, or a final control revision that was not projected; visible review
+judges whether idle, gesture, interruption, recovery, and settling read intentionally.

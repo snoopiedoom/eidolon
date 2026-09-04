@@ -1,7 +1,7 @@
 # Configuration
 
-Eidolon separates shipped defaults, character definitions, motion calibration, and personal
-preferences. Those layers have different owners and must not collapse into one settings file.
+Eidolon separates shipped defaults, character definitions, shared motion sources, optional model
+overrides, and personal preferences. Those layers have different owners and must not collapse.
 
 ## Precedence
 
@@ -179,6 +179,7 @@ Debug builds then expose an intentionally non-persistent body override:
 ```powershell
 $env:EIDOLON_BODY_RENDERER = "model_3d"
 $env:EIDOLON_VRM_PATH = "C:\local-assets\character.vrm"
+$env:EIDOLON_VRMA_PATH = "C:\local-assets\idle.vrma"
 $env:EIDOLON_PRESENTATION_BACKEND = "sdl_window_legacy"
 .\build\windows\eidolon.exe
 ```
@@ -186,34 +187,46 @@ $env:EIDOLON_PRESENTATION_BACKEND = "sdl_window_legacy"
 `EIDOLON_BODY_RENDERER` accepts `sprite`, `portrait`, or `model_3d`. It is ignored by release
 builds, does not write user settings, and does not change the shipped portrait default.
 `EIDOLON_VRM_PATH` supplies the local experimental reference asset only when the existing 3D
-renderer is initialized. It is a development override, not an arbitrary-avatar support promise.
-Without it, legacy Rio 3D remains available but EPR has no VRM body profile and stays inactive. The
-first EPR path recognizes VRM 1.0 metadata within its supported reference-avatar slice; legacy VRM
-0.x files are rejected rather than guessed into the new contract. Third-party VRM assets remain
-local and separately licensed.
+renderer is initialized. `EIDOLON_VRMA_PATH` optionally supplies a local VRM Animation 1.0 clip;
+after validation it loops in-place as the imported base beneath the latest EPR control. Invalid
+clips fail locally and do not disable the renderer. These are development overrides, not an
+arbitrary-avatar support promise. Without a VRM path, legacy Rio 3D remains available but EPR has
+no VRM body profile and stays inactive. The first EPR path recognizes VRM 1.0 metadata within its
+supported reference-avatar slice; legacy VRM 0.x files are rejected rather than guessed into the
+new contract. Third-party VRM and VRMA assets remain local and separately licensed.
 
-When a VRM loads, Eidolon measures its mapped humanoid bind positions, segment lengths,
-proportions, and anatomical frame. It then looks for a versioned semantic calibration sidecar at
-`<VRM path>.epr-calibration`. Set `EIDOLON_VRM_CALIBRATION_PATH` to select a different sidecar:
+`EIDOLON_VRMA_PATH` controls imported base-motion playback; it does not label a clip as an EPR
+semantic generator. Separately, `make vrma-idle-fixture` fetches and hash-verifies the pinned MIT
+idle in ignored build storage. A build that finds that exact fixture registers it immutably as the
+first `idle.neutral` semantic binding. Missing active posture or gesture semantics fall back as a
+complete unit instead of relabeling arbitrary local animation or publishing a partial frame.
+
+When a VRM loads, Eidolon measures its mapped humanoid bind positions, segment lengths, authored
+rest frames, proportions, and anatomical frame. Automatic retargeting converts shared normalized
+motion from its source T-pose into those destination frames. The product contract requires baseline
+playback without a calibration sidecar.
+
+R1 exposes `make vrma-sampler-check` for deterministic fixtures. Use `make vrma-check
+VRMA_PATH=...` to inspect a real VRM Animation file. R2 exposes `make vrm-retarget-check` for
+destination rest-frame conversion, optional-role composition, hips/root policy, and rollback.
+R3 is complete and `make vrm-playback-check` verifies lifecycle, deterministic failure, and atomic
+imported-base/EPR composition. Its pinned idle and walk passed the hidden gate and owner-visible
+review on the current private development body. R4's `make humanoid-pose-check` verifies the first
+masked normalized-motion composition boundary; follow the durable [automatic-retargeting
+workstream](workstreams/epr-automatic-retargeting.md).
+
+The existing semantic calibration loader and editor remain available as optional package-author
+and residual-repair tooling. To select an explicit sidecar:
 
 ```powershell
 $env:EIDOLON_VRM_CALIBRATION_PATH = "C:\local-assets\character.epr-calibration"
 ```
 
-Sidecars bind to an anatomy fingerprint, may contain only the anchors calibrated so far, and are
-loaded transactionally. A missing or stale file leaves the VRM uncalibrated and does not disable
-geometry, projection, another body renderer, or session handling. Create or update one inside the
-actual runtime fixture with:
-
-```powershell
-make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"
-```
-
-The command freezes named anchors, applies task-space edits immediately through scratch projection,
-and atomically saves accepted anchors. A matching sidecar with a neutral right-arm anchor enables
-ordinary EPR playback. Present state/gesture anchors compile into body-relative programs; missing
-anchors degrade only their behavior family and never select the synthetic fixture poses. See
-[Procedural motion](design/procedural-motion.md) for the format and anchor vocabulary.
+`make vrm-calibrate VRM_PATH="C:\local-assets\character.vrm"` opens the legacy reference-fixture
+authoring path. Sidecars bind transactionally to an anatomy fingerprint and may remain partial,
+but a missing or stale sidecar must not become an ordinary playback failure after imported motion
+integration lands. See [Procedural motion](design/procedural-motion.md) for the existing optional
+format and historical anchor vocabulary.
 
 An unavailable or invalid configured path emits the acquisition page and validation command and
 leaves the already initialized portrait active. EPR starts only after the supported reference asset
@@ -221,15 +234,16 @@ passes the current preflight and publishes its preliminary body profile; later r
 still fail locally. EPR or VRM failure does not stop IPC, configured session sources, or the session
 registry. Neither Make nor the runtime downloads the file or handles Pixiv credentials.
 
-`make vrm-structure-check` verifies only the structural/profile preflight; `make vrm-check` remains
-its compatibility alias. `make vrm-runtime-check` then loads and projects the complete deterministic
-scene through the real geometry, texture, skinning, shader, and hidden GPU path. Ordinary playback
-may use a partial sidecar with typed local degradation, but this acceptance target requires all
-eight anchors with their owned resources, an undropped five-second trace, no realization/solve/
-projection failure, and equality between the final control and projection revisions. The visible review
-target loops the complete five-second scene between one-second idle and settled holds until the
-owner closes it or presses Escape. It exists for acting judgement. Neither target establishes
-executable authored gaze or general VRM 1.0 compatibility. Those gates are defined by the
+`make vrm-structure-check` verifies only the model structural/profile preflight; `make vrm-check`
+remains its compatibility alias. `make vrm-runtime-check` exercises the real geometry, textures,
+skinning, projection, shaders, and hidden GPU path through the existing calibrated fixture. Its
+current eight-anchor requirement is legacy regression evidence, not automatic-retargeting
+acceptance. `make vrma-sampler-check` and `make vrma-check VRMA_PATH=...` cover the R1 import
+boundary; `make vrm-retarget-check` covers the standalone R2 destination transaction.
+
+The visible review target still exists for acting judgement. General VRM 1.0 compatibility requires
+the no-sidecar, multi-body gates in the [automatic-retargeting
+workstream](workstreams/epr-automatic-retargeting.md) and the
 [experimental VRM reference-body contract](design/vrm-body-runtime.md).
 
 ## Agent adapters

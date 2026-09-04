@@ -1,5 +1,11 @@
 # Experimental VRM reference-body runtime contract
 
+> **Active direction (2026-08-14):** [EPR automatic humanoid motion and
+> retargeting](../workstreams/epr-automatic-retargeting.md) supersedes this document wherever it
+> describes semantic-anchor calibration as mandatory for ordinary playback. The implemented
+> measurement, sidecar, and authoring machinery remains regression coverage and optional
+> package-author residual tooling.
+
 ## Status and claim boundary
 
 The current EPR/VRM path is an **experimental supported-reference-avatar vertical slice**. It proves
@@ -137,18 +143,20 @@ At load time, the adapter precomputes bind-space correction frames for controlle
 Canonical anatomical pitch, yaw, and roll are transformed through those frames rather than assuming
 that every bone uses model-local X/Y/Z as anatomical axes.
 
-Projection solves into a complete scratch pose and atomically commits its local TRS and expression
-result only after hierarchy/world validation. Failure never mutates the live rig or expression.
-The projection retains an explicit captured base pose for its owned nodes, so a future imported
-animation stage can publish a fresh base before EPR evaluation; constraints and secondary physics
-remain downstream consumers of the committed pose.
+Projection and imported animation solve into owned scratch poses and atomically commit local TRS and
+expression only after hierarchy/world validation. Failure never mutates the live rig or expression.
+The model-owned VRMA player samples and retargets before EPR, then publishes the accepted candidate
+as a new captured base. When an EPR control already exists, the same transaction reapplies it over
+that fresh base so no bare-animation frame becomes render-visible. Independent base, control,
+sample, and publication revisions make that ordering inspectable.
 
 The current projection no longer resets the entire rig or writes an unowned left-arm baseline. It
 stages the captured base TRS only for EPR-owned chest, head, optional eye, and right-arm nodes while
 copying every unowned live channel into scratch. Controlled torso, head, eye, and wrist rotations use
-precomputed bind-world correction frames; right-arm targeting remains world-space. Callers that add
-imported animation must capture the new base after animation and before projection. VRM look-at,
-constraints, and spring bones then compose after EPR in the documented evaluation order.
+precomputed bind-world correction frames; right-arm targeting remains world-space. The application
+ticks imported motion before the EPR fixture and the model update uses the same timestamp as a
+duplicate-evaluation guard. VRM look-at, constraints, and spring bones remain downstream of EPR in
+the documented evaluation order.
 
 ## Body profile
 
