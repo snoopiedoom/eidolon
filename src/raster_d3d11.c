@@ -29,7 +29,8 @@ bool eidolon_d3d11_upload_straight_alpha(EidolonPresentation *presentation,
     if (premultiplied == NULL) {
         return false;
     }
-    if (!eidolon_presentation_set_target_alpha_mask(presentation, update, surface->pixels,
+    if (!eidolon_presentation_set_target_alpha_mask(presentation, update, update->width,
+                                                    update->height, surface->pixels,
                                                     (size_t)surface->pitch, 4U, 3U)) {
         SDL_DestroySurface(premultiplied);
         return false;
@@ -73,8 +74,7 @@ bool eidolon_d3d11_raster_portrait(EidolonPresentation *presentation,
     return rendered;
 }
 
-bool eidolon_d3d11_raster_sprite(EidolonPresentation *presentation,
-                                 EidolonSpriteRenderer *sprite,
+bool eidolon_d3d11_raster_sprite(EidolonPresentation *presentation, EidolonSpriteRenderer *sprite,
                                  const EidolonPresentationTargetUpdate *update,
                                  const SDL_FRect *source) {
     if (!eidolon_sprite_ready(sprite) || source == NULL) {

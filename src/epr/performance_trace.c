@@ -82,14 +82,17 @@ uint64_t eidolon_epr_trace_hash(const EidolonEprTrace *trace) {
 
 const char *eidolon_epr_trace_event_name(EidolonEprTraceEvent event) {
     static const char *const names[] = {
-        "intent.accepted",      "intent.rejected",     "plan.published",      "plan.rejected",
-        "behavior.transition",  "anchor.observed",     "resource.granted",    "resource.denied",
-        "resource.transferred", "resource.released",   "realizer.selected",   "realizer.fallback",
-        "realizer.failed",      "solve.committed",     "solve.rejected",      "capability.degraded",
-        "control.published",    "projection.committed", "projection.rejected",
+        "intent.accepted",     "intent.rejected",      "plan.published",
+        "plan.rejected",       "behavior.transition",  "anchor.observed",
+        "resource.granted",    "resource.denied",      "resource.transferred",
+        "resource.released",   "realizer.selected",    "realizer.fallback",
+        "realizer.failed",     "solve.committed",      "solve.rejected",
+        "capability.degraded", "control.published",    "projection.committed",
+        "projection.rejected", "task_target.accepted", "task_target.rejected",
+        "task_target.applied", "task_target.released",
     };
     if (event < EIDOLON_EPR_TRACE_INTENT_ACCEPTED ||
-        event > EIDOLON_EPR_TRACE_PROJECTION_REJECTED) {
+        event > EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED) {
         return "unknown";
     }
     return names[(size_t)event];

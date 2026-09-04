@@ -2,6 +2,7 @@
 #define EIDOLON_EPR_BODY_RESOURCES_H
 
 #include "epr/performance_intent.h"
+#include "humanoid_pose.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -77,5 +78,7 @@ bool eidolon_epr_resource_is_granted(const EidolonEprResourceResolution *resolut
 EidolonEprOpaqueId
 eidolon_epr_resource_override_owner(const EidolonEprResourceResolution *resolution,
                                     EidolonEprBodyResource resource);
+bool eidolon_epr_resource_mask_humanoid_channels(uint32_t resource_mask, uint64_t *rotation_mask,
+                                                 bool *owns_hips_translation);
 
 #endif

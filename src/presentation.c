@@ -53,8 +53,7 @@ const char *eidolon_presentation_preference_name(EidolonPresentationPreference p
     return "invalid";
 }
 
-const char *
-eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason) {
+const char *eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason) {
     switch (reason) {
     case EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED:
         return "native presentation selected";
@@ -72,9 +71,10 @@ eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason re
     return "unknown presentation selection";
 }
 
-EidolonPresentationSelection
-eidolon_presentation_select(EidolonPresentationPreference preference, bool native_available,
-                            bool native_supports_body, bool native_body_available) {
+EidolonPresentationSelection eidolon_presentation_select(EidolonPresentationPreference preference,
+                                                         bool native_available,
+                                                         bool native_supports_body,
+                                                         bool native_body_available) {
     if (preference == EIDOLON_PRESENTATION_PREFERENCE_SDL_LEGACY) {
         return (EidolonPresentationSelection){
             .use_native = false,
@@ -442,14 +442,14 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
             next.data.pointer.layer.value == 0U ||
             next.data.pointer.device_kind <= EIDOLON_PRESENTATION_POINTER_DEVICE_UNKNOWN ||
             next.data.pointer.device_kind > EIDOLON_PRESENTATION_POINTER_DEVICE_PEN ||
-            (next.data.pointer.buttons &
-             ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_ALL) != 0U ||
+            (next.data.pointer.buttons & ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_ALL) !=
+                0U ||
             (next.data.pointer.modifiers &
              ~(uint64_t)EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT) != 0U ||
             (next.data.pointer.valid_coordinates &
              ~(uint64_t)EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL) != 0U ||
-            ((next.data.pointer.valid_coordinates &
-              EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST) != 0U &&
+            ((next.data.pointer.valid_coordinates & EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST) !=
+                 0U &&
              (!isfinite(next.data.pointer.host_x) || !isfinite(next.data.pointer.host_y))) ||
             ((next.data.pointer.valid_coordinates &
               EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER) != 0U &&
@@ -458,7 +458,7 @@ bool eidolon_presentation_poll_event(EidolonPresentation *presentation,
               !isfinite(next.data.pointer.layer_y_relative))) ||
             ((next.data.pointer.valid_coordinates &
               EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL) != 0U &&
-              (!isfinite(next.data.pointer.global_x) || !isfinite(next.data.pointer.global_y))) ||
+             (!isfinite(next.data.pointer.global_x) || !isfinite(next.data.pointer.global_y))) ||
             !isfinite(next.data.pointer.wheel_x) || !isfinite(next.data.pointer.wheel_y)) {
             SDL_SetError("invalid presentation pointer event");
             return false;
@@ -680,11 +680,12 @@ bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation
 
 bool eidolon_presentation_set_target_alpha_mask(EidolonPresentation *presentation,
                                                 const EidolonPresentationTargetUpdate *update,
+                                                uint32_t mask_width, uint32_t mask_height,
                                                 const uint8_t *pixels, size_t pitch,
                                                 uint8_t pixel_stride, uint8_t alpha_offset) {
-    if (presentation == NULL || update == NULL || !update->redraw_required || pixels == NULL ||
-        pixel_stride == 0U || alpha_offset >= pixel_stride ||
-        pitch < (size_t)update->width * (size_t)pixel_stride) {
+    if (presentation == NULL || update == NULL || !update->redraw_required || mask_width == 0U ||
+        mask_height == 0U || pixels == NULL || pixel_stride == 0U || alpha_offset >= pixel_stride ||
+        pitch < (size_t)mask_width * (size_t)pixel_stride) {
         SDL_SetError("invalid presentation target alpha mask");
         return false;
     }
@@ -701,9 +702,9 @@ bool eidolon_presentation_set_target_alpha_mask(EidolonPresentation *presentatio
             continue;
         }
         return presentation->operations.set_target_alpha_mask == NULL ||
-               presentation->operations.set_target_alpha_mask(presentation->context, update->target,
-                                                              update->generation, pixels, pitch,
-                                                              pixel_stride, alpha_offset);
+               presentation->operations.set_target_alpha_mask(
+                   presentation->context, update->target, update->generation, mask_width,
+                   mask_height, pixels, pitch, pixel_stride, alpha_offset);
     }
     SDL_SetError("presentation target alpha mask does not match staging state");
     return false;

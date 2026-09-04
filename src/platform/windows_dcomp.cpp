@@ -46,6 +46,8 @@ struct DcompTarget {
     IDCompositionEffectGroup *effect = nullptr;
     IDCompositionMatrixTransform *transform = nullptr;
     uint8_t *alpha_mask = nullptr;
+    uint32_t alpha_mask_width = 0U;
+    uint32_t alpha_mask_height = 0U;
     bool alpha_mask_valid = false;
     D2D_MATRIX_3X2_F pending_matrix = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
     D2D_MATRIX_3X2_F committed_matrix = {1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
@@ -170,14 +172,23 @@ HitTestResult hit_test(Win32DcompPresentation *backend, float client_x, float cl
             source_y >= static_cast<float>(target->height)) {
             continue;
         }
-        const size_t pixel = static_cast<size_t>(source_y) * static_cast<size_t>(target->width) +
-                             static_cast<size_t>(source_x);
         const bool routed_gpu_coverage =
             !target->alpha_mask_valid &&
             (target->committed_interaction & EIDOLON_SCENE_INTERACTION_ROUTE_POINTER) != 0U;
-        if (routed_gpu_coverage ||
-            (target->alpha_mask_valid && target->alpha_mask != nullptr &&
-             target->alpha_mask[pixel] > 8U)) {
+        bool covered = false;
+        if (target->alpha_mask_valid && target->alpha_mask != nullptr &&
+            target->alpha_mask_width > 0U && target->alpha_mask_height > 0U) {
+            const size_t mask_x = std::min(
+                static_cast<size_t>(target->alpha_mask_width - 1U),
+                static_cast<size_t>(source_x * static_cast<float>(target->alpha_mask_width) /
+                                    static_cast<float>(target->width)));
+            const size_t mask_y = std::min(
+                static_cast<size_t>(target->alpha_mask_height - 1U),
+                static_cast<size_t>(source_y * static_cast<float>(target->alpha_mask_height) /
+                                    static_cast<float>(target->height)));
+            covered = target->alpha_mask[mask_y * target->alpha_mask_width + mask_x] > 8U;
+        }
+        if (routed_gpu_coverage || covered) {
             result.target = target;
             result.layer_x = source_x;
             result.layer_y = source_y;
@@ -226,8 +237,7 @@ bool enqueue_event(Win32DcompPresentation *backend, EidolonPresentationEventKind
     return eidolon_presentation_event_queue_push(&backend->event_queue, &event);
 }
 
-bool enqueue_structural_event(Win32DcompPresentation *backend,
-                              EidolonPresentationEventKind kind,
+bool enqueue_structural_event(Win32DcompPresentation *backend, EidolonPresentationEventKind kind,
                               EidolonPresentationGraphicsResetKind reset_kind) {
     if (backend == nullptr || kind == EIDOLON_PRESENTATION_EVENT_NONE) {
         return false;
@@ -255,9 +265,7 @@ uint64_t pointer_buttons(WPARAM state) {
 }
 
 uint64_t pointer_modifiers() {
-    return (GetKeyState(VK_SHIFT) & 0x8000) != 0
-               ? EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT
-               : 0U;
+    return (GetKeyState(VK_SHIFT) & 0x8000) != 0 ? EIDOLON_PRESENTATION_POINTER_MODIFIER_SHIFT : 0U;
 }
 
 bool enqueue_pointer_event(Win32DcompPresentation *backend, EidolonPresentationEventKind kind,
@@ -364,8 +372,7 @@ bool start_pointer_routing(Win32DcompPresentation *backend, const HitTestResult 
     return false;
 }
 
-bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
-                         const char *operation) {
+bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result, const char *operation) {
     if (hresult_ok(result, operation)) {
         return true;
     }
@@ -375,8 +382,8 @@ bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
         if (backend->device != nullptr && FAILED(backend->device->GetDeviceRemovedReason())) {
             reset_kind = EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE;
         }
-        if (enqueue_structural_event(
-                backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind)) {
+        if (enqueue_structural_event(backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+                                     reset_kind)) {
             backend->graphics_reset_pending = true;
         }
     }
@@ -385,17 +392,16 @@ bool graphics_hresult_ok(Win32DcompPresentation *backend, HRESULT result,
 
 bool inject_graphics_reset(Win32DcompPresentation *backend,
                            EidolonPresentationGraphicsResetKind reset_kind) {
-    if (backend == nullptr ||
-        (reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE &&
-         reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND)) {
+    if (backend == nullptr || (reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_DEVICE &&
+                               reset_kind != EIDOLON_PRESENTATION_GRAPHICS_RESET_BACKEND)) {
         SDL_SetError("invalid DirectComposition graphics reset injection");
         return false;
     }
     if (backend->graphics_reset_pending) {
         return true;
     }
-    if (!enqueue_structural_event(
-            backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED, reset_kind)) {
+    if (!enqueue_structural_event(backend, EIDOLON_PRESENTATION_EVENT_GRAPHICS_RESET_REQUIRED,
+                                  reset_kind)) {
         return false;
     }
     backend->graphics_reset_pending = true;
@@ -456,9 +462,8 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         return MA_NOACTIVATE;
     case WM_CLOSE:
         if (backend != nullptr) {
-            (void)enqueue_structural_event(
-                backend, EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
-                EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE);
+            (void)enqueue_structural_event(backend, EIDOLON_PRESENTATION_EVENT_HOST_CLOSE_REQUESTED,
+                                           EIDOLON_PRESENTATION_GRAPHICS_RESET_NONE);
         }
         return 0;
     case WM_LBUTTONDOWN: {
@@ -492,15 +497,14 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
         const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
         const HitTestResult hit = hit_test(backend, host_x, host_y);
-        (void)start_pointer_routing(
-            backend, hit, host_x, host_y,
-            pointer_buttons(wparam) | EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
-            message == WM_MBUTTONDBLCLK ? 2U : 1U);
+        (void)start_pointer_routing(backend, hit, host_x, host_y,
+                                    pointer_buttons(wparam) |
+                                        EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                                    message == WM_MBUTTONDBLCLK ? 2U : 1U);
         return 0;
     }
     case WM_MOUSEMOVE:
-        if (backend != nullptr && backend->pointer_routing &&
-            backend->pointer_target != nullptr) {
+        if (backend != nullptr && backend->pointer_routing && backend->pointer_target != nullptr) {
             const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
             const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
             float layer_x = 0.0F;
@@ -523,8 +527,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         return 0;
     case WM_MBUTTONUP:
-        if (backend != nullptr && backend->pointer_routing &&
-            backend->pointer_target != nullptr) {
+        if (backend != nullptr && backend->pointer_routing && backend->pointer_target != nullptr) {
             const float host_x = static_cast<float>(GET_X_LPARAM(lparam));
             const float host_y = static_cast<float>(GET_Y_LPARAM(lparam));
             float layer_x = 0.0F;
@@ -533,8 +536,7 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
                 (void)enqueue_pointer_event(
                     backend, EIDOLON_PRESENTATION_EVENT_POINTER_UP, host_x, host_y, layer_x,
                     layer_y,
-                    pointer_buttons(wparam) &
-                        ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
+                    pointer_buttons(wparam) & ~(uint64_t)EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE,
                     0U);
             }
             stop_pointer_routing(backend, true);
@@ -547,12 +549,11 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         const float host_x = static_cast<float>(cursor.x);
         const float host_y = static_cast<float>(cursor.y);
         const HitTestResult hit = hit_test(backend, host_x, host_y);
-        const float steps = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) /
-                            static_cast<float>(WHEEL_DELTA);
-        (void)enqueue_pointer_wheel(backend, hit, host_x, host_y,
-                                    message == WM_MOUSEHWHEEL ? steps : 0.0F,
-                                    message == WM_MOUSEWHEEL ? steps : 0.0F,
-                                    pointer_buttons(GET_KEYSTATE_WPARAM(wparam)));
+        const float steps =
+            static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
+        (void)enqueue_pointer_wheel(
+            backend, hit, host_x, host_y, message == WM_MOUSEHWHEEL ? steps : 0.0F,
+            message == WM_MOUSEWHEEL ? steps : 0.0F, pointer_buttons(GET_KEYSTATE_WPARAM(wparam)));
         return 0;
     }
     case WM_LBUTTONUP: {
@@ -634,12 +635,10 @@ LRESULT CALLBACK host_window_proc(HWND window, UINT message, WPARAM wparam, LPAR
         }
         return DefWindowProcW(window, message, wparam, lparam);
     case WM_CAPTURECHANGED:
-        if (backend != nullptr && backend->pointer_routing &&
-            backend->pointer_target != nullptr) {
-            (void)enqueue_pointer_event(
-                backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
-                backend->pointer_host_x, backend->pointer_host_y, backend->pointer_layer_x,
-                backend->pointer_layer_y, 0U, 0U);
+        if (backend != nullptr && backend->pointer_routing && backend->pointer_target != nullptr) {
+            (void)enqueue_pointer_event(backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
+                                        backend->pointer_host_x, backend->pointer_host_y,
+                                        backend->pointer_layer_x, backend->pointer_layer_y, 0U, 0U);
             stop_pointer_routing(backend, false);
         }
         if (backend != nullptr && backend->dragging) {
@@ -811,10 +810,9 @@ void suspend_input_region(void *opaque) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     backend->input_suspended = true;
     if (backend->pointer_routing && backend->pointer_target != nullptr) {
-        (void)enqueue_pointer_event(
-            backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
-            backend->pointer_host_x, backend->pointer_host_y, backend->pointer_layer_x,
-            backend->pointer_layer_y, 0U, 0U);
+        (void)enqueue_pointer_event(backend, EIDOLON_PRESENTATION_EVENT_POINTER_CANCELED,
+                                    backend->pointer_host_x, backend->pointer_host_y,
+                                    backend->pointer_layer_x, backend->pointer_layer_y, 0U, 0U);
         stop_pointer_routing(backend, true);
     }
     if (backend->dragging) {
@@ -958,8 +956,7 @@ bool append_test_fallback_output(OutputEnumeration *enumeration) {
     if (record.info.output.value == 0U) {
         return false;
     }
-    const float offset =
-        record.info.bounds.width > 0.0F ? record.info.bounds.width : 1920.0F;
+    const float offset = record.info.bounds.width > 0.0F ? record.info.bounds.width : 1920.0F;
     record.info.bounds.x += offset;
     record.info.usable_bounds.x += offset;
     record.info.flags |= EIDOLON_PRESENTATION_OUTPUT_PRIMARY;
@@ -1006,9 +1003,8 @@ bool same_topology(const std::vector<Win32OutputRecord> &left,
     return true;
 }
 
-const Win32OutputRecord *
-nearest_output(const std::vector<Win32OutputRecord> &outputs, HMONITOR preferred,
-               const RECT &host_rect) {
+const Win32OutputRecord *nearest_output(const std::vector<Win32OutputRecord> &outputs,
+                                        HMONITOR preferred, const RECT &host_rect) {
     for (const Win32OutputRecord &record : outputs) {
         if (record.monitor == preferred) {
             return &record;
@@ -1132,8 +1128,7 @@ bool reconcile_environment(Win32DcompPresentation *backend, bool publish_event) 
     const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, enumerate_output,
                                                 reinterpret_cast<LPARAM>(&enumeration));
     if (enumerated && !enumeration.failed && enumeration.records.empty() &&
-        backend->test_removed_output_id != 0U &&
-        !append_test_fallback_output(&enumeration)) {
+        backend->test_removed_output_id != 0U && !append_test_fallback_output(&enumeration)) {
         enumeration.failed = true;
     }
     if (!enumerated || enumeration.failed || enumeration.records.empty()) {
@@ -1315,20 +1310,11 @@ bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationT
     target->width = width;
     target->height = height;
     target->occupied = true;
-    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
-    target->alpha_mask = new (std::nothrow) uint8_t[pixel_count]();
-    if (target->alpha_mask == nullptr) {
-        SDL_SetError("could not allocate DirectComposition target alpha mask");
-        destroy_target_resource(*target);
-        return false;
-    }
-    if (!graphics_hresult_ok(
-            backend,
-            backend->factory->CreateSwapChainForComposition(backend->device, &description, nullptr,
-                                                            &target->swap_chain),
-            "CreateSwapChainForComposition") ||
-        !graphics_hresult_ok(backend,
-                             backend->composition_device->CreateVisual(&target->visual),
+    if (!graphics_hresult_ok(backend,
+                             backend->factory->CreateSwapChainForComposition(
+                                 backend->device, &description, nullptr, &target->swap_chain),
+                             "CreateSwapChainForComposition") ||
+        !graphics_hresult_ok(backend, backend->composition_device->CreateVisual(&target->visual),
                              "IDCompositionDevice::CreateVisual") ||
         !graphics_hresult_ok(backend, target->visual->SetContent(target->swap_chain),
                              "IDCompositionVisual::SetContent") ||
@@ -1339,9 +1325,9 @@ bool create_target(void *opaque, EidolonSceneLayerId layer, EidolonPresentationT
                              "IDCompositionEffectGroup::SetOpacity") ||
         !graphics_hresult_ok(backend, target->visual->SetEffect(target->effect),
                              "IDCompositionVisual::SetEffect") ||
-        !graphics_hresult_ok(
-            backend, backend->composition_device->CreateMatrixTransform(&target->transform),
-            "IDCompositionDevice::CreateMatrixTransform") ||
+        !graphics_hresult_ok(backend,
+                             backend->composition_device->CreateMatrixTransform(&target->transform),
+                             "IDCompositionDevice::CreateMatrixTransform") ||
         !graphics_hresult_ok(backend, target->visual->SetTransform(target->transform),
                              "IDCompositionVisual::SetTransform") ||
         !acquire_back_buffer(backend, *target)) {
@@ -1360,20 +1346,35 @@ void destroy_target(void *opaque, EidolonPresentationTarget id) {
 }
 
 bool set_target_alpha_mask(void *opaque, EidolonPresentationTarget id, uint64_t generation,
-                           const uint8_t *pixels, size_t pitch, uint8_t pixel_stride,
-                           uint8_t alpha_offset) {
+                           uint32_t mask_width, uint32_t mask_height, const uint8_t *pixels,
+                           size_t pitch, uint8_t pixel_stride, uint8_t alpha_offset) {
     auto *backend = static_cast<Win32DcompPresentation *>(opaque);
     DcompTarget *target = find_target(backend, id, generation);
-    if (target == nullptr || pixels == nullptr || pixel_stride == 0U ||
-        alpha_offset >= pixel_stride || pitch < static_cast<size_t>(target->width) * pixel_stride ||
-        target->alpha_mask == nullptr) {
+    if (target == nullptr || mask_width == 0U || mask_height == 0U || pixels == nullptr ||
+        pixel_stride == 0U || alpha_offset >= pixel_stride ||
+        pitch < static_cast<size_t>(mask_width) * pixel_stride ||
+        static_cast<size_t>(mask_width) > SIZE_MAX / static_cast<size_t>(mask_height)) {
         SDL_SetError("invalid DirectComposition target alpha mask");
         return false;
     }
-    for (uint32_t y = 0U; y < target->height; ++y) {
+    if (target->alpha_mask == nullptr || target->alpha_mask_width != mask_width ||
+        target->alpha_mask_height != mask_height) {
+        const size_t pixel_count =
+            static_cast<size_t>(mask_width) * static_cast<size_t>(mask_height);
+        auto *replacement = new (std::nothrow) uint8_t[pixel_count];
+        if (replacement == nullptr) {
+            SDL_SetError("could not allocate DirectComposition target alpha mask");
+            return false;
+        }
+        delete[] target->alpha_mask;
+        target->alpha_mask = replacement;
+        target->alpha_mask_width = mask_width;
+        target->alpha_mask_height = mask_height;
+    }
+    for (uint32_t y = 0U; y < mask_height; ++y) {
         const uint8_t *source = pixels + static_cast<size_t>(y) * pitch;
-        uint8_t *destination = target->alpha_mask + static_cast<size_t>(y) * target->width;
-        for (uint32_t x = 0U; x < target->width; ++x) {
+        uint8_t *destination = target->alpha_mask + static_cast<size_t>(y) * mask_width;
+        for (uint32_t x = 0U; x < mask_width; ++x) {
             destination[x] = source[static_cast<size_t>(x) * pixel_stride + alpha_offset];
         }
     }
@@ -1653,8 +1654,9 @@ extern "C" ID3D11Texture2D *eidolon_win32_dcomp_target_texture(EidolonPresentati
     return acquire_back_buffer(backend, *resource) ? resource->back_buffer : nullptr;
 }
 
-extern "C" bool eidolon_win32_dcomp_test_inject_graphics_reset(
-    EidolonPresentation *presentation, EidolonPresentationGraphicsResetKind reset_kind) {
+extern "C" bool
+eidolon_win32_dcomp_test_inject_graphics_reset(EidolonPresentation *presentation,
+                                               EidolonPresentationGraphicsResetKind reset_kind) {
     auto *backend = static_cast<Win32DcompPresentation *>(
         eidolon_presentation_backend_context(presentation, "win32_dcomp"));
     return inject_graphics_reset(backend, reset_kind);

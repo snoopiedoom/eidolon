@@ -38,20 +38,17 @@ static void body_point(const EidolonEprBodyProfile *body, const float semantic[3
 }
 
 static bool anchor_owns(const EidolonEprPoseAnchor *anchor, EidolonEprBodyResource resource) {
-    return anchor != NULL &&
-           (anchor->resource_mask & (UINT32_C(1) << (uint32_t)resource)) != 0U;
+    return anchor != NULL && (anchor->resource_mask & (UINT32_C(1) << (uint32_t)resource)) != 0U;
 }
 
-static void anchor_euler(const EidolonEprPoseAnchor *neutral,
-                         const EidolonEprPoseAnchor *target, EidolonEprBodyResource resource,
-                         float result[3]) {
+static void anchor_euler(const EidolonEprPoseAnchor *neutral, const EidolonEprPoseAnchor *target,
+                         EidolonEprBodyResource resource, float result[3]) {
     const float *source = NULL;
     if (anchor_owns(target, resource)) {
-        source = resource == EIDOLON_EPR_RESOURCE_TORSO ? target->torso_euler
-                                                        : target->head_euler;
+        source = resource == EIDOLON_EPR_RESOURCE_TORSO ? target->torso_euler : target->head_euler;
     } else if (anchor_owns(neutral, resource)) {
-        source = resource == EIDOLON_EPR_RESOURCE_TORSO ? neutral->torso_euler
-                                                        : neutral->head_euler;
+        source =
+            resource == EIDOLON_EPR_RESOURCE_TORSO ? neutral->torso_euler : neutral->head_euler;
     }
     if (source != NULL) {
         memcpy(result, source, sizeof(float) * 3U);
@@ -83,13 +80,11 @@ static void anchor_arm(const EidolonEprBodyProfile *body, const EidolonEprPoseAn
     }
 }
 
-static void posture_anchor_weights(const EidolonEprPoseAnchor *neutral,
-                                   const EidolonEprPoseAnchor *target,
-                                   EidolonEprPoseAnchorId target_id,
-                                   float weights[EIDOLON_EPR_POSE_ANCHOR_COUNT]
-                                                [EIDOLON_EPR_RESOURCE_COUNT]) {
-    memset(weights, 0,
-           sizeof(float) * EIDOLON_EPR_POSE_ANCHOR_COUNT * EIDOLON_EPR_RESOURCE_COUNT);
+static void
+posture_anchor_weights(const EidolonEprPoseAnchor *neutral, const EidolonEprPoseAnchor *target,
+                       EidolonEprPoseAnchorId target_id,
+                       float weights[EIDOLON_EPR_POSE_ANCHOR_COUNT][EIDOLON_EPR_RESOURCE_COUNT]) {
+    memset(weights, 0, sizeof(float) * EIDOLON_EPR_POSE_ANCHOR_COUNT * EIDOLON_EPR_RESOURCE_COUNT);
     const EidolonEprBodyResource resources[] = {
         EIDOLON_EPR_RESOURCE_TORSO,
         EIDOLON_EPR_RESOURCE_HEAD,
@@ -160,9 +155,9 @@ void eidolon_epr_realize_posture(const EidolonEprBodyProfile *body,
         mix3(transition_start->right_wrist_euler, wrist, weight, wrist);
         for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
             for (size_t resource = 0U; resource < EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
-                candidate->pose_anchor_resource_weights[anchor][resource] = mixf(
-                    transition_start->pose_anchor_resource_weights[anchor][resource],
-                    target_weights[anchor][resource], weight);
+                candidate->pose_anchor_resource_weights[anchor][resource] =
+                    mixf(transition_start->pose_anchor_resource_weights[anchor][resource],
+                         target_weights[anchor][resource], weight);
             }
         }
     } else {
@@ -221,9 +216,11 @@ bool eidolon_epr_realize_gaze(const EidolonEprBodyProfile *body,
     candidate->eye_yaw = program->values[0] * eye_weight;
     candidate->eye_pitch = program->values[1] * eye_weight;
     candidate->eye_weight = eye_weight;
-    candidate->head_yaw += program->values[0] * head_weight * 0.72F;
-    candidate->head_pitch += program->values[1] * head_weight * 0.50F;
     candidate->head_gaze_weight = head_weight;
+    candidate->head_gaze_yaw = program->values[0] * head_weight * 0.72F;
+    candidate->head_gaze_pitch = program->values[1] * head_weight * 0.50F;
+    candidate->head_yaw += candidate->head_gaze_yaw;
+    candidate->head_pitch += candidate->head_gaze_pitch;
     return body->has_eyes;
 }
 
@@ -255,8 +252,8 @@ static void realize_gesture(const EidolonEprBodyProfile *body,
     const EidolonEprTick recovery = program->phase_ticks[EIDOLON_EPR_PHASE_RECOVERY];
     const EidolonEprTick completion = program->phase_ticks[EIDOLON_EPR_PHASE_COMPLETION];
     for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
-        rest_weights[anchor] = candidate->pose_anchor_resource_weights[anchor]
-                                                                    [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN];
+        rest_weights[anchor] =
+            candidate->pose_anchor_resource_weights[anchor][EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN];
     }
     for (size_t index = 0; index < 3U; ++index) {
         const EidolonEprPoseAnchor *anchor = &program->poses[index];
@@ -305,24 +302,22 @@ static void realize_gesture(const EidolonEprBodyProfile *body,
         mix3(poles[2], rest_pole, phase_weight, candidate->right_elbow_pole);
         mix3(wrists[2], rest_wrist, phase_weight, candidate->right_wrist_euler);
     }
-    const float from_strength =
-        from_rest ? 0.0F : clamp01(program->poses[from].right_arm.weight);
+    const float from_strength = from_rest ? 0.0F : clamp01(program->poses[from].right_arm.weight);
     const float to_strength = to_rest ? 0.0F : clamp01(program->poses[to].right_arm.weight);
     const float rest_strength =
-        (1.0F - phase_weight) * (1.0F - from_strength) +
-        phase_weight * (1.0F - to_strength);
+        (1.0F - phase_weight) * (1.0F - from_strength) + phase_weight * (1.0F - to_strength);
     for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
         candidate->pose_anchor_resource_weights[anchor][EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] =
             rest_weights[anchor] * rest_strength;
     }
     if (!from_rest) {
         candidate->pose_anchor_resource_weights[program->pose_ids[from]]
-                                                      [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] +=
+                                               [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] +=
             (1.0F - phase_weight) * from_strength;
     }
     if (!to_rest) {
         candidate->pose_anchor_resource_weights[program->pose_ids[to]]
-                                                      [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] +=
+                                               [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] +=
             phase_weight * to_strength;
     }
 }
@@ -344,27 +339,31 @@ void eidolon_epr_realize_right_arm(const EidolonEprBodyProfile *body,
         };
         float posture_weights[EIDOLON_EPR_POSE_ANCHOR_COUNT];
         for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
-            posture_weights[anchor] = candidate->pose_anchor_resource_weights[anchor]
-                                                                        [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN];
+            posture_weights[anchor] =
+                candidate
+                    ->pose_anchor_resource_weights[anchor][EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN];
         }
         const EidolonEprTick start = program->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT];
         const EidolonEprTick end = program->phase_ticks[EIDOLON_EPR_PHASE_SETTLE];
         const float weight = smooth01((float)(tick - start) / (float)(end - start));
+        candidate->right_arm_ik_weight = 0.0F;
+        candidate->right_arm_continuity_weight = 1.0F - weight;
+        candidate->right_arm_continuity_id =
+            candidate->right_arm_continuity_weight > 0.0F ? program->behavior : 0U;
         mix3(settle_start->right_hand_position, posture_target, weight,
              candidate->right_hand_target);
         mix3(settle_start->right_elbow_pole, candidate->right_elbow_pole, weight,
              candidate->right_elbow_pole);
         for (size_t index = 0; index < 3U; ++index) {
-            candidate->right_wrist_euler[index] =
-                mixf(settle_start->right_wrist_euler[index],
-                     candidate->right_wrist_euler[index], weight);
+            candidate->right_wrist_euler[index] = mixf(settle_start->right_wrist_euler[index],
+                                                       candidate->right_wrist_euler[index], weight);
         }
         for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
-            candidate->pose_anchor_resource_weights[anchor]
-                                                    [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] =
-                mixf(settle_start->pose_anchor_resource_weights[anchor]
-                                                               [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN],
-                     posture_weights[anchor], weight);
+            candidate
+                ->pose_anchor_resource_weights[anchor][EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] = mixf(
+                settle_start
+                    ->pose_anchor_resource_weights[anchor][EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN],
+                posture_weights[anchor], weight);
         }
     }
 }

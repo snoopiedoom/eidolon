@@ -19,6 +19,55 @@ static bool bounded3(const float values[3], float limit) {
            fabsf(values[2]) <= limit;
 }
 
+const char *eidolon_epr_motion_generator_name(EidolonEprMotionGeneratorId generator) {
+    static const char *const names[EIDOLON_EPR_MOTION_GENERATOR_COUNT] = {
+        [EIDOLON_EPR_MOTION_GENERATOR_NONE] = "none",
+        [EIDOLON_EPR_MOTION_IDLE_NEUTRAL] = "idle.neutral",
+        [EIDOLON_EPR_MOTION_POSTURE_ATTENTIVE] = "posture.attentive",
+        [EIDOLON_EPR_MOTION_POSTURE_THINKING] = "posture.thinking",
+        [EIDOLON_EPR_MOTION_POSTURE_RESPONDING] = "posture.responding",
+        [EIDOLON_EPR_MOTION_POSTURE_INTERRUPTED_GUARDED] = "posture.interrupted_guarded",
+        [EIDOLON_EPR_MOTION_GESTURE_CONTRAST_RIGHT] = "gesture.contrast_right",
+        [EIDOLON_EPR_MOTION_SETTLE_RIGHT_ARM] = "settle.right_arm",
+    };
+    if (generator < EIDOLON_EPR_MOTION_GENERATOR_NONE ||
+        generator >= EIDOLON_EPR_MOTION_GENERATOR_COUNT) {
+        return "unknown";
+    }
+    return names[(size_t)generator];
+}
+
+bool eidolon_epr_motion_generator_reference_validate(
+    const EidolonEprMotionGeneratorReference *reference) {
+    uint64_t expected_rotations = 0U;
+    bool expected_hips = false;
+    if (reference == NULL || reference->version != EIDOLON_EPR_MOTION_GENERATOR_REFERENCE_VERSION ||
+        reference->generator < EIDOLON_EPR_MOTION_GENERATOR_NONE ||
+        reference->generator >= EIDOLON_EPR_MOTION_GENERATOR_COUNT ||
+        reference->takeover < EIDOLON_EPR_MOTION_TAKEOVER_NONE ||
+        reference->takeover >= EIDOLON_EPR_MOTION_TAKEOVER_COUNT ||
+        !isfinite(reference->blend_weight) || !isfinite(reference->intensity) ||
+        !isfinite(reference->playback_rate)) {
+        return false;
+    }
+    if (reference->generator == EIDOLON_EPR_MOTION_GENERATOR_NONE) {
+        return reference->takeover == EIDOLON_EPR_MOTION_TAKEOVER_NONE &&
+               reference->resource_mask == 0U && reference->humanoid_rotation_mask == 0U &&
+               !reference->owns_hips_translation && reference->blend_weight == 0.0F &&
+               reference->intensity == 0.0F && reference->playback_rate == 0.0F;
+    }
+    if (reference->takeover == EIDOLON_EPR_MOTION_TAKEOVER_NONE || reference->resource_mask == 0U ||
+        reference->blend_weight < 0.0F || reference->blend_weight > 1.0F ||
+        reference->intensity < 0.0F || reference->intensity > 1.0F ||
+        reference->playback_rate <= 0.0F || reference->playback_rate > 4.0F ||
+        !eidolon_epr_resource_mask_humanoid_channels(reference->resource_mask, &expected_rotations,
+                                                     &expected_hips)) {
+        return false;
+    }
+    return reference->humanoid_rotation_mask == expected_rotations &&
+           reference->owns_hips_translation == expected_hips;
+}
+
 static bool anchor_valid(const EidolonEprPoseAnchor *anchor) {
     const uint32_t valid_resources = (UINT32_C(1) << EIDOLON_EPR_RESOURCE_COUNT) - 1U;
     return anchor != NULL && anchor->resource_mask != 0U &&
@@ -34,8 +83,7 @@ static bool anchor_valid(const EidolonEprPoseAnchor *anchor) {
 
 bool eidolon_epr_realization_profile_validate(const EidolonEprRealizationProfile *profile,
                                               const EidolonEprBodyProfile *body) {
-    const uint32_t valid_anchors =
-        (UINT32_C(1) << (uint32_t)EIDOLON_EPR_POSE_ANCHOR_COUNT) - 1U;
+    const uint32_t valid_anchors = (UINT32_C(1) << (uint32_t)EIDOLON_EPR_POSE_ANCHOR_COUNT) - 1U;
     if (profile == NULL || body == NULL ||
         profile->version != EIDOLON_EPR_REALIZATION_PROFILE_VERSION ||
         profile->body_fingerprint == 0U || profile->body_fingerprint != body->fingerprint ||
@@ -75,8 +123,7 @@ static uint32_t resource_mask(const EidolonBehaviorPlan *plan, EidolonEprOpaqueI
     return mask;
 }
 
-static void record_anchor_gaps(EidolonRealizationProgram *program,
-                               EidolonEprPoseAnchorId anchor_id,
+static void record_anchor_gaps(EidolonRealizationProgram *program, EidolonEprPoseAnchorId anchor_id,
                                const EidolonEprPoseAnchor *anchor) {
     uint32_t missing = program->resource_mask;
     if (anchor != NULL) {
@@ -88,9 +135,58 @@ static void record_anchor_gaps(EidolonRealizationProgram *program,
     }
 }
 
+static bool configure_motion_reference(EidolonEprBehaviorKind kind,
+                                       EidolonRealizationProgram *program) {
+    EidolonEprMotionGeneratorReference *reference = &program->motion;
+    memset(reference, 0, sizeof(*reference));
+    reference->version = EIDOLON_EPR_MOTION_GENERATOR_REFERENCE_VERSION;
+    switch (kind) {
+    case EIDOLON_EPR_BEHAVIOR_IDLE:
+        reference->generator = EIDOLON_EPR_MOTION_IDLE_NEUTRAL;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_ADDITIVE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE:
+        reference->generator = EIDOLON_EPR_MOTION_POSTURE_ATTENTIVE;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_BASE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_POSTURE_THINKING:
+        reference->generator = EIDOLON_EPR_MOTION_POSTURE_THINKING;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_BASE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_POSTURE_RESPONDING:
+        reference->generator = EIDOLON_EPR_MOTION_POSTURE_RESPONDING;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_BASE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_POSTURE_GUARDED:
+        reference->generator = EIDOLON_EPR_MOTION_POSTURE_INTERRUPTED_GUARDED;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_BASE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT:
+        reference->generator = EIDOLON_EPR_MOTION_GESTURE_CONTRAST_RIGHT;
+        reference->takeover = EIDOLON_EPR_MOTION_TAKEOVER_OVERRIDE;
+        break;
+    case EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM:
+    case EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION:
+    case EIDOLON_EPR_BEHAVIOR_GAZE_RESPONSE:
+    case EIDOLON_EPR_BEHAVIOR_GAZE_INTERRUPTED:
+    case EIDOLON_EPR_BEHAVIOR_EXPRESSION_NEUTRAL:
+    case EIDOLON_EPR_BEHAVIOR_EXPRESSION_FOCUSED:
+        return eidolon_epr_motion_generator_reference_validate(reference);
+    }
+    reference->resource_mask = program->resource_mask;
+    reference->blend_weight = 1.0F;
+    reference->intensity = 1.0F;
+    reference->playback_rate = 1.0F;
+    if (!eidolon_epr_resource_mask_humanoid_channels(reference->resource_mask,
+                                                     &reference->humanoid_rotation_mask,
+                                                     &reference->owns_hips_translation)) {
+        return false;
+    }
+    return eidolon_epr_motion_generator_reference_validate(reference);
+}
+
 static bool configure_posture(const EidolonEprRealizationProfile *profile,
-                              EidolonEprPoseAnchorId target,
-                              EidolonRealizationProgram *program) {
+                              EidolonEprPoseAnchorId target, EidolonRealizationProgram *program) {
     const EidolonEprPoseAnchor *neutral =
         eidolon_epr_realization_anchor(profile, EIDOLON_EPR_POSE_NEUTRAL);
     const EidolonEprPoseAnchor *selected = eidolon_epr_realization_anchor(profile, target);
@@ -118,7 +214,8 @@ static bool configure_gesture(const EidolonEprRealizationProfile *profile,
     };
     program->modality = EIDOLON_EPR_MODALITY_GESTURE;
     for (size_t index = 0U; index < EIDOLON_EPR_PROGRAM_POSE_CAPACITY; ++index) {
-        const EidolonEprPoseAnchor *anchor = eidolon_epr_realization_anchor(profile, anchors[index]);
+        const EidolonEprPoseAnchor *anchor =
+            eidolon_epr_realization_anchor(profile, anchors[index]);
         const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
         record_anchor_gaps(program, anchors[index], anchor);
         if (anchor == NULL || (anchor->resource_mask & right_arm) == 0U) {
@@ -150,6 +247,10 @@ static bool configure_program(const EidolonBehaviorPlan *plan,
     program->resource_mask = resource_mask(plan, behavior->id);
     memcpy(program->phase_ticks, behavior->phase_ticks, sizeof(program->phase_ticks));
     memcpy(program->has_phase, behavior->has_phase, sizeof(program->has_phase));
+
+    if (!configure_motion_reference(behavior->kind, program)) {
+        return false;
+    }
 
     switch (behavior->kind) {
     case EIDOLON_EPR_BEHAVIOR_IDLE:

@@ -2,6 +2,60 @@
 
 #include <string.h>
 
+static uint64_t humanoid_role_range(EidolonHumanoidRole first, EidolonHumanoidRole last) {
+    uint64_t mask = 0U;
+    for (int role = (int)first; role <= (int)last; ++role) {
+        mask |= UINT64_C(1) << (uint32_t)role;
+    }
+    return mask;
+}
+
+static uint64_t humanoid_resource_rotations(EidolonEprBodyResource resource) {
+    switch (resource) {
+    case EIDOLON_EPR_RESOURCE_TORSO:
+        return humanoid_role_range(EIDOLON_HUMANOID_ROLE_HIPS, EIDOLON_HUMANOID_ROLE_UPPER_CHEST);
+    case EIDOLON_EPR_RESOURCE_HEAD:
+        return humanoid_role_range(EIDOLON_HUMANOID_ROLE_NECK, EIDOLON_HUMANOID_ROLE_HEAD);
+    case EIDOLON_EPR_RESOURCE_EYES:
+        return humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_EYE, EIDOLON_HUMANOID_ROLE_RIGHT_EYE);
+    case EIDOLON_EPR_RESOURCE_FACE_EXPRESSION:
+        return 0U;
+    case EIDOLON_EPR_RESOURCE_LEFT_ARM_CHAIN:
+        return humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_SHOULDER,
+                                   EIDOLON_HUMANOID_ROLE_LEFT_HAND) |
+               humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_THUMB_METACARPAL,
+                                   EIDOLON_HUMANOID_ROLE_LEFT_LITTLE_DISTAL);
+    case EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN:
+        return humanoid_role_range(EIDOLON_HUMANOID_ROLE_RIGHT_SHOULDER,
+                                   EIDOLON_HUMANOID_ROLE_RIGHT_HAND) |
+               humanoid_role_range(EIDOLON_HUMANOID_ROLE_RIGHT_THUMB_METACARPAL,
+                                   EIDOLON_HUMANOID_ROLE_RIGHT_LITTLE_DISTAL);
+    case EIDOLON_EPR_RESOURCE_COUNT:
+        return 0U;
+    }
+    return 0U;
+}
+
+bool eidolon_epr_resource_mask_humanoid_channels(uint32_t resource_mask, uint64_t *rotation_mask,
+                                                 bool *owns_hips_translation) {
+    const uint32_t valid_resources = (UINT32_C(1) << (uint32_t)EIDOLON_EPR_RESOURCE_COUNT) - 1U;
+    uint64_t rotations = 0U;
+    bool owns_hips = false;
+    if (rotation_mask == NULL || owns_hips_translation == NULL ||
+        (resource_mask & ~valid_resources) != 0U) {
+        return false;
+    }
+    for (int resource = 0; resource < (int)EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
+        if ((resource_mask & (UINT32_C(1) << (uint32_t)resource)) != 0U) {
+            rotations |= humanoid_resource_rotations((EidolonEprBodyResource)resource);
+            owns_hips = owns_hips || resource == (int)EIDOLON_EPR_RESOURCE_TORSO;
+        }
+    }
+    *rotation_mask = rotations;
+    *owns_hips_translation = owns_hips;
+    return true;
+}
+
 int eidolon_epr_resource_rank_compare(const EidolonEprResourceRank *left,
                                       const EidolonEprResourceRank *right) {
     if (left->urgency != right->urgency) {

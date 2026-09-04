@@ -38,8 +38,7 @@ int main() {
             goto cleanup;
         }
         std::vector<EidolonPresentationOutputInfo> outputs(topology.required_count);
-        topology =
-            eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
+        topology = eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
         if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_OK ||
             topology.copied_count != outputs.size()) {
             std::fprintf(stderr, "topology copy failed: %s\n", SDL_GetError());
@@ -61,33 +60,28 @@ int main() {
             event.data.environment.environment.active_output.value ==
                 initial_environment.active_output.value ||
             (event.data.environment.environment.changed_fields &
-             (EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
-              EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY)) !=
+             (EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT | EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY)) !=
                 (EIDOLON_PRESENTATION_ENV_ACTIVE_OUTPUT |
                  EIDOLON_PRESENTATION_ENV_OUTPUT_TOPOLOGY)) {
-            std::fprintf(stderr, "active-output fallback publication failed: %s\n",
-                         SDL_GetError());
+            std::fprintf(stderr, "active-output fallback publication failed: %s\n", SDL_GetError());
             goto cleanup;
         }
         fallback_output = event.data.environment.environment.active_output;
         EidolonPresentationTopologyResult topology =
             eidolon_presentation_copy_outputs(presentation, nullptr, 0U);
         std::vector<EidolonPresentationOutputInfo> outputs(topology.required_count);
-        topology =
-            eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
+        topology = eidolon_presentation_copy_outputs(presentation, outputs.data(), outputs.size());
         bool removed_retired = true;
         bool fallback_present = false;
         for (const EidolonPresentationOutputInfo &output : outputs) {
             removed_retired =
-                removed_retired &&
-                output.output.value != initial_environment.active_output.value;
+                removed_retired && output.output.value != initial_environment.active_output.value;
             fallback_present =
                 fallback_present ||
-                output.output.value ==
-                    event.data.environment.environment.active_output.value;
+                output.output.value == event.data.environment.environment.active_output.value;
         }
-        if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_OK ||
-            !removed_retired || !fallback_present) {
+        if (topology.status != EIDOLON_PRESENTATION_TOPOLOGY_OK || !removed_retired ||
+            !fallback_present) {
             std::fprintf(stderr, "active-output fallback topology failed: %s\n", SDL_GetError());
             goto cleanup;
         }
@@ -135,8 +129,8 @@ int main() {
 
     {
         const std::vector<uint8_t> alpha_mask(128U * 192U, 255U);
-        if (!eidolon_presentation_set_target_alpha_mask(presentation, &update, alpha_mask.data(),
-                                                        128U, 1U, 0U)) {
+        if (!eidolon_presentation_set_target_alpha_mask(presentation, &update, 128U, 192U,
+                                                        alpha_mask.data(), 128U, 1U, 0U)) {
             std::fprintf(stderr, "alpha-mask upload failed: %s\n", SDL_GetError());
             goto cleanup;
         }
@@ -154,8 +148,7 @@ int main() {
                 layer,
                 1U,
                 EIDOLON_SCENE_LAYER_BODY,
-                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR |
-                    EIDOLON_SCENE_INTERACTION_ROUTE_POINTER,
+                EIDOLON_SCENE_INTERACTION_MOVE_ANCHOR | EIDOLON_SCENE_INTERACTION_ROUTE_POINTER,
                 1U,
                 1U,
                 128U,
@@ -196,8 +189,7 @@ int main() {
         SendMessageW(window, WM_MBUTTONDOWN, MK_MBUTTON, MAKELPARAM(10, 10));
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_POINTER_DOWN ||
-            event.data.pointer.layer.value != layer.value ||
-            event.data.pointer.click_count != 1U) {
+            event.data.pointer.layer.value != layer.value || event.data.pointer.click_count != 1U) {
             std::fprintf(stderr, "native routed pointer down failed: %s\n", SDL_GetError());
             goto cleanup;
         }
@@ -221,8 +213,7 @@ int main() {
             std::fprintf(stderr, "native move start failed: %s\n", SDL_GetError());
             goto cleanup;
         }
-        SendMessageW(window, WM_CAPTURECHANGED, 0U,
-                     reinterpret_cast<LPARAM>(GetDesktopWindow()));
+        SendMessageW(window, WM_CAPTURECHANGED, 0U, reinterpret_cast<LPARAM>(GetDesktopWindow()));
         if (!eidolon_presentation_poll_event(presentation, &event) ||
             event.kind != EIDOLON_PRESENTATION_EVENT_MOVE_CANCELED) {
             std::fprintf(stderr, "native capture cancellation failed: %s\n", SDL_GetError());

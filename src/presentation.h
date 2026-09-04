@@ -236,10 +236,9 @@ typedef enum EidolonPresentationPointerButton {
     EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY = UINT64_C(1) << 0,
     EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE = UINT64_C(1) << 1,
     EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY = UINT64_C(1) << 2,
-    EIDOLON_PRESENTATION_POINTER_BUTTON_ALL =
-        EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY |
-        EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE |
-        EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY,
+    EIDOLON_PRESENTATION_POINTER_BUTTON_ALL = EIDOLON_PRESENTATION_POINTER_BUTTON_PRIMARY |
+                                              EIDOLON_PRESENTATION_POINTER_BUTTON_MIDDLE |
+                                              EIDOLON_PRESENTATION_POINTER_BUTTON_SECONDARY,
 } EidolonPresentationPointerButton;
 
 typedef enum EidolonPresentationPointerModifier {
@@ -250,10 +249,9 @@ typedef enum EidolonPresentationPointerCoordinate {
     EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST = UINT64_C(1) << 0,
     EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER = UINT64_C(1) << 1,
     EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL = UINT64_C(1) << 2,
-    EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL =
-        EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
-        EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER |
-        EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL,
+    EIDOLON_PRESENTATION_POINTER_COORDINATE_ALL = EIDOLON_PRESENTATION_POINTER_COORDINATE_HOST |
+                                                  EIDOLON_PRESENTATION_POINTER_COORDINATE_LAYER |
+                                                  EIDOLON_PRESENTATION_POINTER_COORDINATE_GLOBAL,
 } EidolonPresentationPointerCoordinate;
 
 typedef struct EidolonPresentationPointerEvent {
@@ -336,8 +334,9 @@ typedef struct EidolonPresentationBackendOps {
                           uint32_t height, EidolonPresentationAlphaMode alpha_mode);
     void (*destroy_target)(void *context, EidolonPresentationTarget target);
     bool (*set_target_alpha_mask)(void *context, EidolonPresentationTarget target,
-                                  uint64_t generation, const uint8_t *pixels, size_t pitch,
-                                  uint8_t pixel_stride, uint8_t alpha_offset);
+                                  uint64_t generation, uint32_t mask_width, uint32_t mask_height,
+                                  const uint8_t *pixels, size_t pitch, uint8_t pixel_stride,
+                                  uint8_t alpha_offset);
     bool (*submit_target)(void *context, EidolonPresentationTarget target, uint64_t generation);
     bool (*commit_scene)(void *context, const EidolonPresentationSceneCommit *commit);
     bool (*present)(void *context);
@@ -357,11 +356,11 @@ eidolon_presentation_create_backend(const char *backend_name, uint64_t capabilit
 void eidolon_presentation_destroy(EidolonPresentation *presentation);
 
 const char *eidolon_presentation_preference_name(EidolonPresentationPreference preference);
-const char *
-eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason);
-EidolonPresentationSelection
-eidolon_presentation_select(EidolonPresentationPreference preference, bool native_available,
-                            bool native_supports_body, bool native_body_available);
+const char *eidolon_presentation_selection_reason_name(EidolonPresentationSelectionReason reason);
+EidolonPresentationSelection eidolon_presentation_select(EidolonPresentationPreference preference,
+                                                         bool native_available,
+                                                         bool native_supports_body,
+                                                         bool native_body_available);
 const char *eidolon_presentation_backend_name(const EidolonPresentation *presentation);
 uint64_t eidolon_presentation_capabilities(const EidolonPresentation *presentation);
 bool eidolon_presentation_supports(const EidolonPresentation *presentation,
@@ -397,6 +396,7 @@ bool eidolon_presentation_finish_target_update(EidolonPresentation *presentation
                                                bool content_valid);
 bool eidolon_presentation_set_target_alpha_mask(EidolonPresentation *presentation,
                                                 const EidolonPresentationTargetUpdate *update,
+                                                uint32_t mask_width, uint32_t mask_height,
                                                 const uint8_t *pixels, size_t pitch,
                                                 uint8_t pixel_stride, uint8_t alpha_offset);
 bool eidolon_presentation_target_for_layer(EidolonPresentation *presentation,

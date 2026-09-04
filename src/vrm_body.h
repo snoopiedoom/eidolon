@@ -2,6 +2,7 @@
 #define EIDOLON_VRM_BODY_H
 
 #include "epr/performance_runtime.h"
+#include "humanoid_pose.h"
 
 #include <cgltf.h>
 
@@ -92,6 +93,7 @@ typedef struct EidolonVrmExpression {
 
 typedef struct EidolonVrmBody {
     int node_by_bone[EIDOLON_VRM_BONE_COUNT];
+    int node_by_role[EIDOLON_HUMANOID_ROLE_COUNT];
     EidolonVrmExpression neutral_expression;
     EidolonVrmExpression relaxed_expression;
     EidolonVrmLookAt look_at;

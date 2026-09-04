@@ -4,9 +4,11 @@
 #include "epr/behavior_plan.h"
 #include "epr/body_resources.h"
 #include "epr/canonical_control.h"
+#include "epr/motion_execution.h"
 #include "epr/performance_intent.h"
 #include "epr/performance_trace.h"
 #include "epr/realization_program.h"
+#include "epr/task_target.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -38,6 +40,16 @@ typedef struct EidolonPerformanceRuntime {
     bool has_resources;
     EidolonEprTrace trace;
     EidolonEprTick last_tick;
+    EidolonEprMotionCatalog motion_catalog;
+    EidolonEprMotionFrame motion_frame;
+    EidolonEprMotionExecutionResult motion_result;
+    EidolonEprRightArmTaskTarget right_arm_task_target;
+    uint64_t right_arm_task_target_revision;
+    EidolonEprOpaqueId right_arm_task_target_producer;
+    uint64_t right_arm_task_target_applied_revision;
+    bool has_motion_catalog;
+    bool has_motion_frame;
+    bool has_right_arm_task_target;
     bool has_tick;
     bool has_posture_base;
     bool eyes_degradation_traced;
@@ -57,11 +69,22 @@ void eidolon_epr_runtime_inject_solve_failure(EidolonPerformanceRuntime *runtime
 void eidolon_epr_runtime_note_projection(EidolonPerformanceRuntime *runtime,
                                          uint64_t control_revision, bool committed,
                                          EidolonEprTraceReason reason);
+/* Catalog source contexts are borrowed and must outlive the runtime installation. */
+bool eidolon_epr_runtime_set_motion_catalog(EidolonPerformanceRuntime *runtime,
+                                            const EidolonEprMotionCatalog *catalog);
+void eidolon_epr_runtime_clear_motion_catalog(EidolonPerformanceRuntime *runtime);
+bool eidolon_epr_runtime_publish_right_arm_task_target(EidolonPerformanceRuntime *runtime,
+                                                       const EidolonEprRightArmTaskTarget *target);
+
 const EidolonCanonicalControl *
 eidolon_epr_runtime_control(const EidolonPerformanceRuntime *runtime);
 const EidolonBehaviorPlan *eidolon_epr_runtime_plan(const EidolonPerformanceRuntime *runtime);
 const EidolonRealizationProgramSet *
 eidolon_epr_runtime_programs(const EidolonPerformanceRuntime *runtime);
+const EidolonEprMotionFrame *
+eidolon_epr_runtime_motion_frame(const EidolonPerformanceRuntime *runtime);
+EidolonEprMotionExecutionResult
+eidolon_epr_runtime_motion_result(const EidolonPerformanceRuntime *runtime);
 const EidolonEprTrace *eidolon_epr_runtime_trace(const EidolonPerformanceRuntime *runtime);
 
 #endif

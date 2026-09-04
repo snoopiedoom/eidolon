@@ -8,7 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define EIDOLON_EPR_PROGRAM_VERSION 3U
+#define EIDOLON_EPR_PROGRAM_VERSION 4U
+#define EIDOLON_EPR_MOTION_GENERATOR_REFERENCE_VERSION 1U
 #define EIDOLON_EPR_PROGRAM_CAPACITY EIDOLON_EPR_BEHAVIOR_CAPACITY
 #define EIDOLON_EPR_REALIZATION_PROFILE_VERSION 1U
 #define EIDOLON_EPR_PROGRAM_POSE_CAPACITY 3U
@@ -50,6 +51,39 @@ typedef enum EidolonEprCapabilityRequirement {
     EIDOLON_EPR_CAPABILITY_EXPRESSION = 1U << 1U
 } EidolonEprCapabilityRequirement;
 
+typedef enum EidolonEprMotionGeneratorId {
+    EIDOLON_EPR_MOTION_GENERATOR_NONE = 0,
+    EIDOLON_EPR_MOTION_IDLE_NEUTRAL,
+    EIDOLON_EPR_MOTION_POSTURE_ATTENTIVE,
+    EIDOLON_EPR_MOTION_POSTURE_THINKING,
+    EIDOLON_EPR_MOTION_POSTURE_RESPONDING,
+    EIDOLON_EPR_MOTION_POSTURE_INTERRUPTED_GUARDED,
+    EIDOLON_EPR_MOTION_GESTURE_CONTRAST_RIGHT,
+    EIDOLON_EPR_MOTION_SETTLE_RIGHT_ARM,
+    EIDOLON_EPR_MOTION_GENERATOR_COUNT
+} EidolonEprMotionGeneratorId;
+
+typedef enum EidolonEprMotionTakeoverPolicy {
+    EIDOLON_EPR_MOTION_TAKEOVER_NONE = 0,
+    EIDOLON_EPR_MOTION_TAKEOVER_BASE,
+    EIDOLON_EPR_MOTION_TAKEOVER_ADDITIVE,
+    EIDOLON_EPR_MOTION_TAKEOVER_COOPERATIVE,
+    EIDOLON_EPR_MOTION_TAKEOVER_OVERRIDE,
+    EIDOLON_EPR_MOTION_TAKEOVER_COUNT
+} EidolonEprMotionTakeoverPolicy;
+
+typedef struct EidolonEprMotionGeneratorReference {
+    uint32_t version;
+    EidolonEprMotionGeneratorId generator;
+    EidolonEprMotionTakeoverPolicy takeover;
+    uint32_t resource_mask;
+    uint64_t humanoid_rotation_mask;
+    float blend_weight;
+    float intensity;
+    float playback_rate;
+    bool owns_hips_translation;
+} EidolonEprMotionGeneratorReference;
+
 typedef struct EidolonRealizationProgram {
     uint32_t version;
     EidolonEprOpaqueId id;
@@ -62,6 +96,7 @@ typedef struct EidolonRealizationProgram {
     uint32_t capability_mask;
     EidolonEprTick phase_ticks[EIDOLON_EPR_BEHAVIOR_PHASE_COUNT];
     bool has_phase[EIDOLON_EPR_BEHAVIOR_PHASE_COUNT];
+    EidolonEprMotionGeneratorReference motion;
     EidolonEprPoseAnchor poses[EIDOLON_EPR_PROGRAM_POSE_CAPACITY];
     EidolonEprPoseAnchorId pose_ids[EIDOLON_EPR_PROGRAM_POSE_CAPACITY];
     size_t pose_count;
@@ -79,6 +114,9 @@ typedef struct EidolonRealizationProgramSet {
     size_t count;
 } EidolonRealizationProgramSet;
 
+const char *eidolon_epr_motion_generator_name(EidolonEprMotionGeneratorId generator);
+bool eidolon_epr_motion_generator_reference_validate(
+    const EidolonEprMotionGeneratorReference *reference);
 bool eidolon_epr_realization_profile_validate(const EidolonEprRealizationProfile *profile,
                                               const EidolonEprBodyProfile *body);
 const EidolonEprPoseAnchor *

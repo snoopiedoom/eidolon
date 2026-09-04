@@ -2,6 +2,7 @@ CC := clang
 CXX := clang++
 AR := llvm-ar
 MODE ?= debug
+REVIEW_MODE ?= release
 BLENDER ?= blender
 PYTHON ?= python
 FXC ?=
@@ -24,14 +25,19 @@ COMMON_SOURCES := \
 	src/epr/behavior_plan.c \
 	src/epr/body_resources.c \
 	src/epr/modality_realizers.c \
+	src/epr/motion_catalog.c \
+	src/epr/motion_execution.c \
 	src/epr/performance_intent.c \
 	src/epr/performance_runtime.c \
 	src/epr/performance_trace.c \
 	src/epr/realization_program.c \
+	src/epr/task_target.c \
 	src/epr/temporal.c \
 	src/frame_clock.c \
 	src/hook_output.c \
 	src/humanoid.c \
+	src/humanoid_pose.c \
+	src/humanoid_rest.c \
 	src/ik.c \
 	src/json_scan.c \
 	src/log.c \
@@ -50,6 +56,7 @@ COMMON_SOURCES := \
 	src/portrait_motion.c \
 	src/relay_core.c \
 	src/scene.c \
+	src/semantic_motion_pack.c \
 	src/providers/codex_relay.c \
 	src/providers/codex_stream.c \
 	src/providers/live_source.c \
@@ -64,7 +71,13 @@ COMMON_SOURCES := \
 	src/vrm_body.c \
 	src/vrm_calibration.c \
 	src/vrm_calibration_session.c \
-	src/vrm_projection.c
+	src/vrm_projection.c \
+	src/vrm_retarget.c \
+	src/vrm_playback.c \
+	src/vrma_review_harness.c \
+	src/vrma_review_selection.c \
+	src/vrma_clip.c \
+	src/vrma_motion_source.c
 
 IMGUI_DIR := lib/imgui
 DEAR_BINDINGS_GENERATED := lib/dear_bindings/generated
@@ -170,6 +183,7 @@ RUNTIME_MODEL := $(CURDIR)/assets/model/rio.glb
 DEFAULT_VRM_MODEL ?= $(CURDIR)/assets/2349235869624830263.vrm
 VRM_REFERENCE_URL := https://hub.vroid.com/characters/61437424751231571/models/3310288597351780654
 VRM_PATH ?=
+VRMA_PATH ?=
 MOTION_CONFIG := $(CURDIR)/config/motion.cfg
 CHARACTER_CONFIG := $(CURDIR)/config/character.cfg
 SOURCES := $(COMMON_SOURCES) $(PLATFORM_SOURCES)
@@ -183,6 +197,7 @@ CPPFLAGS += -Ilib/cgltf -DEIDOLON_ASSET_DIR=\"$(abspath assets)\" \
 	-DEIDOLON_AFFECT_WORKER_PATH=\"$(abspath $(BUILD_ROOT)/eidolon-affect-worker$(EXE))\" \
 	"-DEIDOLON_FONT_PATH=\"$(CURDIR)/assets/fonts/MesloLG Nerd Font/MesloLGSNerdFontMono-Regular.ttf\"" \
 	-DEIDOLON_MODEL_PATH=\"$(DEFAULT_VRM_MODEL)\" \
+	-DEIDOLON_EPR_IDLE_NEUTRAL_VRMA_PATH=\"$(abspath build/fixtures/vrma/standard-idle/standard_idle.vrma)\" \
 	-DEIDOLON_VRM_REFERENCE_URL=\"$(VRM_REFERENCE_URL)\" \
 	-DEIDOLON_MOTION_CONFIG_PATH=\"$(abspath $(MOTION_CONFIG))\" \
 	-DEIDOLON_SYSTEM_SETTINGS_PATH=\"$(abspath config/settings.cfg)\" \
@@ -208,8 +223,9 @@ endif
 
 TEST_CFLAGS := $(filter-out -MMD -MP,$(CFLAGS))
 
-.PHONY: all force-output clean check body-host-check epr-boundary-check epr-trace editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-deps sdl-clean sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check vrm-structure-check vrm-runtime-check vrm-calibrate vrm-performance-review model-audit model-material-audit model-export model-preview \
+.PHONY: all force-output clean check body-host-check epr-boundary-check epr-motion-catalog-check epr-motion-execution-check epr-trace humanoid-pose-check editor-config imgui-smoke bgfx-smoke bgfx-interop-smoke d3d11-dcomp-smoke win32-dcomp-backend-smoke sdl-deps sdl-clean sdl-renderer-dcomp-smoke sdl-gpu-dcomp-smoke graphics-backend-benchmark provider-live-test codex-relay-test shaders text-setup affect-setup affect affect-check affect-benchmark character-sprites character-sprites-download character-sprites-check vrm-check vrm-structure-check vrm-runtime-check vrm-animation-runtime-check vrma-idle-fixture vrm-calibrate vrm-performance-review vrma-check vrma-sampler-check vrma-motion-source-check vrm-retarget-check vrm-playback-check model-audit model-material-audit model-export model-preview \
 	model-preview-glb model-mouth model-mouth-sheet model-mouth-pick model-mouth-calibrate help log
+.PHONY: bvh-to-vrma-check vrma-review-selection-check vrma-walk-fixture
 
 all: $(TARGET)
 
@@ -574,6 +590,10 @@ MOTION_CONFIG_TEST := $(TEST_DIR)/motion_config_test$(EXE)
 POSE_TEST := $(TEST_DIR)/pose_test$(EXE)
 IK_TEST := $(TEST_DIR)/ik_test$(EXE)
 HUMANOID_TEST := $(TEST_DIR)/humanoid_test$(EXE)
+HUMANOID_POSE_TEST := $(TEST_DIR)/humanoid_pose_test$(EXE)
+EPR_MOTION_CATALOG_TEST := $(TEST_DIR)/epr_motion_catalog_test$(EXE)
+EPR_MOTION_EXECUTION_TEST := $(TEST_DIR)/epr_motion_execution_test$(EXE)
+SEMANTIC_MOTION_PACK_TEST := $(TEST_DIR)/semantic_motion_pack_test$(EXE)
 POSE_SOLVER_TEST := $(TEST_DIR)/pose_solver_test$(EXE)
 PORTRAIT_TEST := $(TEST_DIR)/portrait_test$(EXE)
 SPRITE_TEST := $(TEST_DIR)/sprite_test$(EXE)
@@ -596,7 +616,12 @@ PERFORMANCE_RUNTIME_TEST := $(TEST_DIR)/performance_runtime_test$(EXE)
 VRM_BODY_TEST := $(TEST_DIR)/vrm_body_test$(EXE)
 VRM_CALIBRATION_TEST := $(TEST_DIR)/vrm_calibration_test$(EXE)
 VRM_PROJECTION_TEST := $(TEST_DIR)/vrm_projection_test$(EXE)
+VRM_RETARGET_TEST := $(TEST_DIR)/vrm_retarget_test$(EXE)
+VRM_PLAYBACK_TEST := $(TEST_DIR)/vrm_playback_test$(EXE)
 EPR_TRACE_TOOL := $(BUILD_ROOT)/tools/$(MODE)/epr-trace$(EXE)
+VRMA_CLIP_TEST := $(TEST_DIR)/vrma_clip_test$(EXE)
+VRMA_MOTION_SOURCE_TEST := $(TEST_DIR)/vrma_motion_source_test$(EXE)
+VRMA_REVIEW_SELECTION_TEST := $(TEST_DIR)/vrma_review_selection_test$(EXE)
 
 ifeq ($(OS),Windows_NT)
 TEST_RUNTIME := $(TEST_DIR)/SDL3.dll
@@ -655,6 +680,28 @@ $(IK_TEST): tests/ik_test.c src/ik.c | $(TEST_RUNTIME)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(HUMANOID_TEST): tests/humanoid_test.c src/humanoid.c src/motion.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(HUMANOID_POSE_TEST): tests/humanoid_pose_test.c src/humanoid_pose.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(EPR_MOTION_CATALOG_TEST): tests/epr_motion_catalog_test.c src/epr/motion_catalog.c \
+		src/epr/realization_program.c src/epr/body_resources.c src/humanoid_pose.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(SEMANTIC_MOTION_PACK_TEST): tests/semantic_motion_pack_test.c src/semantic_motion_pack.c \
+		src/vrma_motion_source.c src/vrma_clip.c src/humanoid_rest.c src/humanoid_pose.c \
+		src/epr/motion_catalog.c src/epr/realization_program.c src/epr/body_resources.c \
+		src/cgltf_impl.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(EPR_MOTION_EXECUTION_TEST): tests/epr_motion_execution_test.c src/epr/motion_execution.c \
+		src/epr/motion_catalog.c src/epr/realization_program.c src/epr/body_resources.c \
+		src/humanoid_pose.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
@@ -749,30 +796,61 @@ $(CODEX_RELAY_TEST): tests/codex_relay_test.c src/conversation.c src/json_scan.c
 $(PERFORMANCE_RUNTIME_TEST): tests/performance_runtime_test.c src/epr/performance_intent.c \
 		src/epr/performance_trace.c src/epr/temporal.c src/epr/body_resources.c \
 		src/epr/behavior_plan.c src/epr/realization_program.c \
-		src/epr/modality_realizers.c src/epr/performance_runtime.c src/performance_fixture.c \
+		src/epr/modality_realizers.c src/epr/performance_runtime.c \
+		src/epr/motion_catalog.c src/epr/motion_execution.c src/humanoid_pose.c \
+		src/epr/task_target.c \
+		src/performance_fixture.c \
 		src/ik.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(VRM_BODY_TEST): tests/vrm_body_test.c src/vrm_body.c src/cgltf_impl.c | $(TEST_RUNTIME)
+$(VRM_BODY_TEST): tests/vrm_body_test.c src/vrm_body.c src/humanoid_pose.c src/cgltf_impl.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(VRM_CALIBRATION_TEST): tests/vrm_calibration_test.c src/vrm_calibration.c \
-		src/vrm_calibration_session.c src/epr/realization_program.c src/ik.c src/cgltf_impl.c | \
+		src/vrm_calibration_session.c src/epr/realization_program.c src/epr/body_resources.c \
+		src/ik.c src/cgltf_impl.c | \
 		$(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
-$(VRM_PROJECTION_TEST): tests/vrm_projection_test.c src/vrm_projection.c src/motion.c | \
-		$(TEST_RUNTIME)
+$(VRM_PROJECTION_TEST): tests/vrm_projection_test.c src/vrm_projection.c src/vrm_retarget.c \
+		src/humanoid_rest.c src/humanoid_pose.c src/motion.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRMA_CLIP_TEST): tests/vrma_clip_test.c src/vrma_clip.c src/humanoid_pose.c src/cgltf_impl.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRMA_MOTION_SOURCE_TEST): tests/vrma_motion_source_test.c src/vrma_motion_source.c \
+		src/vrma_clip.c src/humanoid_rest.c src/humanoid_pose.c src/epr/motion_catalog.c \
+		src/epr/realization_program.c src/epr/body_resources.c src/cgltf_impl.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRM_RETARGET_TEST): tests/vrm_retarget_test.c src/vrm_retarget.c src/humanoid_rest.c src/humanoid_pose.c src/motion.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRM_PLAYBACK_TEST): tests/vrm_playback_test.c src/vrm_playback.c src/vrm_retarget.c \
+		src/vrma_clip.c src/humanoid_rest.c src/humanoid_pose.c src/motion.c src/cgltf_impl.c | $(TEST_RUNTIME)
+	$(make-dir)
+	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+$(VRMA_REVIEW_SELECTION_TEST): tests/vrma_review_selection_test.c \
+		src/vrma_review_selection.c | $(TEST_RUNTIME)
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 $(EPR_TRACE_TOOL): tools/epr_trace.c src/epr/performance_intent.c \
 		src/epr/performance_trace.c src/epr/temporal.c src/epr/body_resources.c \
 		src/epr/behavior_plan.c src/epr/realization_program.c \
-		src/epr/modality_realizers.c src/epr/performance_runtime.c src/performance_fixture.c \
+		src/epr/modality_realizers.c src/epr/performance_runtime.c \
+		src/epr/motion_catalog.c src/epr/motion_execution.c src/humanoid_pose.c \
+		src/performance_fixture.c \
+		src/epr/task_target.c \
 		src/ik.c Makefile
 	$(make-dir)
 	$(CC) $(CPPFLAGS) $(TEST_CFLAGS) $(filter-out Makefile,$^) -o $@
@@ -790,6 +868,26 @@ codex-relay-test: $(CODEX_RELAY_TEST)
 
 epr-boundary-check:
 	$(PYTHON) tests/epr_boundary_test.py src/epr
+
+humanoid-pose-check: $(HUMANOID_POSE_TEST)
+	$(HUMANOID_POSE_TEST)
+
+epr-motion-catalog-check: $(EPR_MOTION_CATALOG_TEST)
+	$(EPR_MOTION_CATALOG_TEST)
+
+epr-motion-execution-check: $(EPR_MOTION_EXECUTION_TEST)
+	$(EPR_MOTION_EXECUTION_TEST)
+
+semantic-motion-pack-check: $(SEMANTIC_MOTION_PACK_TEST)
+	$(SEMANTIC_MOTION_PACK_TEST)
+
+vrma-review-selection-check: $(VRMA_REVIEW_SELECTION_TEST)
+	$(VRMA_REVIEW_SELECTION_TEST)
+
+bvh-to-vrma-check:
+	$(PYTHON) -m unittest discover -s tests -p "bvh*_test.py"
+
+check: bvh-to-vrma-check
 
 ifeq ($(OS),Windows_NT)
 ifeq ($(MODE),debug)
@@ -809,12 +907,13 @@ body-host-check:
 endif
 
 check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIALOGUE_ART_TEST) $(DELIVERY_TEST) $(HOOK_OUTPUT_TEST) $(MOTION_TEST) \
-	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(POSE_SOLVER_TEST) \
+	$(MOTION_CONFIG_TEST) $(POSE_TEST) $(IK_TEST) $(HUMANOID_TEST) $(HUMANOID_POSE_TEST) $(POSE_SOLVER_TEST) \
 	$(PORTRAIT_TEST) $(SPRITE_TEST) $(PORTRAIT_MOTION_TEST) $(AFFECT_TEST) $(AFFECT_TOKENIZER_TEST) $(BUBBLE_LAYOUT_TEST) \
 	$(EXPRESSION_DIRECTOR_TEST) $(FRAME_CLOCK_TEST) $(PRESENTATION_TEST) $(PRESENTATION_EVENT_QUEUE_TEST) \
-	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) \
+	$(SCENE_TEST) $(SESSION_REGISTRY_TEST) $(USER_SETTINGS_TEST) $(EPR_MOTION_CATALOG_TEST) $(EPR_MOTION_EXECUTION_TEST) $(SEMANTIC_MOTION_PACK_TEST) \
 	$(CONVERSATION_TEST) $(RELAY_CORE_TEST) $(PERFORMANCE_RUNTIME_TEST) $(VRM_BODY_TEST) \
-	$(VRM_CALIBRATION_TEST) $(VRM_PROJECTION_TEST)
+	$(VRM_CALIBRATION_TEST) $(VRM_PROJECTION_TEST) $(VRMA_CLIP_TEST) $(VRMA_MOTION_SOURCE_TEST) \
+	$(VRM_RETARGET_TEST) $(VRM_PLAYBACK_TEST) $(VRMA_REVIEW_SELECTION_TEST)
 	$(ANIMATION_TEST)
 	$(STATE_TEST)
 	$(DIALOGUE_TEST)
@@ -826,6 +925,10 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(POSE_TEST)
 	$(IK_TEST)
 	$(HUMANOID_TEST)
+	$(HUMANOID_POSE_TEST)
+	$(EPR_MOTION_CATALOG_TEST)
+	$(EPR_MOTION_EXECUTION_TEST)
+	$(SEMANTIC_MOTION_PACK_TEST)
 	$(POSE_SOLVER_TEST)
 	$(PORTRAIT_TEST)
 	$(SPRITE_TEST)
@@ -846,6 +949,11 @@ check: epr-boundary-check $(ANIMATION_TEST) $(STATE_TEST) $(DIALOGUE_TEST) $(DIA
 	$(VRM_BODY_TEST)
 	$(VRM_CALIBRATION_TEST)
 	$(VRM_PROJECTION_TEST)
+	$(VRMA_CLIP_TEST)
+	$(VRMA_MOTION_SOURCE_TEST)
+	$(VRM_RETARGET_TEST)
+	$(VRM_PLAYBACK_TEST)
+	$(VRMA_REVIEW_SELECTION_TEST)
 
 vrm-structure-check: $(VRM_BODY_TEST)
 ifeq ($(strip $(VRM_PATH)),)
@@ -869,19 +977,155 @@ else
 	$(TARGET) --vrm-runtime-check "$(VRM_PATH)"
 endif
 
-vrm-calibrate: $(TARGET)
+VRMA_IDLE_FIXTURE_COMMIT := ab8f0d4d2ee5bdfa2321b7ac94bfbf4f0a6547eb
+VRMA_IDLE_FIXTURE_DIR := $(CURDIR)/build/fixtures/vrma/standard-idle
+VRMA_IDLE_FIXTURE := $(VRMA_IDLE_FIXTURE_DIR)/standard_idle.vrma
+VRMA_IDLE_FIXTURE_LICENSE := $(VRMA_IDLE_FIXTURE_DIR)/LICENSE
+VRMA_IDLE_FIXTURE_URL := https://raw.githubusercontent.com/hirokazuniimoto/virtual-avatar-sdk/$(VRMA_IDLE_FIXTURE_COMMIT)/assets/animations/standard_idle.vrma
+VRMA_IDLE_FIXTURE_LICENSE_URL := https://raw.githubusercontent.com/hirokazuniimoto/virtual-avatar-sdk/$(VRMA_IDLE_FIXTURE_COMMIT)/LICENSE
+
+vrma-idle-fixture:
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_IDLE_FIXTURE_URL)" \
+		--sha256 42eec1c51cf3978f783d782272e2beac7eb5f945d0f4969de076c569b0f0220b \
+		--output "$(VRMA_IDLE_FIXTURE)"
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_IDLE_FIXTURE_LICENSE_URL)" \
+		--sha256 745c51f42ee5f36efe4275d73d8e5b066173046bacaf0407cb44659143e2d7f3 \
+		--output "$(VRMA_IDLE_FIXTURE_LICENSE)"
+
+VRMA_WALK_FIXTURE_COMMIT := 09a07f54f3bbb58797325f009282d0b2048a2871
+VRMA_WALK_FIXTURE_DIR := $(CURDIR)/build/fixtures/vrma/cmu-neutral-walk
+VRMA_WALK_FIXTURE_SOURCE := $(VRMA_WALK_FIXTURE_DIR)/104_02.bvh
+VRMA_WALK_FIXTURE_RIGHTS := $(VRMA_WALK_FIXTURE_DIR)/READMEFIRST.txt
+VRMA_WALK_FIXTURE := $(VRMA_WALK_FIXTURE_DIR)/cmu_104_02_walk.vrma
+VRMA_WALK_FIXTURE_URL := https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/$(VRMA_WALK_FIXTURE_COMMIT)/data/104/104_02.bvh
+VRMA_WALK_FIXTURE_RIGHTS_URL := https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/$(VRMA_WALK_FIXTURE_COMMIT)/READMEFIRST.txt
+VRMA_WALK_FIXTURE_SOURCE_SHA256 := c7b350504477fc77e890dad93f700af0c98228dd02e16a9f489b37a6fc32cf62
+VRMA_WALK_FIXTURE_RIGHTS_SHA256 := 8e6fe2e640b3728ef2e43e722cb5ae9cdf0010028c0517c4226ed165f9037930
+VRMA_WALK_FIXTURE_SHA256 := 81806d6eb858524d38cd7a8c4de9ed11cba3e26002bf9a82e8da89faf6636eb3
+
+vrma-walk-fixture: $(VRMA_CLIP_TEST)
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_WALK_FIXTURE_URL)" \
+		--sha256 $(VRMA_WALK_FIXTURE_SOURCE_SHA256) --output "$(VRMA_WALK_FIXTURE_SOURCE)"
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_WALK_FIXTURE_RIGHTS_URL)" \
+		--sha256 $(VRMA_WALK_FIXTURE_RIGHTS_SHA256) --output "$(VRMA_WALK_FIXTURE_RIGHTS)"
+	$(PYTHON) tools/bvh_to_vrma.py --source "$(VRMA_WALK_FIXTURE_SOURCE)" \
+		--output "$(VRMA_WALK_FIXTURE)" --source-uri "$(VRMA_WALK_FIXTURE_URL)" \
+		--source-sha256 $(VRMA_WALK_FIXTURE_SOURCE_SHA256) \
+		--output-sha256 $(VRMA_WALK_FIXTURE_SHA256) --clip-name cmu-104-02-neutral-walk \
+		--start-frame 141 --end-frame 442
+	"$(VRMA_CLIP_TEST)" "$(VRMA_WALK_FIXTURE)"
+
+VRMA_SEMANTIC_CANDIDATE_COMMIT := 09a07f54f3bbb58797325f009282d0b2048a2871
+VRMA_SEMANTIC_CANDIDATE_DIR := $(CURDIR)/build/fixtures/vrma/cmu-semantic-candidates
+VRMA_SEMANTIC_CANDIDATE_SOURCE := $(VRMA_SEMANTIC_CANDIDATE_DIR)/18_08.bvh
+VRMA_SEMANTIC_CANDIDATE_RIGHTS := $(VRMA_SEMANTIC_CANDIDATE_DIR)/READMEFIRST.txt
+VRMA_SEMANTIC_CANDIDATE := $(VRMA_SEMANTIC_CANDIDATE_DIR)/cmu_18_08_conversation.vrma
+VRMA_SEMANTIC_CANDIDATE_URL := https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/$(VRMA_SEMANTIC_CANDIDATE_COMMIT)/data/018/18_08.bvh
+VRMA_SEMANTIC_CANDIDATE_RIGHTS_URL := https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/$(VRMA_SEMANTIC_CANDIDATE_COMMIT)/READMEFIRST.txt
+VRMA_SEMANTIC_CANDIDATE_SOURCE_SHA256 := b57e6ba15cf2bde4e6e4233da53425dde6d91952fb2bff17a89c5fce18a1a0ce
+VRMA_SEMANTIC_CANDIDATE_RIGHTS_SHA256 := 8e6fe2e640b3728ef2e43e722cb5ae9cdf0010028c0517c4226ed165f9037930
+VRMA_SEMANTIC_CANDIDATE_SHA256 := c80760542b587de13f02e81176f88a5148769103bf7e891bf7ce89ee1298982c
+VRMA_SEMANTIC_SELECTION := $(VRMA_SEMANTIC_CANDIDATE_DIR)/cmu_18_08.review-selection
+VRMA_SEMANTIC_SLICE := $(VRMA_SEMANTIC_CANDIDATE_DIR)/cmu_18_08_reviewed_slice.vrma
+
+vrma-semantic-candidate: $(VRMA_CLIP_TEST)
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_SEMANTIC_CANDIDATE_URL)" \
+		--sha256 $(VRMA_SEMANTIC_CANDIDATE_SOURCE_SHA256) --output "$(VRMA_SEMANTIC_CANDIDATE_SOURCE)"
+	$(PYTHON) tools/fetch_verified_asset.py --url "$(VRMA_SEMANTIC_CANDIDATE_RIGHTS_URL)" \
+		--sha256 $(VRMA_SEMANTIC_CANDIDATE_RIGHTS_SHA256) --output "$(VRMA_SEMANTIC_CANDIDATE_RIGHTS)"
+	$(PYTHON) tools/bvh_to_vrma.py --source "$(VRMA_SEMANTIC_CANDIDATE_SOURCE)" \
+		--output "$(VRMA_SEMANTIC_CANDIDATE)" --source-uri "$(VRMA_SEMANTIC_CANDIDATE_URL)" \
+		--source-sha256 $(VRMA_SEMANTIC_CANDIDATE_SOURCE_SHA256) \
+		--output-sha256 $(VRMA_SEMANTIC_CANDIDATE_SHA256) --clip-name cmu-18-08-conversation
+	"$(VRMA_CLIP_TEST)" "$(VRMA_SEMANTIC_CANDIDATE)"
+
+.PHONY: vrma-semantic-candidate-review vrma-semantic-slice vrma-semantic-slice-review
+vrma-semantic-candidate-review: vrma-semantic-candidate
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrma-semantic-candidate-review VRM_PATH=/absolute/model.vrm"
+	@false
+else
+	$(MAKE) MODE=$(REVIEW_MODE) $(TARGET)
+	$(TARGET) --review-vrm-animation "$(VRM_PATH)" "$(VRMA_SEMANTIC_CANDIDATE)" "$(VRMA_SEMANTIC_SELECTION)"
+endif
+
+vrma-semantic-slice: $(VRMA_CLIP_TEST) vrma-semantic-candidate
+	$(PYTHON) tools/bvh_review_slice.py --source "$(VRMA_SEMANTIC_CANDIDATE_SOURCE)" \
+		--selection "$(VRMA_SEMANTIC_SELECTION)" --output "$(VRMA_SEMANTIC_SLICE)" \
+		--source-uri "$(VRMA_SEMANTIC_CANDIDATE_URL)" \
+		--source-sha256 $(VRMA_SEMANTIC_CANDIDATE_SOURCE_SHA256) --base-frame 1 \
+		--clip-name cmu-18-08-reviewed-slice
+	"$(VRMA_CLIP_TEST)" "$(VRMA_SEMANTIC_SLICE)"
+
+vrma-semantic-slice-review: vrma-semantic-slice
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrma-semantic-slice-review VRM_PATH=/absolute/model.vrm"
+	@false
+else
+	$(MAKE) MODE=$(REVIEW_MODE) $(TARGET)
+	$(TARGET) --review-vrm-animation "$(VRM_PATH)" "$(VRMA_SEMANTIC_SLICE)"
+endif
+
+vrm-animation-runtime-check: $(TARGET)
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrm-animation-runtime-check VRM_PATH=/absolute/model.vrm VRMA_PATH=/absolute/motion.vrma"
+	@false
+else ifeq ($(strip $(VRMA_PATH)),)
+	@echo "Usage: make vrm-animation-runtime-check VRM_PATH=/absolute/model.vrm VRMA_PATH=/absolute/motion.vrma"
+	@false
+else
+	$(TARGET) --vrm-animation-runtime-check "$(VRM_PATH)" "$(VRMA_PATH)"
+endif
+
+.PHONY: vrm-animation-review
+vrm-animation-review:
+ifeq ($(strip $(VRM_PATH)),)
+	@echo "Usage: make vrm-animation-review VRM_PATH=/absolute/model.vrm VRMA_PATH=/absolute/motion.vrma"
+	@false
+else ifeq ($(strip $(VRMA_PATH)),)
+	@echo "Usage: make vrm-animation-review VRM_PATH=/absolute/model.vrm VRMA_PATH=/absolute/motion.vrma"
+	@false
+else
+	$(MAKE) MODE=$(REVIEW_MODE) $(TARGET)
+	$(TARGET) --review-vrm-animation "$(VRM_PATH)" "$(VRMA_PATH)"
+endif
+
+vrma-sampler-check: $(VRMA_CLIP_TEST)
+	$(VRMA_CLIP_TEST)
+
+vrma-motion-source-check: $(VRMA_MOTION_SOURCE_TEST)
+	$(VRMA_MOTION_SOURCE_TEST)
+
+vrm-retarget-check: $(VRM_RETARGET_TEST)
+	$(VRM_RETARGET_TEST)
+
+vrm-playback-check: $(VRM_PLAYBACK_TEST) $(VRM_PROJECTION_TEST)
+	$(VRM_PLAYBACK_TEST)
+	$(VRM_PROJECTION_TEST)
+
+vrma-check: $(VRMA_CLIP_TEST)
+ifeq ($(strip $(VRMA_PATH)),)
+	@echo "Usage: make vrma-check VRMA_PATH=/absolute/path/to/motion.vrma"
+	@false
+else
+	"$(VRMA_CLIP_TEST)" "$(VRMA_PATH)"
+endif
+
+vrm-calibrate:
 ifeq ($(strip $(VRM_PATH)),)
 	@echo "Usage: make vrm-calibrate VRM_PATH=/absolute/path/to/model.vrm"
 	@false
 else
+	$(MAKE) MODE=$(REVIEW_MODE) $(TARGET)
 	$(TARGET) --calibrate-vrm "$(VRM_PATH)"
 endif
 
-vrm-performance-review: $(TARGET)
+vrm-performance-review:
 ifeq ($(strip $(VRM_PATH)),)
 	@echo "Usage: make vrm-performance-review VRM_PATH=/absolute/path/to/model.vrm"
 	@false
 else
+	$(MAKE) MODE=$(REVIEW_MODE) $(TARGET)
 	$(TARGET) --review-performance "$(VRM_PATH)"
 endif
 
@@ -978,10 +1222,27 @@ help:
 	@echo "make vrm-structure-check VRM_PATH=...  preflight the experimental reference VRM"
 	@echo "make vrm-check VRM_PATH=...            compatibility alias for vrm-structure-check"
 	@echo "make vrm-runtime-check VRM_PATH=...    exercise the complete hidden VRM/GPU path"
+	@echo "make vrma-idle-fixture                  fetch the pinned MIT full-body idle fixture"
+	@echo "make vrma-walk-fixture                  build the pinned CMU neutral-walk VRMA fixture"
+	@echo "make vrma-semantic-candidate            build the pinned full conversation capture"
+	@echo "make vrma-semantic-candidate-review VRM_PATH=...  mark and accept one captured range"
+	@echo "make vrma-semantic-slice                build the exact accepted range"
+	@echo "make vrma-semantic-slice-review VRM_PATH=...  visibly review the exact derived slice"
+	@echo "make vrm-animation-runtime-check VRM_PATH=... VRMA_PATH=...  exercise sidecar-free VRMA/GPU playback"
+	@echo "make vrm-animation-review VRM_PATH=... VRMA_PATH=...  loop VRMA visibly on the native body target"
 	@echo "make vrm-calibrate VRM_PATH=...        edit and save anatomy-bound EPR anchors"
 	@echo "make vrm-performance-review VRM_PATH=...  loop the five-second EPR acceptance scene"
 	@echo "make log             tail the Eidolon debug log"
 	@echo "make shaders         bake SDL_GPU SPIR-V and DXIL shaders"
+	@echo "make vrma-sampler-check                 verify deterministic VRMA parsing and sampling"
+	@echo "make vrma-motion-source-check           verify authored-rest canonical normalization"
+	@echo "make vrma-review-selection-check        verify deterministic native range-selection state"
+	@echo "make vrm-retarget-check                 verify automatic T-pose retargeting and rollback"
+	@echo "make vrm-playback-check                 verify playback lifecycle and atomic base composition"
+	@echo "make humanoid-pose-check                verify deterministic masked pose composition"
+	@echo "make epr-motion-catalog-check            verify bounded semantic motion-source resolution"
+	@echo "make epr-motion-execution-check          verify fixed-tick motion sampling and composition"
+	@echo "make vrma-check VRMA_PATH=...           preflight and sample a VRM Animation clip"
 	@echo "make model-audit     inspect every Rio FBX with Blender"
 	@echo "make model-material-audit  inspect imported FBX shader graphs"
 	@echo "make model-export    repair and export the runtime Rio GLB"

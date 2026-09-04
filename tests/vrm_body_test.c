@@ -4,42 +4,42 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FIXTURE_META                                                                           \
-    "\"meta\":{\"name\":\"Fixture\",\"authors\":[\"Eidolon\"],"                    \
-    "\"licenseUrl\":\"https://example.invalid/license\","                                 \
+#define FIXTURE_META                                                                               \
+    "\"meta\":{\"name\":\"Fixture\",\"authors\":[\"Eidolon\"],"                                    \
+    "\"licenseUrl\":\"https://example.invalid/license\","                                          \
     "\"commercialUsage\":\"personalNonProfit\",\"creditNotation\":\"required\"}"
 
-#define FIXTURE_HUMANOID_WITH_EYES                                                            \
-    "\"humanoid\":{\"humanBones\":{"                                                     \
-    "\"hips\":{\"node\":0},\"spine\":{\"node\":1},\"head\":{\"node\":2},"       \
-    "\"leftEye\":{\"node\":3},\"rightEye\":{\"node\":4},"                            \
-    "\"leftUpperLeg\":{\"node\":5},\"leftLowerLeg\":{\"node\":6},"                   \
-    "\"leftFoot\":{\"node\":7},\"rightUpperLeg\":{\"node\":8},"                      \
-    "\"rightLowerLeg\":{\"node\":9},\"rightFoot\":{\"node\":10},"                    \
-    "\"leftUpperArm\":{\"node\":11},\"leftLowerArm\":{\"node\":12},"                 \
-    "\"leftHand\":{\"node\":13},\"rightUpperArm\":{\"node\":14},"                    \
+#define FIXTURE_HUMANOID_WITH_EYES                                                                 \
+    "\"humanoid\":{\"humanBones\":{"                                                               \
+    "\"hips\":{\"node\":0},\"spine\":{\"node\":1},\"head\":{\"node\":2},"                          \
+    "\"leftEye\":{\"node\":3},\"rightEye\":{\"node\":4},"                                          \
+    "\"leftUpperLeg\":{\"node\":5},\"leftLowerLeg\":{\"node\":6},"                                 \
+    "\"leftFoot\":{\"node\":7},\"rightUpperLeg\":{\"node\":8},"                                    \
+    "\"rightLowerLeg\":{\"node\":9},\"rightFoot\":{\"node\":10},"                                  \
+    "\"leftUpperArm\":{\"node\":11},\"leftLowerArm\":{\"node\":12},"                               \
+    "\"leftHand\":{\"node\":13},\"rightUpperArm\":{\"node\":14},"                                  \
     "\"rightLowerArm\":{\"node\":15},\"rightHand\":{\"node\":16}}}"
 
-#define FIXTURE_HUMANOID_NO_EYES                                                              \
-    "\"humanoid\":{\"humanBones\":{"                                                     \
-    "\"hips\":{\"node\":0},\"spine\":{\"node\":1},\"head\":{\"node\":2},"       \
-    "\"leftUpperLeg\":{\"node\":5},\"leftLowerLeg\":{\"node\":6},"                   \
-    "\"leftFoot\":{\"node\":7},\"rightUpperLeg\":{\"node\":8},"                      \
-    "\"rightLowerLeg\":{\"node\":9},\"rightFoot\":{\"node\":10},"                    \
-    "\"leftUpperArm\":{\"node\":11},\"leftLowerArm\":{\"node\":12},"                 \
-    "\"leftHand\":{\"node\":13},\"rightUpperArm\":{\"node\":14},"                    \
+#define FIXTURE_HUMANOID_NO_EYES                                                                   \
+    "\"humanoid\":{\"humanBones\":{"                                                               \
+    "\"hips\":{\"node\":0},\"spine\":{\"node\":1},\"head\":{\"node\":2},"                          \
+    "\"leftUpperLeg\":{\"node\":5},\"leftLowerLeg\":{\"node\":6},"                                 \
+    "\"leftFoot\":{\"node\":7},\"rightUpperLeg\":{\"node\":8},"                                    \
+    "\"rightLowerLeg\":{\"node\":9},\"rightFoot\":{\"node\":10},"                                  \
+    "\"leftUpperArm\":{\"node\":11},\"leftLowerArm\":{\"node\":12},"                               \
+    "\"leftHand\":{\"node\":13},\"rightUpperArm\":{\"node\":14},"                                  \
     "\"rightLowerArm\":{\"node\":15},\"rightHand\":{\"node\":16}}}"
 
-#define FIXTURE_LOOK_AT                                                                        \
-    "\"lookAt\":{\"type\":\"bone\",\"offsetFromHeadBone\":[0,0.06,0],"               \
-    "\"rangeMapHorizontalInner\":{\"inputMaxValue\":90,\"outputScale\":10},"            \
-    "\"rangeMapHorizontalOuter\":{\"inputMaxValue\":80,\"outputScale\":12},"            \
-    "\"rangeMapVerticalDown\":{\"inputMaxValue\":70,\"outputScale\":8},"                \
+#define FIXTURE_LOOK_AT                                                                            \
+    "\"lookAt\":{\"type\":\"bone\",\"offsetFromHeadBone\":[0,0.06,0],"                             \
+    "\"rangeMapHorizontalInner\":{\"inputMaxValue\":90,\"outputScale\":10},"                       \
+    "\"rangeMapHorizontalOuter\":{\"inputMaxValue\":80,\"outputScale\":12},"                       \
+    "\"rangeMapVerticalDown\":{\"inputMaxValue\":70,\"outputScale\":8},"                           \
     "\"rangeMapVerticalUp\":{\"inputMaxValue\":60,\"outputScale\":7}}"
 
 static const char VALID_VRM[] =
-    "{\"specVersion\":\"1.0\"," FIXTURE_META "," FIXTURE_HUMANOID_WITH_EYES ","
-    FIXTURE_LOOK_AT ",\"expressions\":{\"preset\":{"
+    "{\"specVersion\":\"1.0\"," FIXTURE_META "," FIXTURE_HUMANOID_WITH_EYES "," FIXTURE_LOOK_AT
+    ",\"expressions\":{\"preset\":{"
     "\"neutral\":{\"morphTargetBinds\":[{\"node\":17,\"index\":0,\"weight\":1}]},"
     "\"relaxed\":{\"morphTargetBinds\":[{\"node\":17,\"index\":2,\"weight\":1}]}}}}";
 
@@ -93,8 +93,7 @@ static const char MISSING_RIGHT_HAND[] =
 static const char UNICODE_NAME[] =
     "{\"specVersion\":\"1.0\","
     "\"meta\":{\"name\":\"Fixture \\uD83D\\uDE00\",\"authors\":[\"Eidolon\"],"
-    "\"licenseUrl\":\"https://example.invalid/license\"},"
-    FIXTURE_HUMANOID_WITH_EYES "}";
+    "\"licenseUrl\":\"https://example.invalid/license\"}," FIXTURE_HUMANOID_WITH_EYES "}";
 
 static cgltf_accessor expression_accessors[3];
 static cgltf_attribute expression_attributes[3];
@@ -238,6 +237,9 @@ static void test_valid_fixture(void) {
     assert(body.mtoon_material_states[0] == EIDOLON_VRM_CAPABILITY_PARSED);
     assert(body.mtoon_material_states[1] == EIDOLON_VRM_CAPABILITY_ABSENT);
     assert(eidolon_vrm_body_node(&body, EIDOLON_VRM_BONE_RIGHT_HAND) == 16);
+    assert(body.node_by_role[EIDOLON_HUMANOID_ROLE_RIGHT_HAND] == 16);
+    assert(body.node_by_role[EIDOLON_HUMANOID_ROLE_LEFT_EYE] == 3);
+    assert(body.node_by_role[EIDOLON_HUMANOID_ROLE_LEFT_TOES] == -1);
     assert_profile(&data, &body, true);
     eidolon_vrm_body_destroy(&body);
 }

@@ -4,6 +4,7 @@
 #include "log.h"
 #include "motion.h"
 #include "pose_solver.h"
+#include "semantic_motion_pack.h"
 #include "vrm_body.h"
 #include "vrm_calibration.h"
 #include "vrm_projection.h"
@@ -13,13 +14,14 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
+#include "platform/windows_dcomp.h"
 #include <d3d11.h>
 #include <windows.h>
-#include "platform/windows_dcomp.h"
 #endif
 
 #include <cgltf.h>
@@ -34,7 +36,7 @@
 #if !defined(_WIN32)
 #define MODEL_READBACK_COUNT 3
 #endif
-#define MODEL_FRAME_INTERVAL_MS 33U
+#define MODEL_FRAME_INTERVAL_MS 16U
 #define VRM_VIEW_VERTICAL_SPAN 1.70F
 #define VRM_VIEW_RIGHT_ACTION_BIAS 0.085F
 
@@ -128,23 +130,35 @@ struct EidolonModelRenderer {
     Uint32 *hit_indices;
     SDL_FPoint *hit_projected;
     uint8_t *hit_grid;
-    uint8_t *hit_mask;
     size_t hit_vertex_count;
     size_t hit_index_count;
-    size_t hit_mask_size;
     uint64_t last_hit_mask_ms;
+    bool hit_grid_ready;
 #endif
     EidolonMotionRig motion;
     EidolonHumanoidProfile humanoid;
     EidolonSemanticPose semantic_pose;
     EidolonVrmBody vrm_body;
     EidolonVrmProjection vrm_projection;
+    EidolonVrmPlayback vrm_playback;
+    EidolonVrmRetargeter epr_normalized_projector;
+    EidolonSemanticMotionPack epr_motion_pack;
+    EidolonEprMotionFrame vrm_last_motion_frame;
+    bool vrm_last_motion_frame_valid;
     EidolonEprBodyProfile body_profile;
     EidolonVrmMeasurements vrm_measurements;
     EidolonVrmCalibration vrm_calibration;
+    EidolonCanonicalControl vrm_last_control;
+    EidolonVrmCalibration vrm_last_control_calibration;
+    uint64_t last_motion_update_ms;
     bool humanoid_ready;
     bool vrm_ready;
     bool vrm_calibration_loaded;
+    bool vrm_last_control_valid;
+    bool vrm_last_control_has_calibration;
+    bool vrm_last_control_uses_model_calibration;
+    bool motion_update_has_tick;
+    bool vrm_playback_failure_logged;
     bool semantic_pose_active;
     bool semantic_pose_failed;
     Uint16 joint_nodes[MODEL_MAX_JOINTS];
@@ -181,8 +195,8 @@ static void load_optional_vrm_calibration(EidolonModelRenderer *model, const cha
     const bool explicitly_configured = configured_path != NULL && configured_path[0] != '\0';
     const char *path = configured_path;
     if (!explicitly_configured) {
-        const int written = SDL_snprintf(default_path, sizeof(default_path), "%s.epr-calibration",
-                                         model_path);
+        const int written =
+            SDL_snprintf(default_path, sizeof(default_path), "%s.epr-calibration", model_path);
         if (written <= 0 || (size_t)written >= sizeof(default_path)) {
             eidolon_log_write("model", "VRM calibration sidecar path is too long");
             return;
@@ -209,12 +223,11 @@ static void load_optional_vrm_calibration(EidolonModelRenderer *model, const cha
     }
     EidolonVrmCalibration candidate;
     char error[EIDOLON_VRM_CALIBRATION_ERROR_CAPACITY];
-    const bool valid = eidolon_vrm_calibration_parse(
-        text, size, &model->vrm_measurements, &candidate, error, sizeof(error));
+    const bool valid = eidolon_vrm_calibration_parse(text, size, &model->vrm_measurements,
+                                                     &candidate, error, sizeof(error));
     SDL_free(text);
     if (!valid) {
-        eidolon_log_write("model", "ignored invalid VRM calibration sidecar '%s': %s", path,
-                          error);
+        eidolon_log_write("model", "ignored invalid VRM calibration sidecar '%s': %s", path, error);
         return;
     }
     model->vrm_calibration = candidate;
@@ -350,19 +363,19 @@ static void set_rotation_pivot(EidolonModelRenderer *model, const EidolonCpuGeom
         const float height = maximum[1] - minimum[1];
         const float depth = maximum[2] - minimum[2];
         if (width > 0.0001F && height > 0.0001F) {
-            const float rotation_safe_depth = SDL_sqrtf(width * width + height * height +
-                                                        depth * depth);
+            const float rotation_safe_depth =
+                SDL_sqrtf(width * width + height * height + depth * depth);
             model->view_scale = VRM_VIEW_VERTICAL_SPAN / height;
             model->view_center[0] += width * VRM_VIEW_RIGHT_ACTION_BIAS;
             model->view_depth_scale = 0.80F / SDL_max(rotation_safe_depth, 0.10F);
             model->fit_vrm_view = true;
-            eidolon_log_write(
-                "model",
-                "VRM performance view width=%.3f height=%.3f depth=%.3f "
-                "pivot=%.3f,%.3f,%.3f center=%.3f,%.3f,%.3f scale=%.3f",
-                width, height, depth, model->rotation_pivot[0], model->rotation_pivot[1],
-                model->rotation_pivot[2], model->view_center[0], model->view_center[1],
-                model->view_center[2], model->view_scale);
+            eidolon_log_write("model",
+                              "VRM performance view width=%.3f height=%.3f depth=%.3f "
+                              "pivot=%.3f,%.3f,%.3f center=%.3f,%.3f,%.3f scale=%.3f",
+                              width, height, depth, model->rotation_pivot[0],
+                              model->rotation_pivot[1], model->rotation_pivot[2],
+                              model->view_center[0], model->view_center[1], model->view_center[2],
+                              model->view_scale);
         }
     }
 }
@@ -678,10 +691,10 @@ static bool fill_geometry(const cgltf_data *data, size_t identity_joint,
                 EidolonModelVertex *vertex = &geometry->vertices[vertex_cursor + vertex_index];
                 if (vrm_body != NULL &&
                     vrm_body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE &&
-                    !accumulate_expression_delta(
-                        primitive, (size_t)node_index, vertex_index, world,
-                        vrm_body->relaxed_expression.morph_binds,
-                        vrm_body->relaxed_expression.morph_bind_count, vertex->focused_delta)) {
+                    !accumulate_expression_delta(primitive, (size_t)node_index, vertex_index, world,
+                                                 vrm_body->relaxed_expression.morph_binds,
+                                                 vrm_body->relaxed_expression.morph_bind_count,
+                                                 vertex->focused_delta)) {
                     return false;
                 }
 
@@ -1254,8 +1267,7 @@ static float hit_edge(SDL_FPoint a, SDL_FPoint b, float x, float y) {
     return (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
 }
 
-static bool rasterize_native_hit_mask(EidolonModelRenderer *model,
-                                      const EidolonModelScene *scene) {
+static bool rasterize_native_hit_mask(EidolonModelRenderer *model, const EidolonModelScene *scene) {
     if (!model->native_target || model->hit_vertices == NULL || model->hit_indices == NULL ||
         model->hit_projected == NULL || model->hit_grid == NULL) {
         return SDL_SetError("native model hit-test geometry is unavailable");
@@ -1264,14 +1276,11 @@ static bool rasterize_native_hit_mask(EidolonModelRenderer *model,
     for (size_t vertex_index = 0U; vertex_index < model->hit_vertex_count; ++vertex_index) {
         const EidolonModelVertex *vertex = &model->hit_vertices[vertex_index];
         const float morphed[3] = {
-            vertex->position[0] +
-                vertex->neutral_delta[0] * scene->expression_weights[0] +
+            vertex->position[0] + vertex->neutral_delta[0] * scene->expression_weights[0] +
                 vertex->focused_delta[0] * scene->expression_weights[1],
-            vertex->position[1] +
-                vertex->neutral_delta[1] * scene->expression_weights[0] +
+            vertex->position[1] + vertex->neutral_delta[1] * scene->expression_weights[0] +
                 vertex->focused_delta[1] * scene->expression_weights[1],
-            vertex->position[2] +
-                vertex->neutral_delta[2] * scene->expression_weights[0] +
+            vertex->position[2] + vertex->neutral_delta[2] * scene->expression_weights[0] +
                 vertex->focused_delta[2] * scene->expression_weights[1],
         };
         float skinned[3] = {0.0F, 0.0F, 0.0F};
@@ -1308,10 +1317,10 @@ static bool rasterize_native_hit_mask(EidolonModelRenderer *model,
         const SDL_FPoint c = model->hit_projected[ic];
         const int minimum_x = SDL_max(0, (int)SDL_floorf(SDL_min(a.x, SDL_min(b.x, c.x))));
         const int minimum_y = SDL_max(0, (int)SDL_floorf(SDL_min(a.y, SDL_min(b.y, c.y))));
-        const int maximum_x = SDL_min(MODEL_HIT_MASK_GRID - 1,
-                                      (int)SDL_ceilf(SDL_max(a.x, SDL_max(b.x, c.x))));
-        const int maximum_y = SDL_min(MODEL_HIT_MASK_GRID - 1,
-                                      (int)SDL_ceilf(SDL_max(a.y, SDL_max(b.y, c.y))));
+        const int maximum_x =
+            SDL_min(MODEL_HIT_MASK_GRID - 1, (int)SDL_ceilf(SDL_max(a.x, SDL_max(b.x, c.x))));
+        const int maximum_y =
+            SDL_min(MODEL_HIT_MASK_GRID - 1, (int)SDL_ceilf(SDL_max(a.y, SDL_max(b.y, c.y))));
         for (int y = minimum_y; y <= maximum_y; ++y) {
             for (int x = minimum_x; x <= maximum_x; ++x) {
                 const float sample_x = (float)x + 0.5F;
@@ -1327,23 +1336,6 @@ static bool rasterize_native_hit_mask(EidolonModelRenderer *model,
         }
     }
 
-    const size_t mask_size = (size_t)model->target_width * (size_t)model->target_height;
-    if (mask_size != model->hit_mask_size) {
-        uint8_t *replacement = SDL_realloc(model->hit_mask, mask_size);
-        if (replacement == NULL) {
-            return false;
-        }
-        model->hit_mask = replacement;
-        model->hit_mask_size = mask_size;
-    }
-    for (int y = 0; y < model->target_height; ++y) {
-        const size_t grid_y = (size_t)y * MODEL_HIT_MASK_GRID / (size_t)model->target_height;
-        for (int x = 0; x < model->target_width; ++x) {
-            const size_t grid_x = (size_t)x * MODEL_HIT_MASK_GRID / (size_t)model->target_width;
-            model->hit_mask[(size_t)y * (size_t)model->target_width + (size_t)x] =
-                model->hit_grid[grid_y * MODEL_HIT_MASK_GRID + grid_x];
-        }
-    }
     return true;
 }
 
@@ -1575,15 +1567,13 @@ static bool submit_model_frame_to(EidolonModelRenderer *model, uint64_t now_ms,
     if (!rendered) {
         return false;
     }
-    if (model->native_target &&
-        (model->hit_mask == NULL ||
-         model->hit_mask_size !=
-             (size_t)model->target_width * (size_t)model->target_height ||
-         now_ms - model->last_hit_mask_ms >= MODEL_HIT_MASK_INTERVAL_MS)) {
+    if (model->native_target && (!model->hit_grid_ready ||
+                                 now_ms - model->last_hit_mask_ms >= MODEL_HIT_MASK_INTERVAL_MS)) {
         if (!rasterize_native_hit_mask(model, &scene)) {
             return false;
         }
         model->last_hit_mask_ms = now_ms;
+        model->hit_grid_ready = true;
     }
     model->last_submit_ms = now_ms;
     model->presented_frame_sequence += 1U;
@@ -2339,8 +2329,7 @@ uint64_t eidolon_model_presented_frame_sequence(const EidolonModelRenderer *mode
 
 EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
                                            EidolonPresentation *presentation,
-                                           const char *model_path,
-                                           const char *shader_directory,
+                                           const char *model_path, const char *shader_directory,
                                            EidolonNeutralPose neutral_pose,
                                            EidolonIdleTuning idle_tuning) {
     EidolonModelRenderer *model = SDL_calloc(1, sizeof(*model));
@@ -2348,6 +2337,7 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
         SDL_SetError("out of memory while creating model renderer");
         return NULL;
     }
+    eidolon_semantic_motion_pack_init(&model->epr_motion_pack);
 #if defined(_WIN32)
     model->target_width = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
     model->target_height = EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT;
@@ -2422,11 +2412,16 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
         return NULL;
     }
     if (is_vrm) {
-        model->vrm_ready =
-            eidolon_vrm_projection_init(&model->vrm_projection, &model->vrm_body,
-                                        &model->body_profile, &model->motion);
+        char projector_error[EIDOLON_VRM_RETARGET_ERROR_CAPACITY] = {0};
+        model->vrm_ready = eidolon_vrm_projection_init(&model->vrm_projection, &model->vrm_body,
+                                                       &model->body_profile, &model->motion) &&
+                           eidolon_vrm_retargeter_init_destination(
+                               &model->epr_normalized_projector, &model->vrm_body, &model->motion,
+                               projector_error, sizeof(projector_error));
         if (!model->vrm_ready) {
-            SDL_SetError("could not initialize experimental reference VRM control projection");
+            SDL_SetError("could not initialize experimental reference VRM projection: %s",
+                         projector_error[0] != '\0' ? projector_error
+                                                    : "canonical projection failed");
             cpu_geometry_destroy(&geometry);
             cgltf_free(data);
             eidolon_model_destroy(model);
@@ -2459,8 +2454,8 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
             geometry.indices = NULL;
             model->hit_projected =
                 SDL_calloc(model->hit_vertex_count, sizeof(*model->hit_projected));
-            model->hit_grid = SDL_calloc(MODEL_HIT_MASK_GRID * MODEL_HIT_MASK_GRID,
-                                         sizeof(*model->hit_grid));
+            model->hit_grid =
+                SDL_calloc(MODEL_HIT_MASK_GRID * MODEL_HIT_MASK_GRID, sizeof(*model->hit_grid));
             if (model->hit_projected == NULL || model->hit_grid == NULL) {
                 cpu_geometry_destroy(&geometry);
                 cgltf_free(data);
@@ -2490,8 +2485,8 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
 
 #if defined(_WIN32)
     const char *gpu_driver = renderer != NULL ? SDL_GetRendererName(renderer) : "direct3d11";
-    const char *frame_transfer = model->native_target ? "direct-composition-target"
-                                                     : "shared-texture";
+    const char *frame_transfer =
+        model->native_target ? "direct-composition-target" : "shared-texture";
 #else
     const char *gpu_driver = SDL_GetGPUDeviceDriver(model->device);
     const char *frame_transfer = "asynchronous-readback";
@@ -2500,27 +2495,24 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
                       "loaded %s draws=%zu textures=%zu joints=%zu target=%dx%d gpu=%s humanoid=%s "
                       "frame-transfer=%s",
                       model->vrm_ready ? "experimental reference VRM" : "GLB", model->draw_count,
-                      model->texture_count,
-                      model->joint_count, model->target_width, model->target_height,
-                      gpu_driver != NULL ? gpu_driver : "unknown",
+                      model->texture_count, model->joint_count, model->target_width,
+                      model->target_height, gpu_driver != NULL ? gpu_driver : "unknown",
                       (model->humanoid_ready || model->vrm_ready) ? "ready" : "unavailable",
                       frame_transfer);
     if (model->vrm_ready) {
-        eidolon_log_write("model",
-                          "reference VRM body '%s' by %s eyes=%s look-at=%s relaxed=%s "
-                          "neutral=%s mtoon=%s spring=%s constraints=%s license=%s",
-                          model->vrm_body.name, model->vrm_body.author,
-                          model->vrm_body.eye_bones_present ? "present" : "absent",
-                          eidolon_vrm_capability_state_name(model->vrm_body.look_at.state),
-                          eidolon_vrm_capability_state_name(
-                              model->vrm_body.relaxed_expression.state),
-                          eidolon_vrm_capability_state_name(
-                              model->vrm_body.neutral_expression.state),
-                          eidolon_vrm_capability_state_name(model->vrm_body.mtoon_state),
-                          eidolon_vrm_capability_state_name(model->vrm_body.spring_bones_state),
-                          eidolon_vrm_capability_state_name(
-                              model->vrm_body.node_constraints_state),
-                          model->vrm_body.license_url);
+        eidolon_log_write(
+            "model",
+            "reference VRM body '%s' by %s eyes=%s look-at=%s relaxed=%s "
+            "neutral=%s mtoon=%s spring=%s constraints=%s license=%s",
+            model->vrm_body.name, model->vrm_body.author,
+            model->vrm_body.eye_bones_present ? "present" : "absent",
+            eidolon_vrm_capability_state_name(model->vrm_body.look_at.state),
+            eidolon_vrm_capability_state_name(model->vrm_body.relaxed_expression.state),
+            eidolon_vrm_capability_state_name(model->vrm_body.neutral_expression.state),
+            eidolon_vrm_capability_state_name(model->vrm_body.mtoon_state),
+            eidolon_vrm_capability_state_name(model->vrm_body.spring_bones_state),
+            eidolon_vrm_capability_state_name(model->vrm_body.node_constraints_state),
+            model->vrm_body.license_url);
         eidolon_log_write(
             "model",
             "reference VRM anatomy fingerprint=%016llx height=%.4f shoulders=%.4f torso=%.4f "
@@ -2553,6 +2545,28 @@ EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
             model->humanoid.shoulder_width, model->humanoid.arm_length[EIDOLON_HUMANOID_LEFT],
             model->humanoid.arm_length[EIDOLON_HUMANOID_RIGHT], model->humanoid.torso_length);
     }
+    if (model->vrm_ready) {
+        const char *vrma_path = SDL_getenv("EIDOLON_VRMA_PATH");
+        if (vrma_path != NULL && vrma_path[0] != '\0' &&
+            !eidolon_model_vrm_animation_load(model, vrma_path, NULL, true, SDL_GetTicks())) {
+            eidolon_log_write("motion", "ignored unavailable EIDOLON_VRMA_PATH '%s': %s", vrma_path,
+                              SDL_GetError());
+            SDL_ClearError();
+        }
+#if defined(EIDOLON_EPR_IDLE_NEUTRAL_VRMA_PATH)
+        FILE *idle_fixture = fopen(EIDOLON_EPR_IDLE_NEUTRAL_VRMA_PATH, "rb");
+        if (idle_fixture != NULL) {
+            fclose(idle_fixture);
+            if (!eidolon_model_epr_motion_load(model, EIDOLON_EPR_MOTION_IDLE_NEUTRAL,
+                                               EIDOLON_EPR_IDLE_NEUTRAL_VRMA_PATH,
+                                               UINT64_C(0x42eec1c51cf3978f), true)) {
+                eidolon_log_write("motion", "ignored unavailable verified idle binding: %s",
+                                  SDL_GetError());
+                SDL_ClearError();
+            }
+        }
+#endif
+    }
     return model;
 }
 
@@ -2581,6 +2595,21 @@ bool eidolon_model_vrm_calibration(const EidolonModelRenderer *model,
     *calibration = model->vrm_calibration;
     return true;
 }
+static void remember_vrm_control(EidolonModelRenderer *model,
+                                 const EidolonCanonicalControl *control,
+                                 const EidolonVrmCalibration *calibration,
+                                 bool uses_model_calibration) {
+    model->vrm_last_control = *control;
+    model->vrm_last_control_valid = true;
+    model->vrm_last_control_uses_model_calibration = uses_model_calibration;
+    model->vrm_last_control_has_calibration = calibration != NULL;
+    if (calibration != NULL) {
+        model->vrm_last_control_calibration = *calibration;
+    } else {
+        memset(&model->vrm_last_control_calibration, 0,
+               sizeof(model->vrm_last_control_calibration));
+    }
+}
 
 bool eidolon_model_set_vrm_calibration(EidolonModelRenderer *model,
                                        const EidolonVrmCalibration *calibration) {
@@ -2594,6 +2623,10 @@ bool eidolon_model_set_vrm_calibration(EidolonModelRenderer *model,
     }
     model->vrm_calibration = *calibration;
     model->vrm_calibration_loaded = calibration->anchor_mask != 0U;
+    if (model->vrm_last_control_valid && model->vrm_last_control_uses_model_calibration) {
+        remember_vrm_control(model, &model->vrm_last_control,
+                             model->vrm_calibration_loaded ? calibration : NULL, true);
+    }
     return true;
 }
 
@@ -2608,6 +2641,9 @@ bool eidolon_model_apply_control(EidolonModelRenderer *model,
         return SDL_SetError("VRM control revision %llu was stale or invalid",
                             (unsigned long long)control->revision);
     }
+    remember_vrm_control(model, control,
+                         model->vrm_calibration_loaded ? &model->vrm_calibration : NULL, true);
+    model->vrm_last_motion_frame_valid = false;
     model->transform_revision += 1U;
     return true;
 }
@@ -2625,10 +2661,233 @@ bool eidolon_model_apply_control_calibrated(EidolonModelRenderer *model,
         return SDL_SetError("calibrated VRM control projection is invalid: %s", error);
     }
     if (!eidolon_vrm_projection_apply_calibrated(&model->vrm_projection, &model->motion, control,
-                                                  calibration)) {
+                                                 calibration)) {
         return SDL_SetError("calibrated VRM control revision %llu was stale or invalid",
                             (unsigned long long)control->revision);
     }
+    remember_vrm_control(model, control, calibration, false);
+    model->vrm_last_motion_frame_valid = false;
+    model->transform_revision += 1U;
+    return true;
+}
+
+bool eidolon_model_apply_performance(EidolonModelRenderer *model,
+                                     const EidolonCanonicalControl *control,
+                                     const EidolonEprMotionFrame *motion_frame) {
+    const EidolonVrmCalibration *calibration;
+    if (motion_frame == NULL) {
+        return eidolon_model_apply_control(model, control);
+    }
+    if (model == NULL || control == NULL || !model->vrm_ready || model->failed ||
+        !model->epr_normalized_projector.ready) {
+        return SDL_SetError("normalized EPR performance projection is unavailable");
+    }
+    calibration = model->vrm_calibration_loaded ? &model->vrm_calibration : NULL;
+    if (!eidolon_vrm_projection_apply_motion_frame_calibrated(
+            &model->vrm_projection, &model->epr_normalized_projector, &model->motion, motion_frame,
+            control, calibration)) {
+        return SDL_SetError("normalized EPR frame at tick %lld was stale or invalid",
+                            (long long)motion_frame->tick);
+    }
+    remember_vrm_control(model, control, calibration, true);
+    model->vrm_last_motion_frame = *motion_frame;
+    model->vrm_last_motion_frame_valid = true;
+    model->transform_revision += 1U;
+    return true;
+}
+
+bool eidolon_model_epr_motion_load(EidolonModelRenderer *model,
+                                   EidolonEprMotionGeneratorId generator, const char *path,
+                                   uint64_t source_identity, bool loop) {
+    const EidolonSemanticMotionAsset asset = {
+        .binding =
+            {
+                .version = EIDOLON_SEMANTIC_MOTION_BINDING_VERSION,
+                .generator = generator,
+                .source_identity = source_identity,
+                .loop = loop,
+            },
+        .path = path,
+    };
+    return eidolon_model_epr_motion_pack_load(model, &asset, 1U);
+}
+
+bool eidolon_model_epr_motion_pack_load(EidolonModelRenderer *model,
+                                        const EidolonSemanticMotionAsset *assets, size_t count) {
+    char error[EIDOLON_SEMANTIC_MOTION_PACK_ERROR_CAPACITY];
+    if (model == NULL || !model->vrm_ready || model->failed) {
+        return SDL_SetError("semantic motion pack is unavailable");
+    }
+    if (!eidolon_semantic_motion_pack_load(&model->epr_motion_pack, assets, count, error,
+                                           sizeof(error))) {
+        return SDL_SetError("could not load semantic motion pack: %s", error);
+    }
+    for (size_t index = 0U; index < count; ++index) {
+        eidolon_log_write("motion", "bound semantic generator=%s source=%016llx path=%s",
+                          eidolon_epr_motion_generator_name(assets[index].binding.generator),
+                          (unsigned long long)assets[index].binding.source_identity,
+                          assets[index].path);
+    }
+    return true;
+}
+
+bool eidolon_model_epr_motion_catalog(const EidolonModelRenderer *model,
+                                      EidolonEprMotionCatalog *catalog) {
+    if (model == NULL || catalog == NULL || !model->vrm_ready || model->failed ||
+        !eidolon_semantic_motion_pack_validate(&model->epr_motion_pack)) {
+        return false;
+    }
+    *catalog = model->epr_motion_pack.catalog;
+    return true;
+}
+
+static bool model_vrm_playback_available(const EidolonModelRenderer *model) {
+    return model != NULL && model->vrm_ready && !model->failed &&
+           model->vrm_playback.version == EIDOLON_VRM_PLAYBACK_VERSION && model->vrm_playback.ready;
+}
+
+bool eidolon_model_vrm_animation_load(EidolonModelRenderer *model, const char *path,
+                                      const char *identity, bool loop, uint64_t now_ms) {
+    char error[EIDOLON_VRM_PLAYBACK_ERROR_CAPACITY];
+    if (model == NULL || path == NULL || path[0] == '\0' || !model->vrm_ready || model->failed) {
+        return SDL_SetError("VRMA playback requires an active VRM model and file path");
+    }
+    if (!eidolon_vrm_playback_load(&model->vrm_playback, path, identity, &model->vrm_body,
+                                   &model->motion, EIDOLON_VRM_ROOT_MOTION_IN_PLACE, error,
+                                   sizeof(error))) {
+        return SDL_SetError("could not load VRMA playback: %s", error);
+    }
+    if (!eidolon_vrm_playback_set_loop(&model->vrm_playback, loop) ||
+        !eidolon_vrm_playback_play(&model->vrm_playback, now_ms)) {
+        eidolon_vrm_playback_fail(&model->vrm_playback,
+                                  "could not initialize VRMA playback controls");
+        return SDL_SetError("could not initialize VRMA playback controls");
+    }
+    model->motion_update_has_tick = false;
+    model->vrm_playback_failure_logged = false;
+    EidolonVrmPlaybackReport report;
+    if (!eidolon_vrm_playback_report(&model->vrm_playback, &report)) {
+        eidolon_vrm_playback_fail(&model->vrm_playback, "could not report loaded VRMA coverage");
+        return SDL_SetError("could not report loaded VRMA coverage");
+    }
+    eidolon_log_write("motion",
+                      "loaded VRMA base clip id=%s duration=%.3fs loop=%s root=in-place "
+                      "rotation_tracks=%zu varying=%zu chains=0x%02x varying_chains=0x%02x",
+                      report.clip_identity, report.duration_seconds, report.loop ? "yes" : "no",
+                      report.coverage.rotation_track_count,
+                      report.coverage.varying_rotation_track_count,
+                      (unsigned int)report.coverage.tracked_chain_mask,
+                      (unsigned int)report.coverage.varying_chain_mask);
+    return true;
+}
+
+bool eidolon_model_vrm_animation_play(EidolonModelRenderer *model, uint64_t now_ms) {
+    if (!model_vrm_playback_available(model) ||
+        !eidolon_vrm_playback_play(&model->vrm_playback, now_ms)) {
+        return SDL_SetError("VRMA playback is unavailable");
+    }
+    model->motion_update_has_tick = false;
+    return true;
+}
+
+bool eidolon_model_vrm_animation_pause(EidolonModelRenderer *model, uint64_t now_ms) {
+    if (!model_vrm_playback_available(model) ||
+        !eidolon_vrm_playback_pause(&model->vrm_playback, now_ms)) {
+        return SDL_SetError("VRMA playback could not pause at this clock");
+    }
+    model->motion_update_has_tick = false;
+    return true;
+}
+
+bool eidolon_model_vrm_animation_seek(EidolonModelRenderer *model, float seconds, uint64_t now_ms) {
+    if (!model_vrm_playback_available(model) ||
+        !eidolon_vrm_playback_seek(&model->vrm_playback, seconds, now_ms)) {
+        return SDL_SetError("VRMA playback seek is invalid or unavailable");
+    }
+    model->motion_update_has_tick = false;
+    return true;
+}
+
+bool eidolon_model_vrm_animation_set_loop(EidolonModelRenderer *model, bool loop) {
+    if (!model_vrm_playback_available(model) ||
+        !eidolon_vrm_playback_set_loop(&model->vrm_playback, loop)) {
+        return SDL_SetError("VRMA loop control is unavailable");
+    }
+    model->motion_update_has_tick = false;
+    return true;
+}
+
+bool eidolon_model_vrm_animation_set_rate(EidolonModelRenderer *model, float playback_rate,
+                                          uint64_t now_ms) {
+    if (!model_vrm_playback_available(model) ||
+        !eidolon_vrm_playback_set_rate(&model->vrm_playback, playback_rate, now_ms)) {
+        return SDL_SetError("VRMA playback rate is invalid or unavailable");
+    }
+    model->motion_update_has_tick = false;
+    return true;
+}
+
+bool eidolon_model_vrm_animation_report(const EidolonModelRenderer *model,
+                                        EidolonVrmPlaybackReport *report) {
+    return model != NULL && report != NULL &&
+           eidolon_vrm_playback_report(&model->vrm_playback, report);
+}
+
+bool eidolon_model_update_motion(EidolonModelRenderer *model, uint64_t now_ms) {
+    const EidolonMotionRig *candidate = NULL;
+    char error[EIDOLON_VRM_PLAYBACK_ERROR_CAPACITY];
+    if (model == NULL || model->failed) {
+        return SDL_SetError("model motion runtime is unavailable");
+    }
+    if (model->vrm_playback.version != EIDOLON_VRM_PLAYBACK_VERSION || !model->vrm_playback.ready) {
+        return true;
+    }
+    if (model->motion_update_has_tick && model->last_motion_update_ms == now_ms) {
+        return !model->vrm_playback.failed;
+    }
+    model->last_motion_update_ms = now_ms;
+    model->motion_update_has_tick = true;
+    if (!eidolon_vrm_playback_update(&model->vrm_playback, now_ms, &model->motion, &candidate,
+                                     error, sizeof(error))) {
+        if (!model->vrm_playback_failure_logged) {
+            eidolon_log_write("motion", "VRMA base playback stopped id=%s reason=%s",
+                              model->vrm_playback.clip_identity, error);
+            model->vrm_playback_failure_logged = true;
+        }
+        return SDL_SetError("%s", error);
+    }
+    if (candidate == NULL) {
+        return true;
+    }
+    bool published;
+    if (model->vrm_last_control_valid) {
+        const EidolonVrmCalibration *calibration =
+            model->vrm_last_control_has_calibration ? &model->vrm_last_control_calibration : NULL;
+        if (model->vrm_last_motion_frame_valid) {
+            published = eidolon_vrm_projection_publish_base_motion_frame_calibrated(
+                &model->vrm_projection, &model->epr_normalized_projector, &model->motion, candidate,
+                &model->vrm_last_motion_frame, &model->vrm_last_control, calibration);
+        } else {
+            published = eidolon_vrm_projection_publish_base_calibrated(
+                &model->vrm_projection, &model->motion, candidate, &model->vrm_last_control,
+                calibration);
+        }
+    } else {
+        published =
+            eidolon_vrm_projection_publish_base(&model->vrm_projection, &model->motion, candidate);
+    }
+    if (!published || !eidolon_vrm_playback_note_published(&model->vrm_playback,
+                                                           model->vrm_playback.sample_revision)) {
+        eidolon_vrm_playback_fail(&model->vrm_playback,
+                                  "atomic VRMA base/EPR publication was rejected");
+        if (!model->vrm_playback_failure_logged) {
+            eidolon_log_write("motion", "VRMA base playback stopped id=%s reason=%s",
+                              model->vrm_playback.clip_identity, model->vrm_playback.failure);
+            model->vrm_playback_failure_logged = true;
+        }
+        return SDL_SetError("%s", model->vrm_playback.failure);
+    }
+    model->vrm_playback_failure_logged = false;
     model->transform_revision += 1U;
     return true;
 }
@@ -2645,6 +2904,8 @@ bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
     report->texture_count = model->texture_count;
     report->joint_count = model->joint_count;
     report->projection_revision = model->vrm_projection.control_revision;
+    report->base_revision = model->vrm_projection.base_revision;
+    report->playback_revision = model->vrm_playback.published_revision;
     report->frame_sequence = model->presented_frame_sequence;
     report->geometry_ready = model->draw_count > 0U && model->draws != NULL &&
                              model->vertex_buffer != NULL && model->index_buffer != NULL;
@@ -2655,14 +2916,17 @@ bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
     report->textures_ready = textures_ready;
 #if defined(_WIN32)
     report->skinning_ready = model->joint_count > 0U && model->bones_buffer != NULL;
-    report->shaders_ready = model->vertex_shader != NULL && model->pixel_shader != NULL &&
-                            model->input_layout != NULL;
+    report->shaders_ready =
+        model->vertex_shader != NULL && model->pixel_shader != NULL && model->input_layout != NULL;
 #else
     report->skinning_ready = model->joint_count > 0U;
     report->shaders_ready = model->pipeline != NULL && model->alpha_pipeline != NULL;
 #endif
     report->projection_ready = model->vrm_ready && model->vrm_projection.ready &&
                                model->vrm_projection.control_revision > 0U;
+    report->animation_ready = model->vrm_playback.version == EIDOLON_VRM_PLAYBACK_VERSION &&
+                              model->vrm_playback.ready && !model->vrm_playback.failed &&
+                              model->vrm_playback.published_revision > 0U;
     report->hidden_frame_ready = model->presented_frame_sequence > 0U;
     ready = report->geometry_ready && report->textures_ready && report->skinning_ready &&
             report->shaders_ready && report->projection_ready && report->hidden_frame_ready;
@@ -2695,6 +2959,9 @@ const char *eidolon_model_body_name(const EidolonModelRenderer *model) {
 void eidolon_model_update(EidolonModelRenderer *model, uint64_t now_ms) {
     if (model == NULL || model->failed) {
         return;
+    }
+    if (!eidolon_model_update_motion(model, now_ms)) {
+        SDL_ClearError();
     }
 #if !defined(_WIN32)
     for (size_t readback_index = 0; readback_index < MODEL_READBACK_COUNT; ++readback_index) {
@@ -2739,9 +3006,9 @@ bool eidolon_model_ready(const EidolonModelRenderer *model) {
         return false;
     }
 #if defined(_WIN32)
-    return model->native_target ? model->device != NULL && model->context != NULL &&
-                                      model->depth_dsv != NULL
-                                : model->renderer_texture != NULL && model->color_rtv != NULL;
+    return model->native_target
+               ? model->device != NULL && model->context != NULL && model->depth_dsv != NULL
+               : model->renderer_texture != NULL && model->color_rtv != NULL;
 #else
     return model->renderer_texture != NULL;
 #endif
@@ -2759,17 +3026,17 @@ uint64_t eidolon_model_content_revision(const EidolonModelRenderer *model) {
     return model->presented_transform_revision;
 }
 
-bool eidolon_model_render_presentation_target(
-    EidolonModelRenderer *model, EidolonPresentation *presentation,
-    const EidolonPresentationTargetUpdate *update) {
+bool eidolon_model_render_presentation_target(EidolonModelRenderer *model,
+                                              EidolonPresentation *presentation,
+                                              const EidolonPresentationTargetUpdate *update) {
 #if defined(_WIN32)
     if (model == NULL || presentation == NULL || update == NULL || model->failed ||
         !model->native_target || update->width != (uint32_t)model->target_width ||
         update->height != (uint32_t)model->target_height) {
         return SDL_SetError("invalid native model presentation target");
     }
-    ID3D11Texture2D *texture = eidolon_win32_dcomp_target_texture(
-        presentation, update->target, update->generation);
+    ID3D11Texture2D *texture =
+        eidolon_win32_dcomp_target_texture(presentation, update->target, update->generation);
     if (texture == NULL) {
         return false;
     }
@@ -2790,18 +3057,20 @@ bool eidolon_model_render_presentation_target(
 #endif
 }
 
-bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model,
-                                     const uint8_t **pixels, size_t *pitch) {
-    if (model == NULL || pixels == NULL || pitch == NULL || model->failed) {
+bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model, const uint8_t **pixels,
+                                     uint32_t *width, uint32_t *height, size_t *pitch) {
+    if (model == NULL || pixels == NULL || width == NULL || height == NULL || pitch == NULL ||
+        model->failed) {
         return false;
     }
 #if defined(_WIN32)
-    if (!model->native_target || model->hit_mask == NULL ||
-        model->hit_mask_size != (size_t)model->target_width * (size_t)model->target_height) {
+    if (!model->native_target || model->hit_grid == NULL || !model->hit_grid_ready) {
         return false;
     }
-    *pixels = model->hit_mask;
-    *pitch = (size_t)model->target_width;
+    *pixels = model->hit_grid;
+    *width = MODEL_HIT_MASK_GRID;
+    *height = MODEL_HIT_MASK_GRID;
+    *pitch = MODEL_HIT_MASK_GRID;
     return true;
 #else
     return false;
@@ -2926,12 +3195,14 @@ void eidolon_model_destroy(EidolonModelRenderer *model) {
     SDL_free(model->textures);
     SDL_free(model->draws);
 #if defined(_WIN32)
-    SDL_free(model->hit_mask);
     SDL_free(model->hit_grid);
     SDL_free(model->hit_projected);
     SDL_free(model->hit_indices);
     SDL_free(model->hit_vertices);
 #endif
+    eidolon_semantic_motion_pack_destroy(&model->epr_motion_pack);
+    eidolon_vrm_retargeter_destroy(&model->epr_normalized_projector);
+    eidolon_vrm_playback_destroy(&model->vrm_playback);
     eidolon_vrm_projection_destroy(&model->vrm_projection);
     eidolon_vrm_body_destroy(&model->vrm_body);
     eidolon_motion_destroy(&model->motion);

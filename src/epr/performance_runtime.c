@@ -35,6 +35,79 @@ static void emit(EidolonPerformanceRuntime *runtime, EidolonEprTraceRecord recor
     (void)eidolon_epr_trace_emit(&runtime->trace, record);
 }
 
+static void trace_right_arm_task_target(EidolonPerformanceRuntime *runtime,
+                                        const EidolonEprRightArmTaskTarget *target,
+                                        EidolonEprTick tick, EidolonEprTraceEvent event,
+                                        EidolonEprTraceReason reason) {
+    EidolonEprTraceRecord record = trace_record(runtime, tick, event, reason);
+    record.resource = (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    if (target != NULL) {
+        record.behavior = target->behavior;
+        record.cause = target->target;
+        record.value = target->revision;
+    }
+    emit(runtime, record);
+}
+
+static void release_right_arm_task_target(EidolonPerformanceRuntime *runtime, EidolonEprTick tick,
+                                          EidolonEprTraceReason reason) {
+    if (runtime == NULL || !runtime->has_right_arm_task_target) {
+        return;
+    }
+    trace_right_arm_task_target(runtime, &runtime->right_arm_task_target, tick,
+                                EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED, reason);
+    memset(&runtime->right_arm_task_target, 0, sizeof(runtime->right_arm_task_target));
+    runtime->has_right_arm_task_target = false;
+}
+
+static bool plan_claims_right_arm_task_target(const EidolonPerformanceRuntime *runtime,
+                                              const EidolonEprRightArmTaskTarget *target) {
+    const EidolonEprBehaviorUnit *behavior;
+    if (runtime == NULL || target == NULL || !runtime->has_plan ||
+        target->plan_generation != runtime->plan.generation) {
+        return false;
+    }
+    behavior = eidolon_epr_plan_find(&runtime->plan, target->behavior);
+    if (behavior == NULL || behavior->retired ||
+        eidolon_epr_program_find(&runtime->programs, target->behavior) == NULL) {
+        return false;
+    }
+    for (size_t index = 0U; index < runtime->plan.claim_count; ++index) {
+        const EidolonEprResourceClaim *claim = &runtime->plan.claims[index];
+        if (claim->behavior == target->behavior &&
+            claim->plan_generation == target->plan_generation &&
+            claim->resource == EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN &&
+            (claim->mode == EIDOLON_EPR_CLAIM_BASE || claim->mode == EIDOLON_EPR_CLAIM_OVERRIDE) &&
+            target->sample_tick >= claim->start_tick &&
+            target->valid_until_tick <= claim->end_tick) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool right_arm_task_target_revisions_valid(const EidolonPerformanceRuntime *runtime,
+                                                  const EidolonEprRightArmTaskTarget *target) {
+    if (runtime->right_arm_task_target_revision == 0U) {
+        return target->predecessor_revision == 0U;
+    }
+    return target->producer == runtime->right_arm_task_target_producer &&
+           target->revision > runtime->right_arm_task_target_revision &&
+           target->predecessor_revision == runtime->right_arm_task_target_revision;
+}
+
+static EidolonEprTick task_target_rejection_tick(const EidolonPerformanceRuntime *runtime,
+                                                 const EidolonEprRightArmTaskTarget *target,
+                                                 bool target_valid) {
+    if (target_valid) {
+        return target->sample_tick;
+    }
+    if (runtime->has_tick) {
+        return runtime->last_tick;
+    }
+    return runtime->has_intent ? runtime->intent.observed_tick : 0;
+}
+
 EidolonEprBodyProfile eidolon_epr_default_body_profile(void) {
     const EidolonEprBodyProfile profile = {
         .version = EIDOLON_EPR_BODY_PROFILE_VERSION,
@@ -84,6 +157,8 @@ bool eidolon_epr_runtime_init(EidolonPerformanceRuntime *runtime, uint64_t seed,
     runtime->control.gaze_target[2] = 1.0F;
     runtime->control.revision = 1U;
     runtime->control.hash = eidolon_epr_control_hash(&runtime->control);
+    runtime->motion_result.status = EIDOLON_EPR_MOTION_EXECUTION_NOT_REQUIRED;
+    runtime->motion_result.catalog_status = EIDOLON_EPR_MOTION_CATALOG_NOT_REQUIRED;
     runtime->last_tick = 0;
     eidolon_epr_trace_init(&runtime->trace);
     return true;
@@ -98,6 +173,41 @@ static bool revisions_valid(const EidolonPerformanceRuntime *runtime,
            intent->predecessor_revision == runtime->intent.revision &&
            intent->provenance.source == runtime->intent.provenance.source &&
            intent->provenance.session == runtime->intent.provenance.session;
+}
+
+bool eidolon_epr_runtime_publish_right_arm_task_target(EidolonPerformanceRuntime *runtime,
+                                                       const EidolonEprRightArmTaskTarget *target) {
+    bool target_valid;
+    EidolonEprTraceReason reason;
+    EidolonEprTick tick;
+    if (runtime == NULL) {
+        return false;
+    }
+    target_valid = eidolon_epr_right_arm_task_target_validate(target);
+    tick = task_target_rejection_tick(runtime, target, target_valid);
+    if (!target_valid) {
+        reason = EIDOLON_EPR_REASON_INVALID_CANDIDATE;
+    } else if (!right_arm_task_target_revisions_valid(runtime, target) ||
+               (runtime->has_tick && target->sample_tick < runtime->last_tick)) {
+        reason = EIDOLON_EPR_REASON_STALE_REVISION;
+    } else if (!plan_claims_right_arm_task_target(runtime, target)) {
+        reason = EIDOLON_EPR_REASON_REVISED;
+    } else {
+        if (runtime->has_right_arm_task_target) {
+            release_right_arm_task_target(runtime, target->sample_tick, EIDOLON_EPR_REASON_REVISED);
+        }
+        runtime->right_arm_task_target = *target;
+        runtime->right_arm_task_target_revision = target->revision;
+        runtime->right_arm_task_target_producer = target->producer;
+        runtime->has_right_arm_task_target = true;
+        trace_right_arm_task_target(runtime, target, target->sample_tick,
+                                    EIDOLON_EPR_TRACE_TASK_TARGET_ACCEPTED,
+                                    EIDOLON_EPR_REASON_NONE);
+        return true;
+    }
+    trace_right_arm_task_target(runtime, target, tick, EIDOLON_EPR_TRACE_TASK_TARGET_REJECTED,
+                                reason);
+    return false;
 }
 
 static void trace_new_realizers(EidolonPerformanceRuntime *runtime,
@@ -130,10 +240,9 @@ static void trace_new_realizers(EidolonPerformanceRuntime *runtime,
             const EidolonRealizationProgram *program =
                 eidolon_epr_program_find(&runtime->programs, behavior->id);
             if (program != NULL && program->missing_anchor_mask != 0U) {
-                EidolonEprTraceRecord fallback =
-                    trace_record(runtime, runtime->intent.observed_tick,
-                                 EIDOLON_EPR_TRACE_REALIZER_FALLBACK,
-                                 EIDOLON_EPR_REASON_CALIBRATION_MISSING);
+                EidolonEprTraceRecord fallback = trace_record(
+                    runtime, runtime->intent.observed_tick, EIDOLON_EPR_TRACE_REALIZER_FALLBACK,
+                    EIDOLON_EPR_REASON_CALIBRATION_MISSING);
                 fallback.behavior = behavior->id;
                 fallback.cause = behavior->cause;
                 fallback.resource = program->missing_resource_mask != 0U
@@ -158,6 +267,18 @@ posture_program(const EidolonRealizationProgramSet *programs) {
     }
     return NULL;
 }
+static const EidolonRealizationProgram *
+settle_program(const EidolonRealizationProgramSet *programs) {
+    if (programs == NULL) {
+        return NULL;
+    }
+    for (size_t index = 0U; index < programs->count; ++index) {
+        if (programs->programs[index].modality == EIDOLON_EPR_MODALITY_SETTLE) {
+            return &programs->programs[index];
+        }
+    }
+    return NULL;
+}
 
 bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
                                 const EidolonPerformanceIntent *intent) {
@@ -166,6 +287,8 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
     EidolonBehaviorPlan previous;
     const EidolonRealizationProgram *previous_posture;
     const EidolonRealizationProgram *next_posture;
+    const EidolonRealizationProgram *previous_settle;
+    const EidolonRealizationProgram *next_settle;
     const bool had_previous = runtime != NULL && runtime->has_plan;
     if (runtime == NULL || intent == NULL) {
         return false;
@@ -201,8 +324,7 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
         emit(runtime, record);
         return false;
     }
-    if (!eidolon_epr_program_set_compile(&candidate, &runtime->realization,
-                                         &candidate_programs)) {
+    if (!eidolon_epr_program_set_compile(&candidate, &runtime->realization, &candidate_programs)) {
         EidolonEprTraceRecord record =
             trace_record(runtime, intent->observed_tick, EIDOLON_EPR_TRACE_REALIZER_FAILED,
                          EIDOLON_EPR_REASON_INVALID_CANDIDATE);
@@ -213,16 +335,22 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
     }
     previous_posture = had_previous ? posture_program(&runtime->programs) : NULL;
     next_posture = posture_program(&candidate_programs);
+    previous_settle = had_previous ? settle_program(&runtime->programs) : NULL;
+    next_settle = settle_program(&candidate_programs);
     if (next_posture != NULL &&
         (previous_posture == NULL || previous_posture->behavior != next_posture->behavior)) {
         runtime->posture_start =
             runtime->has_posture_base ? runtime->posture_base : runtime->control;
     }
-    if (intent->mode == EIDOLON_EPR_MODE_INTERRUPTED) {
+    if (next_settle != NULL &&
+        (previous_settle == NULL || previous_settle->behavior != next_settle->behavior)) {
         runtime->settle_start = runtime->control;
     }
     runtime->intent = *intent;
     runtime->has_intent = true;
+    runtime->has_motion_frame = false;
+    runtime->motion_result.status = EIDOLON_EPR_MOTION_EXECUTION_NOT_REQUIRED;
+    runtime->motion_result.catalog_status = EIDOLON_EPR_MOTION_CATALOG_NOT_REQUIRED;
     runtime->plan = candidate;
     runtime->programs = candidate_programs;
     runtime->has_plan = true;
@@ -242,8 +370,36 @@ bool eidolon_epr_runtime_accept(EidolonPerformanceRuntime *runtime,
         published.value = runtime->plan.predecessor_generation;
         emit(runtime, published);
     }
+    if (runtime->has_right_arm_task_target) {
+        release_right_arm_task_target(runtime, intent->observed_tick, EIDOLON_EPR_REASON_REVISED);
+    }
     trace_new_realizers(runtime, had_previous ? &previous : NULL);
     return true;
+}
+
+bool eidolon_epr_runtime_set_motion_catalog(EidolonPerformanceRuntime *runtime,
+                                            const EidolonEprMotionCatalog *catalog) {
+    if (runtime == NULL || catalog == NULL || !eidolon_epr_motion_catalog_validate(catalog)) {
+        return false;
+    }
+    runtime->motion_catalog = *catalog;
+    runtime->has_motion_catalog = true;
+    runtime->has_motion_frame = false;
+    runtime->motion_result.status = EIDOLON_EPR_MOTION_EXECUTION_NOT_REQUIRED;
+    runtime->motion_result.catalog_status = EIDOLON_EPR_MOTION_CATALOG_NOT_REQUIRED;
+    return true;
+}
+
+void eidolon_epr_runtime_clear_motion_catalog(EidolonPerformanceRuntime *runtime) {
+    if (runtime == NULL) {
+        return;
+    }
+    memset(&runtime->motion_catalog, 0, sizeof(runtime->motion_catalog));
+    memset(&runtime->motion_frame, 0, sizeof(runtime->motion_frame));
+    runtime->has_motion_catalog = false;
+    runtime->has_motion_frame = false;
+    runtime->motion_result.status = EIDOLON_EPR_MOTION_EXECUTION_NOT_REQUIRED;
+    runtime->motion_result.catalog_status = EIDOLON_EPR_MOTION_CATALOG_NOT_REQUIRED;
 }
 
 static EidolonEprBehaviorRuntimeState *runtime_state(EidolonPerformanceRuntime *runtime,
@@ -374,8 +530,7 @@ static void advance_behavior_states(EidolonPerformanceRuntime *runtime, EidolonE
 
 static bool compact_runtime_history(EidolonPerformanceRuntime *runtime) {
     size_t write = 0U;
-    if (!eidolon_epr_plan_compact(&runtime->plan,
-                                  runtime->has_intent ? &runtime->intent : NULL)) {
+    if (!eidolon_epr_plan_compact(&runtime->plan, runtime->has_intent ? &runtime->intent : NULL)) {
         return false;
     }
     for (size_t index = 0U; index < runtime->programs.count; ++index) {
@@ -529,19 +684,104 @@ static bool anchor_weights_valid(const EidolonCanonicalControl *candidate) {
     return true;
 }
 
+static uint32_t procedural_resource_mask(void) {
+    return (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) | (UINT32_C(1) << EIDOLON_EPR_RESOURCE_EYES) |
+           (UINT32_C(1) << EIDOLON_EPR_RESOURCE_FACE_EXPRESSION) |
+           (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+}
+
+static void include_procedural_grants(const EidolonEprResourceResolution *resolution,
+                                      const EidolonRealizationProgram *program,
+                                      EidolonCanonicalControl *candidate) {
+    if (resolution == NULL || program == NULL || candidate == NULL ||
+        program->motion.generator != EIDOLON_EPR_MOTION_GENERATOR_NONE) {
+        return;
+    }
+    for (size_t resource = 0U; resource < EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
+        const uint32_t bit = UINT32_C(1) << (uint32_t)resource;
+        if ((program->resource_mask & bit) != 0U &&
+            eidolon_epr_resource_is_granted(resolution, program->behavior,
+                                            (EidolonEprBodyResource)resource)) {
+            candidate->procedural_resource_mask |= bit;
+        }
+    }
+}
+
+static uint64_t apply_right_arm_task_target(EidolonPerformanceRuntime *runtime,
+                                            const EidolonEprResourceResolution *resolution,
+                                            EidolonEprTick tick,
+                                            EidolonCanonicalControl *candidate) {
+    const EidolonEprRightArmTaskTarget *target;
+    const float arm_length =
+        runtime->body.right_upper_arm_length + runtime->body.right_lower_arm_length;
+    if (!runtime->has_right_arm_task_target) {
+        return 0U;
+    }
+    target = &runtime->right_arm_task_target;
+    if (tick > target->valid_until_tick) {
+        release_right_arm_task_target(runtime, tick, EIDOLON_EPR_REASON_COMPLETED);
+        return 0U;
+    }
+    if (target->plan_generation != runtime->plan.generation) {
+        release_right_arm_task_target(runtime, tick, EIDOLON_EPR_REASON_REVISED);
+        return 0U;
+    }
+    if (tick < target->sample_tick ||
+        !eidolon_epr_resource_is_granted(resolution, target->behavior,
+                                         EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN)) {
+        return 0U;
+    }
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        candidate->right_hand_target[axis] =
+            runtime->body.shoulder[axis] +
+            arm_length * (target->hand_target[0] * runtime->body.right[axis] +
+                          target->hand_target[1] * runtime->body.up[axis] +
+                          target->hand_target[2] * runtime->body.forward[axis]);
+        candidate->right_elbow_pole[axis] =
+            runtime->body.shoulder[axis] +
+            arm_length * (target->elbow_pole[0] * runtime->body.right[axis] +
+                          target->elbow_pole[1] * runtime->body.up[axis] +
+                          target->elbow_pole[2] * runtime->body.forward[axis]);
+        candidate->right_wrist_euler[axis] = target->wrist_euler[axis];
+    }
+    candidate->right_arm_ik_weight = target->weight;
+    candidate->right_arm_continuity_weight = 0.0F;
+    candidate->right_arm_continuity_id = 0U;
+    candidate->procedural_resource_mask |= UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    return target->revision;
+}
+
 static bool canonical_valid(const EidolonPerformanceRuntime *runtime,
                             const EidolonCanonicalControl *candidate) {
+    const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
     const float angles[] = {
-        candidate->torso_pitch, candidate->torso_yaw, candidate->torso_roll, candidate->head_pitch,
-        candidate->head_yaw,    candidate->head_roll, candidate->eye_yaw,    candidate->eye_pitch,
+        candidate->torso_pitch,   candidate->torso_yaw, candidate->torso_roll,
+        candidate->head_pitch,    candidate->head_yaw,  candidate->head_roll,
+        candidate->eye_yaw,       candidate->eye_pitch, candidate->head_gaze_pitch,
+        candidate->head_gaze_yaw,
+    };
+    const float procedural_weights[] = {
+        candidate->right_arm_ik_weight,
+        candidate->right_arm_continuity_weight,
     };
     return finite_vector(angles, sizeof(angles) / sizeof(angles[0])) &&
+           finite_vector(procedural_weights,
+                         sizeof(procedural_weights) / sizeof(procedural_weights[0])) &&
+           candidate->right_arm_ik_weight >= 0.0F && candidate->right_arm_ik_weight <= 1.0F &&
+           candidate->right_arm_continuity_weight >= 0.0F &&
+           candidate->right_arm_continuity_weight <= 1.0F &&
+           (candidate->procedural_resource_mask & ~procedural_resource_mask()) == 0U &&
+           ((candidate->procedural_resource_mask & right_arm) != 0U ||
+            (candidate->right_arm_ik_weight == 0.0F &&
+             candidate->right_arm_continuity_weight == 0.0F &&
+             candidate->right_arm_continuity_id == 0U)) &&
+           ((candidate->right_arm_continuity_weight > 0.0F) ==
+            (candidate->right_arm_continuity_id != 0U)) &&
            finite_vector(candidate->gaze_target, 3U) &&
            finite_vector(candidate->right_hand_target, 3U) &&
            finite_vector(candidate->right_elbow_position, 3U) &&
            finite_vector(candidate->right_hand_position, 3U) &&
-           finite_vector(candidate->right_wrist_euler, 3U) &&
-           anchor_weights_valid(candidate) &&
+           finite_vector(candidate->right_wrist_euler, 3U) && anchor_weights_valid(candidate) &&
            fabsf(candidate->torso_pitch) <= 0.7F && fabsf(candidate->torso_yaw) <= 0.7F &&
            fabsf(candidate->torso_roll) <= 0.7F &&
            fabsf(candidate->head_pitch) <= runtime->body.shoulder_limit_radians &&
@@ -572,20 +812,12 @@ uint64_t eidolon_epr_control_hash(EidolonCanonicalControl *control) {
         control->right_wrist_euler,
         control->right_arm_velocity,
         &control->pose_anchor_resource_weights[0][0],
-        &control->focused_expression_weight,
+        &control->right_arm_ik_weight,
     };
     const size_t counts[] = {
-        6U,
+        6U, 3U, 6U, 3U, 3U,
+        3U, 3U, 3U, 3U, EIDOLON_EPR_POSE_ANCHOR_COUNT * EIDOLON_EPR_RESOURCE_COUNT,
         3U,
-        4U,
-        3U,
-        3U,
-        3U,
-        3U,
-        3U,
-        3U,
-        EIDOLON_EPR_POSE_ANCHOR_COUNT * EIDOLON_EPR_RESOURCE_COUNT,
-        1U,
     };
     hash = hash_u64(hash, control->version);
     hash = hash_u64(hash, control->revision);
@@ -596,6 +828,8 @@ uint64_t eidolon_epr_control_hash(EidolonCanonicalControl *control) {
             hash = hash_u64(hash, (uint64_t)quantize(vectors[vector][index]));
         }
     }
+    hash = hash_u64(hash, control->procedural_resource_mask);
+    hash = hash_u64(hash, control->right_arm_continuity_id);
     hash = hash_u64(hash, control->valid ? 1U : 0U);
     hash = hash_u64(hash, control->eyes_degraded ? 1U : 0U);
     hash = hash_u64(hash, control->expression_degraded ? 1U : 0U);
@@ -617,6 +851,7 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     EidolonEprOpaqueId right_arm_owner;
     EidolonEprOpaqueId expression_owner;
     uint64_t decision_sequence;
+    uint64_t applied_task_target_revision;
     bool publish_checkpoint;
     if (runtime == NULL || !runtime->has_plan || (runtime->has_tick && tick < runtime->last_tick) ||
         !eidolon_epr_resource_resolve(runtime->plan.claims, runtime->plan.claim_count, tick,
@@ -635,6 +870,13 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
         eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
     expression_owner =
         eidolon_epr_resource_override_owner(&resolution, EIDOLON_EPR_RESOURCE_FACE_EXPRESSION);
+    EidolonHumanoidPose motion_base;
+    EidolonEprMotionFrame motion_candidate;
+    EidolonEprMotionExecutionResult motion_result = {
+        .status = EIDOLON_EPR_MOTION_EXECUTION_NOT_REQUIRED,
+        .catalog_status = EIDOLON_EPR_MOTION_CATALOG_NOT_REQUIRED,
+    };
+    bool has_motion_candidate = false;
     posture = program_for_owner(runtime, posture_owner);
     gaze = program_for_owner(runtime, gaze_owner);
     right_arm = program_for_owner(runtime, right_arm_owner);
@@ -648,8 +890,7 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     candidate.tick = tick;
     candidate.valid = true;
     eidolon_epr_realize_posture(&runtime->body, &runtime->realization, posture,
-                                posture != NULL ? &runtime->posture_start : NULL, tick,
-                                &candidate);
+                                posture != NULL ? &runtime->posture_start : NULL, tick, &candidate);
     posture_base = candidate;
     if (eidolon_epr_resource_is_granted(&resolution,
                                         eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_IDLE, 1U),
@@ -668,6 +909,8 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     }
     eidolon_epr_realize_right_arm(&runtime->body, right_arm, tick, &runtime->settle_start,
                                   &candidate);
+    applied_task_target_revision =
+        apply_right_arm_task_target(runtime, &resolution, tick, &candidate);
     if (!eidolon_epr_realize_expression(&runtime->body, expression, &candidate)) {
         if (!runtime->expression_degradation_traced) {
             EidolonEprTraceRecord degraded =
@@ -679,6 +922,9 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
             runtime->expression_degradation_traced = true;
         }
     }
+    include_procedural_grants(&resolution, gaze, &candidate);
+    include_procedural_grants(&resolution, right_arm, &candidate);
+    include_procedural_grants(&resolution, expression, &candidate);
     if (runtime->has_tick && tick > runtime->control.tick) {
         const float seconds = (float)(tick - runtime->control.tick) / 1000.0F;
         for (size_t index = 0; index < 3U; ++index) {
@@ -700,6 +946,23 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
         runtime->has_tick = true;
         return false;
     }
+    if (runtime->has_motion_catalog) {
+        eidolon_humanoid_pose_init(&motion_base);
+        motion_result =
+            eidolon_epr_motion_programs_compose(&runtime->motion_catalog, &runtime->programs,
+                                                &resolution, tick, &motion_base, &motion_candidate);
+        has_motion_candidate = motion_result.status == EIDOLON_EPR_MOTION_EXECUTION_OK &&
+                               motion_candidate.execution_count > 0U &&
+                               (motion_candidate.pose.rotation_mask != 0U ||
+                                motion_candidate.pose.has_hips_translation);
+    }
+    if (applied_task_target_revision != 0U &&
+        applied_task_target_revision != runtime->right_arm_task_target_applied_revision) {
+        runtime->right_arm_task_target_applied_revision = applied_task_target_revision;
+        trace_right_arm_task_target(runtime, &runtime->right_arm_task_target, tick,
+                                    EIDOLON_EPR_TRACE_TASK_TARGET_APPLIED,
+                                    EIDOLON_EPR_REASON_SELECTED);
+    }
     runtime->inject_next_solve_failure = false;
     (void)eidolon_epr_control_hash(&candidate);
     publish_checkpoint = candidate.plan_generation != runtime->control.plan_generation ||
@@ -707,6 +970,13 @@ bool eidolon_epr_runtime_step(EidolonPerformanceRuntime *runtime, EidolonEprTick
     runtime->control = candidate;
     runtime->posture_base = posture_base;
     runtime->has_posture_base = true;
+    runtime->motion_result = motion_result;
+    runtime->has_motion_frame = has_motion_candidate;
+    if (has_motion_candidate) {
+        runtime->motion_frame = motion_candidate;
+    } else {
+        memset(&runtime->motion_frame, 0, sizeof(runtime->motion_frame));
+    }
     runtime->last_tick = tick;
     runtime->has_tick = true;
     if (publish_checkpoint) {
@@ -771,4 +1041,17 @@ eidolon_epr_runtime_programs(const EidolonPerformanceRuntime *runtime) {
 
 const EidolonEprTrace *eidolon_epr_runtime_trace(const EidolonPerformanceRuntime *runtime) {
     return runtime != NULL ? &runtime->trace : NULL;
+}
+const EidolonEprMotionFrame *
+eidolon_epr_runtime_motion_frame(const EidolonPerformanceRuntime *runtime) {
+    return runtime != NULL && runtime->has_motion_frame ? &runtime->motion_frame : NULL;
+}
+
+EidolonEprMotionExecutionResult
+eidolon_epr_runtime_motion_result(const EidolonPerformanceRuntime *runtime) {
+    const EidolonEprMotionExecutionResult unavailable = {
+        .status = EIDOLON_EPR_MOTION_EXECUTION_INVALID_ARGUMENT,
+        .catalog_status = EIDOLON_EPR_MOTION_CATALOG_INVALID_ARGUMENT,
+    };
+    return runtime != NULL ? runtime->motion_result : unavailable;
 }

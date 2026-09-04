@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #define EIDOLON_EPR_BODY_PROFILE_VERSION 1U
-#define EIDOLON_EPR_CONTROL_VERSION 2U
+#define EIDOLON_EPR_CONTROL_VERSION 4U
 
 typedef enum EidolonEprPoseAnchorId {
     EIDOLON_EPR_POSE_NEUTRAL = 0,
@@ -56,15 +56,20 @@ typedef struct EidolonCanonicalControl {
     float eye_pitch;
     float eye_weight;
     float head_gaze_weight;
+    float head_gaze_pitch;
+    float head_gaze_yaw;
     float right_hand_target[3];
     float right_elbow_pole[3];
     float right_elbow_position[3];
     float right_hand_position[3];
     float right_wrist_euler[3];
     float right_arm_velocity[3];
+    float right_arm_ik_weight;
+    float right_arm_continuity_weight;
     float focused_expression_weight;
-    float pose_anchor_resource_weights[EIDOLON_EPR_POSE_ANCHOR_COUNT]
-                                      [EIDOLON_EPR_RESOURCE_COUNT];
+    uint32_t procedural_resource_mask;
+    uint64_t right_arm_continuity_id;
+    float pose_anchor_resource_weights[EIDOLON_EPR_POSE_ANCHOR_COUNT][EIDOLON_EPR_RESOURCE_COUNT];
     uint64_t hash;
     bool valid;
     bool eyes_degraded;

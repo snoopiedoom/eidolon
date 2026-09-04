@@ -42,6 +42,31 @@ static const BoneName BONE_NAMES[] = {
     {EIDOLON_VRM_BONE_RIGHT_HAND, "rightHand", true},
 };
 
+static const EidolonHumanoidRole LEGACY_ROLE_BY_BONE[EIDOLON_VRM_BONE_COUNT] = {
+    [EIDOLON_VRM_BONE_HIPS] = EIDOLON_HUMANOID_ROLE_HIPS,
+    [EIDOLON_VRM_BONE_SPINE] = EIDOLON_HUMANOID_ROLE_SPINE,
+    [EIDOLON_VRM_BONE_CHEST] = EIDOLON_HUMANOID_ROLE_CHEST,
+    [EIDOLON_VRM_BONE_UPPER_CHEST] = EIDOLON_HUMANOID_ROLE_UPPER_CHEST,
+    [EIDOLON_VRM_BONE_NECK] = EIDOLON_HUMANOID_ROLE_NECK,
+    [EIDOLON_VRM_BONE_HEAD] = EIDOLON_HUMANOID_ROLE_HEAD,
+    [EIDOLON_VRM_BONE_LEFT_EYE] = EIDOLON_HUMANOID_ROLE_LEFT_EYE,
+    [EIDOLON_VRM_BONE_RIGHT_EYE] = EIDOLON_HUMANOID_ROLE_RIGHT_EYE,
+    [EIDOLON_VRM_BONE_LEFT_UPPER_LEG] = EIDOLON_HUMANOID_ROLE_LEFT_UPPER_LEG,
+    [EIDOLON_VRM_BONE_LEFT_LOWER_LEG] = EIDOLON_HUMANOID_ROLE_LEFT_LOWER_LEG,
+    [EIDOLON_VRM_BONE_LEFT_FOOT] = EIDOLON_HUMANOID_ROLE_LEFT_FOOT,
+    [EIDOLON_VRM_BONE_RIGHT_UPPER_LEG] = EIDOLON_HUMANOID_ROLE_RIGHT_UPPER_LEG,
+    [EIDOLON_VRM_BONE_RIGHT_LOWER_LEG] = EIDOLON_HUMANOID_ROLE_RIGHT_LOWER_LEG,
+    [EIDOLON_VRM_BONE_RIGHT_FOOT] = EIDOLON_HUMANOID_ROLE_RIGHT_FOOT,
+    [EIDOLON_VRM_BONE_LEFT_SHOULDER] = EIDOLON_HUMANOID_ROLE_LEFT_SHOULDER,
+    [EIDOLON_VRM_BONE_LEFT_UPPER_ARM] = EIDOLON_HUMANOID_ROLE_LEFT_UPPER_ARM,
+    [EIDOLON_VRM_BONE_LEFT_LOWER_ARM] = EIDOLON_HUMANOID_ROLE_LEFT_LOWER_ARM,
+    [EIDOLON_VRM_BONE_LEFT_HAND] = EIDOLON_HUMANOID_ROLE_LEFT_HAND,
+    [EIDOLON_VRM_BONE_RIGHT_SHOULDER] = EIDOLON_HUMANOID_ROLE_RIGHT_SHOULDER,
+    [EIDOLON_VRM_BONE_RIGHT_UPPER_ARM] = EIDOLON_HUMANOID_ROLE_RIGHT_UPPER_ARM,
+    [EIDOLON_VRM_BONE_RIGHT_LOWER_ARM] = EIDOLON_HUMANOID_ROLE_RIGHT_LOWER_ARM,
+    [EIDOLON_VRM_BONE_RIGHT_HAND] = EIDOLON_HUMANOID_ROLE_RIGHT_HAND,
+};
+
 static void set_error(char *error, size_t capacity, const char *format, ...) {
     va_list arguments;
     if (error == NULL || capacity == 0U) {
@@ -444,8 +469,7 @@ static bool first_array_string(JsonSpan array, char *output, size_t capacity) {
 }
 
 static const cgltf_extension *find_scoped_extension(const cgltf_extension *extensions,
-                                                    cgltf_size extension_count,
-                                                    const char *name) {
+                                                    cgltf_size extension_count, const char *name) {
     for (cgltf_size index = 0; index < extension_count; ++index) {
         const cgltf_extension *extension = &extensions[index];
         if (extension->name != NULL && strcmp(extension->name, name) == 0) {
@@ -461,16 +485,16 @@ static const cgltf_extension *find_extension(const cgltf_data *data, const char 
 
 const char *eidolon_vrm_capability_state_name(EidolonVrmCapabilityState state) {
     switch (state) {
-        case EIDOLON_VRM_CAPABILITY_ABSENT:
-            return "absent";
-        case EIDOLON_VRM_CAPABILITY_DECLARED:
-            return "declared";
-        case EIDOLON_VRM_CAPABILITY_PARSED:
-            return "parsed-not-executable";
-        case EIDOLON_VRM_CAPABILITY_EXECUTABLE:
-            return "executable";
-        default:
-            return "invalid";
+    case EIDOLON_VRM_CAPABILITY_ABSENT:
+        return "absent";
+    case EIDOLON_VRM_CAPABILITY_DECLARED:
+        return "declared";
+    case EIDOLON_VRM_CAPABILITY_PARSED:
+        return "parsed-not-executable";
+    case EIDOLON_VRM_CAPABILITY_EXECUTABLE:
+        return "executable";
+    default:
+        return "invalid";
     }
 }
 
@@ -565,34 +589,37 @@ static bool parse_bones(JsonSpan root, const cgltf_data *data, EidolonVrmBody *b
         set_error(error, error_capacity, "VRMC_vrm humanoid.humanBones is missing");
         return false;
     }
-    for (size_t index = 0; index < sizeof(BONE_NAMES) / sizeof(BONE_NAMES[0]); ++index) {
-        const BoneName *mapping = &BONE_NAMES[index];
+    for (size_t index = 0U; index < EIDOLON_HUMANOID_ROLE_COUNT; ++index) {
+        const EidolonHumanoidRole role = (EidolonHumanoidRole)index;
+        const char *name = eidolon_humanoid_role_name(role);
         JsonSpan bone;
         JsonSpan node_span;
         int64_t node;
-        if (!object_member(bones, mapping->name, &bone)) {
-            if (mapping->required) {
-                set_error(error, error_capacity, "required VRM bone '%s' is missing",
-                          mapping->name);
+        if (!object_member(bones, name, &bone)) {
+            if (eidolon_humanoid_role_required(role)) {
+                set_error(error, error_capacity, "required VRM bone '%s' is missing", name);
                 return false;
             }
             continue;
         }
         if (!object_member(bone, "node", &node_span) || !json_integer(node_span, &node) ||
             node < 0 || (uint64_t)node >= (uint64_t)data->nodes_count) {
-            set_error(error, error_capacity, "VRM bone '%s' has an invalid node", mapping->name);
+            set_error(error, error_capacity, "VRM bone '%s' has an invalid node", name);
             return false;
         }
-        body->node_by_bone[(size_t)mapping->bone] = (int)node;
+        body->node_by_role[index] = (int)node;
     }
-    for (size_t left = 0; left < EIDOLON_VRM_BONE_COUNT; ++left) {
-        if (body->node_by_bone[left] < 0) {
+    for (size_t bone = 0U; bone < EIDOLON_VRM_BONE_COUNT; ++bone) {
+        body->node_by_bone[bone] = body->node_by_role[(size_t)LEGACY_ROLE_BY_BONE[bone]];
+    }
+    for (size_t left = 0U; left < EIDOLON_HUMANOID_ROLE_COUNT; ++left) {
+        if (body->node_by_role[left] < 0) {
             continue;
         }
-        for (size_t right = left + 1U; right < EIDOLON_VRM_BONE_COUNT; ++right) {
-            if (body->node_by_bone[left] == body->node_by_bone[right]) {
+        for (size_t right = left + 1U; right < EIDOLON_HUMANOID_ROLE_COUNT; ++right) {
+            if (body->node_by_role[left] == body->node_by_role[right]) {
                 set_error(error, error_capacity, "VRM humanoid maps two roles to node %d",
-                          body->node_by_bone[left]);
+                          body->node_by_role[left]);
                 return false;
             }
         }
@@ -620,62 +647,61 @@ static EidolonVrmHumanBone torso_parent(const EidolonVrmBody *body) {
 }
 
 static EidolonVrmHumanBone expected_humanoid_parent(EidolonVrmHumanBone bone,
-                                                     const EidolonVrmBody *body) {
+                                                    const EidolonVrmBody *body) {
     switch (bone) {
-        case EIDOLON_VRM_BONE_HIPS:
-            return EIDOLON_VRM_BONE_COUNT;
-        case EIDOLON_VRM_BONE_SPINE:
-            return EIDOLON_VRM_BONE_HIPS;
-        case EIDOLON_VRM_BONE_CHEST:
-            return EIDOLON_VRM_BONE_SPINE;
-        case EIDOLON_VRM_BONE_UPPER_CHEST:
-            return EIDOLON_VRM_BONE_CHEST;
-        case EIDOLON_VRM_BONE_NECK:
-            return torso_parent(body);
-        case EIDOLON_VRM_BONE_HEAD:
-            return body->node_by_bone[EIDOLON_VRM_BONE_NECK] >= 0 ? EIDOLON_VRM_BONE_NECK
-                                                                  : torso_parent(body);
-        case EIDOLON_VRM_BONE_LEFT_EYE:
-        case EIDOLON_VRM_BONE_RIGHT_EYE:
-            return EIDOLON_VRM_BONE_HEAD;
-        case EIDOLON_VRM_BONE_LEFT_UPPER_LEG:
-        case EIDOLON_VRM_BONE_RIGHT_UPPER_LEG:
-            return EIDOLON_VRM_BONE_HIPS;
-        case EIDOLON_VRM_BONE_LEFT_LOWER_LEG:
-            return EIDOLON_VRM_BONE_LEFT_UPPER_LEG;
-        case EIDOLON_VRM_BONE_LEFT_FOOT:
-            return EIDOLON_VRM_BONE_LEFT_LOWER_LEG;
-        case EIDOLON_VRM_BONE_RIGHT_LOWER_LEG:
-            return EIDOLON_VRM_BONE_RIGHT_UPPER_LEG;
-        case EIDOLON_VRM_BONE_RIGHT_FOOT:
-            return EIDOLON_VRM_BONE_RIGHT_LOWER_LEG;
-        case EIDOLON_VRM_BONE_LEFT_SHOULDER:
-        case EIDOLON_VRM_BONE_RIGHT_SHOULDER:
-            return torso_parent(body);
-        case EIDOLON_VRM_BONE_LEFT_UPPER_ARM:
-            return body->node_by_bone[EIDOLON_VRM_BONE_LEFT_SHOULDER] >= 0
-                       ? EIDOLON_VRM_BONE_LEFT_SHOULDER
-                       : torso_parent(body);
-        case EIDOLON_VRM_BONE_LEFT_LOWER_ARM:
-            return EIDOLON_VRM_BONE_LEFT_UPPER_ARM;
-        case EIDOLON_VRM_BONE_LEFT_HAND:
-            return EIDOLON_VRM_BONE_LEFT_LOWER_ARM;
-        case EIDOLON_VRM_BONE_RIGHT_UPPER_ARM:
-            return body->node_by_bone[EIDOLON_VRM_BONE_RIGHT_SHOULDER] >= 0
-                       ? EIDOLON_VRM_BONE_RIGHT_SHOULDER
-                       : torso_parent(body);
-        case EIDOLON_VRM_BONE_RIGHT_LOWER_ARM:
-            return EIDOLON_VRM_BONE_RIGHT_UPPER_ARM;
-        case EIDOLON_VRM_BONE_RIGHT_HAND:
-            return EIDOLON_VRM_BONE_RIGHT_LOWER_ARM;
-        default:
-            return EIDOLON_VRM_BONE_COUNT;
+    case EIDOLON_VRM_BONE_HIPS:
+        return EIDOLON_VRM_BONE_COUNT;
+    case EIDOLON_VRM_BONE_SPINE:
+        return EIDOLON_VRM_BONE_HIPS;
+    case EIDOLON_VRM_BONE_CHEST:
+        return EIDOLON_VRM_BONE_SPINE;
+    case EIDOLON_VRM_BONE_UPPER_CHEST:
+        return EIDOLON_VRM_BONE_CHEST;
+    case EIDOLON_VRM_BONE_NECK:
+        return torso_parent(body);
+    case EIDOLON_VRM_BONE_HEAD:
+        return body->node_by_bone[EIDOLON_VRM_BONE_NECK] >= 0 ? EIDOLON_VRM_BONE_NECK
+                                                              : torso_parent(body);
+    case EIDOLON_VRM_BONE_LEFT_EYE:
+    case EIDOLON_VRM_BONE_RIGHT_EYE:
+        return EIDOLON_VRM_BONE_HEAD;
+    case EIDOLON_VRM_BONE_LEFT_UPPER_LEG:
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_LEG:
+        return EIDOLON_VRM_BONE_HIPS;
+    case EIDOLON_VRM_BONE_LEFT_LOWER_LEG:
+        return EIDOLON_VRM_BONE_LEFT_UPPER_LEG;
+    case EIDOLON_VRM_BONE_LEFT_FOOT:
+        return EIDOLON_VRM_BONE_LEFT_LOWER_LEG;
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_LEG:
+        return EIDOLON_VRM_BONE_RIGHT_UPPER_LEG;
+    case EIDOLON_VRM_BONE_RIGHT_FOOT:
+        return EIDOLON_VRM_BONE_RIGHT_LOWER_LEG;
+    case EIDOLON_VRM_BONE_LEFT_SHOULDER:
+    case EIDOLON_VRM_BONE_RIGHT_SHOULDER:
+        return torso_parent(body);
+    case EIDOLON_VRM_BONE_LEFT_UPPER_ARM:
+        return body->node_by_bone[EIDOLON_VRM_BONE_LEFT_SHOULDER] >= 0
+                   ? EIDOLON_VRM_BONE_LEFT_SHOULDER
+                   : torso_parent(body);
+    case EIDOLON_VRM_BONE_LEFT_LOWER_ARM:
+        return EIDOLON_VRM_BONE_LEFT_UPPER_ARM;
+    case EIDOLON_VRM_BONE_LEFT_HAND:
+        return EIDOLON_VRM_BONE_LEFT_LOWER_ARM;
+    case EIDOLON_VRM_BONE_RIGHT_UPPER_ARM:
+        return body->node_by_bone[EIDOLON_VRM_BONE_RIGHT_SHOULDER] >= 0
+                   ? EIDOLON_VRM_BONE_RIGHT_SHOULDER
+                   : torso_parent(body);
+    case EIDOLON_VRM_BONE_RIGHT_LOWER_ARM:
+        return EIDOLON_VRM_BONE_RIGHT_UPPER_ARM;
+    case EIDOLON_VRM_BONE_RIGHT_HAND:
+        return EIDOLON_VRM_BONE_RIGHT_LOWER_ARM;
+    default:
+        return EIDOLON_VRM_BONE_COUNT;
     }
 }
 
 static bool nearest_humanoid_parent(const cgltf_data *data, const EidolonVrmBody *body,
-                                    EidolonVrmHumanBone bone,
-                                    EidolonVrmHumanBone *parent_bone) {
+                                    EidolonVrmHumanBone bone, EidolonVrmHumanBone *parent_bone) {
     const int node_index = body->node_by_bone[(size_t)bone];
     const cgltf_node *node = &data->nodes[(size_t)node_index];
     size_t remaining = (size_t)data->nodes_count + 1U;
@@ -934,7 +960,7 @@ static void parse_look_at(JsonSpan root, EidolonVrmBody *body) {
     body->look_at.state = EIDOLON_VRM_CAPABILITY_PARSED;
     set_error(body->look_at.diagnostic, sizeof(body->look_at.diagnostic),
               "authored %s look-at parsed; runtime degrades to head-only",
-              body->look_at.type == EIDOLON_VRM_LOOK_AT_BONE          ? "bone"
+              body->look_at.type == EIDOLON_VRM_LOOK_AT_BONE         ? "bone"
               : body->look_at.type == EIDOLON_VRM_LOOK_AT_EXPRESSION ? "expression"
                                                                      : "unspecified");
 }
@@ -999,6 +1025,9 @@ bool eidolon_vrm_body_parse(const cgltf_data *data, EidolonVrmBody *body, char *
     memset(body, 0, sizeof(*body));
     for (size_t index = 0; index < EIDOLON_VRM_BONE_COUNT; ++index) {
         body->node_by_bone[index] = -1;
+    }
+    for (size_t index = 0U; index < EIDOLON_HUMANOID_ROLE_COUNT; ++index) {
+        body->node_by_role[index] = -1;
     }
     extension = find_extension(data, "VRMC_vrm");
     if (extension == NULL || extension->data == NULL) {
@@ -1160,8 +1189,7 @@ bool eidolon_vrm_body_make_profile(const cgltf_data *data, const EidolonVrmBody 
     profile->has_required_humanoid = true;
     profile->has_right_arm = true;
     profile->has_eyes = body->look_at.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
-    profile->has_expression =
-        body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    profile->has_expression = body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
     if (!isfinite(profile->right_upper_arm_length) || !isfinite(profile->right_lower_arm_length) ||
         profile->right_upper_arm_length <= 0.0001F || profile->right_lower_arm_length <= 0.0001F) {
         set_error(error, error_capacity, "VRM right arm has invalid measurements");

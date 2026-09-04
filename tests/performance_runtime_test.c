@@ -54,10 +54,37 @@ static void body_point(const EidolonEprBodyProfile *body, const float semantic[3
     const float arm_length = body->right_upper_arm_length + body->right_lower_arm_length;
     for (size_t axis = 0U; axis < 3U; ++axis) {
         point[axis] = body->shoulder[axis] +
-                      arm_length * (semantic[0] * body->right[axis] +
-                                    semantic[1] * body->up[axis] +
+                      arm_length * (semantic[0] * body->right[axis] + semantic[1] * body->up[axis] +
                                     semantic[2] * body->forward[axis]);
     }
+}
+
+static EidolonEprRightArmTaskTarget
+right_arm_task_target(uint64_t revision, uint64_t predecessor_revision, uint64_t plan_generation,
+                      EidolonEprOpaqueId behavior, EidolonEprTick sample_tick,
+                      EidolonEprTick valid_until_tick) {
+    EidolonEprRightArmTaskTarget target;
+    memset(&target, 0, sizeof(target));
+    target.version = EIDOLON_EPR_RIGHT_ARM_TASK_TARGET_VERSION;
+    target.revision = revision;
+    target.predecessor_revision = predecessor_revision;
+    target.plan_generation = plan_generation;
+    target.producer = UINT64_C(0xd1a0);
+    target.target = UINT64_C(0xa11ce);
+    target.behavior = behavior;
+    target.sample_tick = sample_tick;
+    target.valid_until_tick = valid_until_tick;
+    target.hand_target[0] = 0.45F;
+    target.hand_target[1] = -0.35F;
+    target.hand_target[2] = 0.15F;
+    target.elbow_pole[0] = 0.20F;
+    target.elbow_pole[1] = -0.10F;
+    target.elbow_pole[2] = 0.55F;
+    target.wrist_euler[0] = 0.10F;
+    target.wrist_euler[1] = -0.20F;
+    target.wrist_euler[2] = 0.05F;
+    target.weight = 0.75F;
+    return target;
 }
 
 static void test_realization_profile_bounds_are_transactional(void) {
@@ -84,6 +111,24 @@ static void test_intent_validation(void) {
     add_contrast(&listening);
     listening.beats[0].source_end = 1U;
     assert(!eidolon_epr_intent_validate(&listening));
+}
+
+static void test_task_target_validation(void) {
+    EidolonEprRightArmTaskTarget target =
+        right_arm_task_target(1U, 0U, 1U, UINT64_C(0xbeef), 100, 1100);
+    assert(eidolon_epr_right_arm_task_target_validate(&target));
+    target.valid_until_tick = 1101;
+    assert(!eidolon_epr_right_arm_task_target_validate(&target));
+    target.valid_until_tick = 1100;
+    target.weight = NAN;
+    assert(!eidolon_epr_right_arm_task_target_validate(&target));
+    target.weight = 0.5F;
+    target.hand_target[0] = 2.01F;
+    assert(!eidolon_epr_right_arm_task_target_validate(&target));
+    assert(strcmp(eidolon_epr_trace_event_name(EIDOLON_EPR_TRACE_TASK_TARGET_ACCEPTED),
+                  "task_target.accepted") == 0);
+    assert(strcmp(eidolon_epr_trace_event_name(EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED),
+                  "task_target.released") == 0);
 }
 
 static void test_temporal_transaction(void) {
@@ -155,6 +200,136 @@ static void test_resource_order_independence(void) {
     assert(memcmp(&a, &b, sizeof(a)) == 0);
 }
 
+static uint64_t humanoid_role_range(EidolonHumanoidRole first, EidolonHumanoidRole last) {
+    uint64_t mask = 0U;
+    for (int role = (int)first; role <= (int)last; ++role) {
+        mask |= UINT64_C(1) << (uint32_t)role;
+    }
+    return mask;
+}
+
+static void test_resource_masks_map_to_humanoid_channels(void) {
+    const uint64_t torso =
+        humanoid_role_range(EIDOLON_HUMANOID_ROLE_HIPS, EIDOLON_HUMANOID_ROLE_UPPER_CHEST);
+    const uint64_t head =
+        humanoid_role_range(EIDOLON_HUMANOID_ROLE_NECK, EIDOLON_HUMANOID_ROLE_HEAD);
+    const uint64_t eyes =
+        humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_EYE, EIDOLON_HUMANOID_ROLE_RIGHT_EYE);
+    const uint64_t left_arm =
+        humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_SHOULDER, EIDOLON_HUMANOID_ROLE_LEFT_HAND) |
+        humanoid_role_range(EIDOLON_HUMANOID_ROLE_LEFT_THUMB_METACARPAL,
+                            EIDOLON_HUMANOID_ROLE_LEFT_LITTLE_DISTAL);
+    const uint64_t right_arm = humanoid_role_range(EIDOLON_HUMANOID_ROLE_RIGHT_SHOULDER,
+                                                   EIDOLON_HUMANOID_ROLE_RIGHT_HAND) |
+                               humanoid_role_range(EIDOLON_HUMANOID_ROLE_RIGHT_THUMB_METACARPAL,
+                                                   EIDOLON_HUMANOID_ROLE_RIGHT_LITTLE_DISTAL);
+    const uint64_t expected[] = {torso, head, eyes, 0U, left_arm, right_arm};
+    uint64_t combined = 0U;
+    uint64_t rotations;
+    bool owns_hips;
+
+    for (int resource = 0; resource < (int)EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
+        assert(eidolon_epr_resource_mask_humanoid_channels(UINT32_C(1) << (uint32_t)resource,
+                                                           &rotations, &owns_hips));
+        assert(rotations == expected[(size_t)resource]);
+        assert(owns_hips == (resource == (int)EIDOLON_EPR_RESOURCE_TORSO));
+        assert((combined & rotations) == 0U);
+        combined |= rotations;
+    }
+    assert(eidolon_epr_resource_mask_humanoid_channels(
+        (UINT32_C(1) << EIDOLON_EPR_RESOURCE_TORSO) |
+            (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN),
+        &rotations, &owns_hips));
+    assert(rotations == (torso | right_arm));
+    assert(owns_hips);
+
+    rotations = UINT64_C(0x1234);
+    owns_hips = true;
+    assert(!eidolon_epr_resource_mask_humanoid_channels(UINT32_C(1) << EIDOLON_EPR_RESOURCE_COUNT,
+                                                        &rotations, &owns_hips));
+    assert(rotations == UINT64_C(0x1234));
+    assert(owns_hips);
+}
+
+static void assert_motion_reference(const EidolonRealizationProgram *program,
+                                    EidolonEprMotionGeneratorId generator,
+                                    EidolonEprMotionTakeoverPolicy takeover) {
+    uint64_t expected_rotations;
+    bool expected_hips;
+    assert(program != NULL);
+    assert(program->version == EIDOLON_EPR_PROGRAM_VERSION);
+    assert(program->motion.version == EIDOLON_EPR_MOTION_GENERATOR_REFERENCE_VERSION);
+    assert(program->motion.generator == generator);
+    assert(program->motion.takeover == takeover);
+    assert(program->motion.resource_mask == program->resource_mask);
+    assert(eidolon_epr_resource_mask_humanoid_channels(program->resource_mask, &expected_rotations,
+                                                       &expected_hips));
+    assert(program->motion.humanoid_rotation_mask == expected_rotations);
+    assert(program->motion.owns_hips_translation == expected_hips);
+    assert(program->motion.blend_weight == 1.0F);
+    assert(program->motion.intensity == 1.0F);
+    assert(program->motion.playback_rate == 1.0F);
+    assert(eidolon_epr_motion_generator_reference_validate(&program->motion));
+}
+
+static void test_realization_programs_reference_semantic_motion(void) {
+    const EidolonEprBodyProfile profile = eidolon_epr_default_body_profile();
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceIntent value;
+    const EidolonRealizationProgram *program;
+    EidolonEprMotionGeneratorReference invalid;
+
+    assert(init_fixture_runtime(&runtime, 71U, &profile));
+    value = intent(1U, 0U, 0, EIDOLON_EPR_MODE_ABSENT);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    program = eidolon_epr_program_find(&runtime.programs,
+                                       eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_IDLE, 1U));
+    assert_motion_reference(program, EIDOLON_EPR_MOTION_IDLE_NEUTRAL,
+                            EIDOLON_EPR_MOTION_TAKEOVER_ADDITIVE);
+    assert(strcmp(eidolon_epr_motion_generator_name(program->motion.generator), "idle.neutral") ==
+           0);
+
+    value = intent(2U, 1U, 400, EIDOLON_EPR_MODE_LISTENING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    program = eidolon_epr_program_find(
+        &runtime.programs, eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE, 1U));
+    assert_motion_reference(program, EIDOLON_EPR_MOTION_POSTURE_ATTENTIVE,
+                            EIDOLON_EPR_MOTION_TAKEOVER_BASE);
+    program = eidolon_epr_program_find(
+        &runtime.programs, eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION, 1U));
+    assert(program != NULL);
+    assert(program->motion.generator == EIDOLON_EPR_MOTION_GENERATOR_NONE);
+    assert(eidolon_epr_motion_generator_reference_validate(&program->motion));
+
+    value = intent(3U, 2U, 3000, EIDOLON_EPR_MODE_RESPONDING);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    program = eidolon_epr_program_find(
+        &runtime.programs,
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT, UINT64_C(0xc017a57)));
+    assert_motion_reference(program, EIDOLON_EPR_MOTION_GESTURE_CONTRAST_RIGHT,
+                            EIDOLON_EPR_MOTION_TAKEOVER_OVERRIDE);
+
+    value = intent(4U, 3U, 3600, EIDOLON_EPR_MODE_INTERRUPTED);
+    add_contrast(&value);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    program = eidolon_epr_program_find(
+        &runtime.programs,
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, UINT64_C(0xc017a57)));
+    assert(program != NULL);
+    assert(program->motion.generator == EIDOLON_EPR_MOTION_GENERATOR_NONE);
+    assert(program->motion.takeover == EIDOLON_EPR_MOTION_TAKEOVER_NONE);
+    assert(program->resource_mask == (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+    assert(program->motion.resource_mask == 0U);
+    assert(eidolon_epr_motion_generator_reference_validate(&program->motion));
+
+    invalid = program->motion;
+    invalid.playback_rate = 4.01F;
+    assert(!eidolon_epr_motion_generator_reference_validate(&invalid));
+    assert(strcmp(eidolon_epr_motion_generator_name(EIDOLON_EPR_MOTION_GENERATOR_COUNT),
+                  "unknown") == 0);
+}
+
 static void accept_and_step(EidolonPerformanceRuntime *runtime, EidolonPerformanceIntent *value,
                             const EidolonEprTick *ticks, size_t tick_count) {
     assert(eidolon_epr_runtime_accept(runtime, value));
@@ -217,6 +392,136 @@ static bool trace_has(const EidolonPerformanceRuntime *runtime, EidolonEprTraceE
     return false;
 }
 
+static void test_right_arm_task_targets_are_owned_versioned_and_transactional(void) {
+    const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
+    const uint32_t right_arm_bit = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    const EidolonEprOpaqueId attentive =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_POSTURE_ATTENTIVE, 1U);
+    const EidolonEprOpaqueId thinking =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_POSTURE_THINKING, 1U);
+    const EidolonEprOpaqueId gaze =
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GAZE_ATTENTION, 1U);
+    EidolonPerformanceRuntime runtime;
+    EidolonPerformanceIntent value;
+    EidolonEprRightArmTaskTarget target;
+    EidolonEprRightArmTaskTarget previous_target;
+    EidolonCanonicalControl previous_control;
+    float expected[3];
+    uint64_t listening_generation;
+
+    assert(init_fixture_runtime(&runtime, 73U, &body));
+    value = intent(1U, 0U, 400, EIDOLON_EPR_MODE_LISTENING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    listening_generation = runtime.plan.generation;
+
+    target = right_arm_task_target(1U, 0U, listening_generation, attentive, 400, 650);
+    assert(eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(runtime.has_right_arm_task_target);
+    assert(runtime.right_arm_task_target_revision == 1U);
+    assert(runtime.right_arm_task_target_producer == target.producer);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_ACCEPTED, attentive,
+                     EIDOLON_EPR_REASON_NONE, 1U, (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    previous_target = runtime.right_arm_task_target;
+    target.revision = 2U;
+    target.predecessor_revision = 1U;
+    target.weight = NAN;
+    assert(!eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(runtime.has_right_arm_task_target);
+    assert(runtime.right_arm_task_target_revision == 1U);
+    assert(memcmp(&runtime.right_arm_task_target, &previous_target, sizeof(previous_target)) == 0);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_REJECTED, attentive,
+                     EIDOLON_EPR_REASON_INVALID_CANDIDATE, 2U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    target = right_arm_task_target(2U, 1U, listening_generation, gaze, 400, 650);
+    assert(!eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(runtime.right_arm_task_target_revision == 1U);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_REJECTED, gaze,
+                     EIDOLON_EPR_REASON_REVISED, 2U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    assert(eidolon_epr_runtime_step(&runtime, 400));
+    body_point(&body, previous_target.hand_target, expected);
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        assert(fabsf(runtime.control.right_hand_target[axis] - expected[axis]) < 0.0001F);
+        assert(fabsf(runtime.control.right_wrist_euler[axis] - previous_target.wrist_euler[axis]) <
+               0.0001F);
+    }
+    assert(fabsf(runtime.control.right_arm_ik_weight - 0.75F) < 0.0001F);
+    assert((runtime.control.procedural_resource_mask & right_arm_bit) != 0U);
+    assert(runtime.right_arm_task_target_applied_revision == 1U);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_APPLIED, attentive,
+                     EIDOLON_EPR_REASON_SELECTED, 1U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    target = right_arm_task_target(2U, 1U, listening_generation, attentive, 500, 700);
+    target.hand_target[0] = 0.30F;
+    target.hand_target[1] = -0.50F;
+    target.weight = 0.40F;
+    assert(eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED, attentive,
+                     EIDOLON_EPR_REASON_REVISED, 1U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+    assert(eidolon_epr_runtime_step(&runtime, 500));
+    body_point(&body, target.hand_target, expected);
+    for (size_t axis = 0U; axis < 3U; ++axis) {
+        assert(fabsf(runtime.control.right_hand_target[axis] - expected[axis]) < 0.0001F);
+    }
+    assert(fabsf(runtime.control.right_arm_ik_weight - 0.40F) < 0.0001F);
+    assert(runtime.right_arm_task_target_applied_revision == 2U);
+
+    previous_target = runtime.right_arm_task_target;
+    assert(!eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(runtime.right_arm_task_target_revision == 2U);
+    assert(memcmp(&runtime.right_arm_task_target, &previous_target, sizeof(previous_target)) == 0);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_REJECTED, attentive,
+                     EIDOLON_EPR_REASON_STALE_REVISION, 2U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    target = right_arm_task_target(3U, 2U, listening_generation, attentive, 600, 700);
+    target.weight = 0.55F;
+    assert(eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    previous_control = runtime.control;
+    eidolon_epr_runtime_inject_solve_failure(&runtime);
+    assert(!eidolon_epr_runtime_step(&runtime, 600));
+    assert(memcmp(&runtime.control, &previous_control, sizeof(previous_control)) == 0);
+    assert(runtime.right_arm_task_target_applied_revision == 2U);
+    assert(runtime.has_right_arm_task_target);
+    assert(eidolon_epr_runtime_step(&runtime, 620));
+    assert(runtime.right_arm_task_target_applied_revision == 3U);
+
+    assert(eidolon_epr_runtime_step(&runtime, 701));
+    assert(!runtime.has_right_arm_task_target);
+    assert(runtime.right_arm_task_target_revision == 3U);
+    assert(runtime.control.right_arm_ik_weight == 0.0F);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED, attentive,
+                     EIDOLON_EPR_REASON_COMPLETED, 3U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    target = right_arm_task_target(4U, 3U, listening_generation, attentive, 720, 900);
+    assert(eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    value = intent(2U, 1U, 800, EIDOLON_EPR_MODE_THINKING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(!runtime.has_right_arm_task_target);
+    assert(runtime.right_arm_task_target_revision == 4U);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_RELEASED, attentive,
+                     EIDOLON_EPR_REASON_REVISED, 4U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+
+    target = right_arm_task_target(5U, 4U, listening_generation, attentive, 800, 900);
+    assert(!eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(runtime.right_arm_task_target_revision == 4U);
+    target.plan_generation = runtime.plan.generation;
+    target.behavior = thinking;
+    assert(eidolon_epr_runtime_publish_right_arm_task_target(&runtime, &target));
+    assert(eidolon_epr_runtime_step(&runtime, 800));
+    assert(runtime.right_arm_task_target_applied_revision == 5U);
+    assert(trace_has(&runtime, EIDOLON_EPR_TRACE_TASK_TARGET_APPLIED, thinking,
+                     EIDOLON_EPR_REASON_SELECTED, 5U,
+                     (uint32_t)EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN));
+}
+
 static void test_calibrated_targets_drive_posture_and_missing_anchor_degrades_locally(void) {
     const EidolonEprBodyProfile body = eidolon_epr_default_body_profile();
     EidolonEprRealizationProfile realization;
@@ -259,20 +564,17 @@ static void test_calibrated_targets_drive_posture_and_missing_anchor_degrades_lo
     assert(fabsf(runtime.posture_base.torso_pitch) < 0.0001F);
     assert(trace_has(&runtime, EIDOLON_EPR_TRACE_REALIZER_FALLBACK, thinking,
                      EIDOLON_EPR_REASON_CALIBRATION_MISSING,
-                     (uint64_t)(UINT32_C(1) << EIDOLON_EPR_POSE_THINKING),
-                     program->resource_mask));
+                     (uint64_t)(UINT32_C(1) << EIDOLON_EPR_POSE_THINKING), program->resource_mask));
 
     value = intent(4U, 3U, 2000, EIDOLON_EPR_MODE_RESPONDING);
     add_contrast(&value);
     assert(eidolon_epr_runtime_accept(&runtime, &value));
     const EidolonEprOpaqueId gesture =
-        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT,
-                                UINT64_C(0xc017a57));
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT, UINT64_C(0xc017a57));
     program = eidolon_epr_program_find(&runtime.programs, gesture);
-    const uint32_t missing_gesture =
-        (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_PREPARATION) |
-        (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_PEAK) |
-        (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_RECOVERY);
+    const uint32_t missing_gesture = (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_PREPARATION) |
+                                     (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_PEAK) |
+                                     (UINT32_C(1) << EIDOLON_EPR_POSE_CONTRAST_RECOVERY);
     assert(program != NULL);
     assert(program->pose_count == 0U);
     assert(program->missing_anchor_mask == missing_gesture);
@@ -333,16 +635,15 @@ static void test_calibrated_contrast_peak_drives_right_arm(void) {
     assert(eidolon_epr_runtime_step(&runtime, 3200));
     assert(eidolon_epr_runtime_step(&runtime, 3410));
     assert(eidolon_epr_runtime_step(&runtime, 3510));
-    body_point(&body,
-               realization.anchors[EIDOLON_EPR_POSE_CONTRAST_PEAK].right_arm.hand_target,
+    body_point(&body, realization.anchors[EIDOLON_EPR_POSE_CONTRAST_PEAK].right_arm.hand_target,
                expected);
     for (size_t axis = 0U; axis < 3U; ++axis) {
         assert(fabsf(runtime.control.right_hand_target[axis] - expected[axis]) < 0.0001F);
     }
-    assert(fabsf(runtime.control.pose_anchor_resource_weights
-                     [EIDOLON_EPR_POSE_CONTRAST_PEAK]
-                     [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] -
-                 1.0F) < 0.0001F);
+    assert(
+        fabsf(runtime.control.pose_anchor_resource_weights[EIDOLON_EPR_POSE_CONTRAST_PEAK]
+                                                          [EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN] -
+              1.0F) < 0.0001F);
 }
 
 static void test_runtime_compacts_long_lived_behavior_history(void) {
@@ -376,6 +677,8 @@ static void test_revised_interruption_does_not_retime_settle(void) {
     EidolonPerformanceIntent value;
     const EidolonEprOpaqueId settle =
         eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_SETTLE_RIGHT_ARM, UINT64_C(0xc017a57));
+    const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    EidolonCanonicalControl settle_start;
     assert(init_fixture_runtime(&runtime, 29U, &body));
     value = intent(1U, 0U, 3000, EIDOLON_EPR_MODE_RESPONDING);
     add_contrast(&value);
@@ -389,7 +692,14 @@ static void test_revised_interruption_does_not_retime_settle(void) {
     assert(behavior != NULL);
     assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT] == 3600);
     assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_SETTLE] == 3920);
+    settle_start = runtime.settle_start;
+    assert(eidolon_epr_runtime_step(&runtime, 3600));
+    assert((runtime.control.procedural_resource_mask & right_arm) != 0U);
+    assert(runtime.control.right_arm_continuity_id == settle);
+    assert(fabsf(runtime.control.right_arm_continuity_weight - 1.0F) < 0.0001F);
+    assert(runtime.control.right_arm_ik_weight == 0.0F);
     assert(eidolon_epr_runtime_step(&runtime, 3700));
+    assert(runtime.control.right_arm_continuity_weight > 0.5F);
 
     value = intent(3U, 2U, 3750, EIDOLON_EPR_MODE_INTERRUPTED);
     add_contrast(&value);
@@ -398,7 +708,15 @@ static void test_revised_interruption_does_not_retime_settle(void) {
     assert(behavior != NULL);
     assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_INTERRUPT] == 3600);
     assert(behavior->phase_ticks[EIDOLON_EPR_PHASE_SETTLE] == 3920);
+    assert(memcmp(&runtime.settle_start, &settle_start, sizeof(settle_start)) == 0);
+    assert(eidolon_epr_runtime_step(&runtime, 3760));
+    assert(runtime.control.right_arm_continuity_id == settle);
+    assert(fabsf(runtime.control.right_arm_continuity_weight - 0.5F) < 0.0001F);
     assert(eidolon_epr_runtime_step(&runtime, 3920));
+    assert((runtime.control.procedural_resource_mask & right_arm) != 0U);
+    assert(runtime.control.right_arm_continuity_id == 0U);
+    assert(runtime.control.right_arm_continuity_weight == 0.0F);
+    assert(runtime.control.right_arm_ik_weight == 0.0F);
     behavior = eidolon_epr_plan_find(&runtime.plan, settle);
     assert(behavior != NULL && behavior->retired);
 }
@@ -408,8 +726,7 @@ static void test_completed_gesture_tombstone_prevents_replay_until_evidence_leav
     EidolonPerformanceRuntime runtime;
     EidolonPerformanceIntent value;
     const EidolonEprOpaqueId gesture =
-        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT,
-                                UINT64_C(0xc017a57));
+        eidolon_epr_behavior_id(EIDOLON_EPR_BEHAVIOR_GESTURE_CONTRAST_RIGHT, UINT64_C(0xc017a57));
     assert(init_fixture_runtime(&runtime, 31U, &body));
     value = intent(1U, 0U, 3000, EIDOLON_EPR_MODE_RESPONDING);
     add_contrast(&value);
@@ -503,6 +820,94 @@ static void test_complete_scenario_and_determinism(void) {
     assert(gesture_state->highest_observed_phase == (int)EIDOLON_EPR_PHASE_RECOVERY);
 }
 
+typedef struct RuntimeMotionFixture {
+    float radians;
+} RuntimeMotionFixture;
+
+static bool sample_runtime_motion(const void *context, float seconds, bool loop,
+                                  EidolonHumanoidPose *pose) {
+    const RuntimeMotionFixture *fixture = context;
+    const uint64_t all_roles = (UINT64_C(1) << (uint32_t)EIDOLON_HUMANOID_ROLE_COUNT) - UINT64_C(1);
+    (void)seconds;
+    (void)loop;
+    if (fixture == NULL || pose == NULL) {
+        return false;
+    }
+    eidolon_humanoid_pose_init(pose);
+    pose->rotation_mask = all_roles;
+    for (size_t role = 0U; role < EIDOLON_HUMANOID_ROLE_COUNT; ++role) {
+        pose->rotations[role][0] = sinf(fixture->radians * 0.5F);
+        pose->rotations[role][3] = cosf(fixture->radians * 0.5F);
+    }
+    pose->has_hips_translation = true;
+    pose->hips_translation[1] = 0.01F;
+    return true;
+}
+
+static void add_runtime_motion(EidolonEprMotionCatalog *catalog,
+                               EidolonEprMotionGeneratorId generator, uint64_t identity,
+                               RuntimeMotionFixture *fixture) {
+    const EidolonEprMotionCatalogEntry entry = {
+        .generator = generator,
+        .source =
+            {
+                .version = EIDOLON_EPR_MOTION_SOURCE_VERSION,
+                .identity = identity,
+                .context = fixture,
+                .sample = sample_runtime_motion,
+                .rotation_mask =
+                    (UINT64_C(1) << (uint32_t)EIDOLON_HUMANOID_ROLE_COUNT) - UINT64_C(1),
+                .duration_seconds = 1.0F,
+                .owns_hips_translation = true,
+                .loop = true,
+            },
+    };
+    assert(eidolon_epr_motion_catalog_add(catalog, &entry) == EIDOLON_EPR_MOTION_CATALOG_OK);
+}
+
+static void test_runtime_motion_catalog_is_transactional_and_degrades_locally(void) {
+    EidolonPerformanceRuntime runtime;
+    const EidolonEprBodyProfile profile = eidolon_epr_default_body_profile();
+    EidolonPerformanceIntent value;
+    EidolonEprMotionCatalog catalog;
+    EidolonEprMotionCatalog invalid;
+    EidolonEprMotionExecutionResult result;
+    RuntimeMotionFixture idle = {.radians = 0.04F};
+    RuntimeMotionFixture posture = {.radians = 0.20F};
+
+    eidolon_epr_motion_catalog_init(&catalog);
+    add_runtime_motion(&catalog, EIDOLON_EPR_MOTION_IDLE_NEUTRAL, UINT64_C(0x1001), &idle);
+    assert(init_fixture_runtime(&runtime, 17U, &profile));
+    assert(eidolon_epr_runtime_set_motion_catalog(&runtime, &catalog));
+    value = intent(1U, 0U, 0, EIDOLON_EPR_MODE_ABSENT);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_step(&runtime, 0));
+    assert(eidolon_epr_runtime_motion_frame(&runtime) != NULL);
+    assert(eidolon_epr_runtime_motion_frame(&runtime)->execution_count == 1U);
+
+    invalid = catalog;
+    invalid.version = 0U;
+    assert(!eidolon_epr_runtime_set_motion_catalog(&runtime, &invalid));
+    assert(eidolon_epr_runtime_motion_frame(&runtime) != NULL);
+    value = intent(2U, 1U, 400, EIDOLON_EPR_MODE_LISTENING);
+    assert(eidolon_epr_runtime_accept(&runtime, &value));
+    assert(eidolon_epr_runtime_motion_frame(&runtime) == NULL);
+    assert(eidolon_epr_runtime_step(&runtime, 400));
+    assert(eidolon_epr_runtime_motion_frame(&runtime) == NULL);
+    result = eidolon_epr_runtime_motion_result(&runtime);
+    assert(result.status == EIDOLON_EPR_MOTION_EXECUTION_CATALOG_FAILED);
+    assert(result.catalog_status == EIDOLON_EPR_MOTION_CATALOG_MISSING_GENERATOR);
+    assert(runtime.control.plan_generation == runtime.plan.generation);
+
+    add_runtime_motion(&catalog, EIDOLON_EPR_MOTION_POSTURE_ATTENTIVE, UINT64_C(0x1002), &posture);
+    assert(eidolon_epr_runtime_set_motion_catalog(&runtime, &catalog));
+    assert(eidolon_epr_runtime_step(&runtime, 520));
+    assert(eidolon_epr_runtime_motion_frame(&runtime) != NULL);
+    assert(eidolon_epr_runtime_motion_frame(&runtime)->execution_count == 2U);
+    eidolon_epr_runtime_clear_motion_catalog(&runtime);
+    assert(eidolon_epr_runtime_motion_frame(&runtime) == NULL);
+}
+
 static void test_stale_and_solve_failure_are_transactional(void) {
     EidolonPerformanceRuntime runtime;
     const EidolonEprBodyProfile profile = eidolon_epr_default_body_profile();
@@ -551,6 +956,9 @@ static void test_gaze_is_eye_first_head_follow(void) {
     const EidolonRealizationProgram *expression;
     EidolonRealizationProgram temporary;
     float target[3];
+    const uint32_t procedural_mask = (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) |
+                                     (UINT32_C(1) << EIDOLON_EPR_RESOURCE_EYES) |
+                                     (UINT32_C(1) << EIDOLON_EPR_RESOURCE_FACE_EXPRESSION);
 
     assert(init_fixture_runtime(&runtime, 11U, &profile));
     assert(init_fixture_runtime(&reordered, 11U, &profile));
@@ -575,11 +983,20 @@ static void test_gaze_is_eye_first_head_follow(void) {
     assert(eidolon_epr_runtime_step(&runtime, 480));
     assert(eidolon_epr_runtime_step(&reordered, 480));
     assert(runtime.control.hash == reordered.control.hash);
+    assert(runtime.control.procedural_resource_mask == procedural_mask);
     assert(runtime.control.eye_weight > 0.5F);
     assert(runtime.control.head_gaze_weight == 0.0F);
+    assert(runtime.control.head_gaze_pitch == 0.0F);
+    assert(runtime.control.head_gaze_yaw == 0.0F);
     memcpy(target, runtime.control.gaze_target, sizeof(target));
     assert(eidolon_epr_runtime_step(&runtime, 700));
     assert(runtime.control.head_gaze_weight > 0.0F);
+    assert(fabsf(runtime.control.head_gaze_pitch) > 0.0001F);
+    assert(fabsf(runtime.control.head_gaze_yaw) > 0.0001F);
+    assert(fabsf(runtime.control.head_pitch -
+                 (runtime.posture_base.head_pitch + runtime.control.head_gaze_pitch)) < 0.0001F);
+    assert(fabsf(runtime.control.head_yaw -
+                 (runtime.posture_base.head_yaw + runtime.control.head_gaze_yaw)) < 0.0001F);
     assert(memcmp(target, runtime.control.gaze_target, sizeof(target)) == 0);
 }
 
@@ -620,6 +1037,7 @@ static void test_trace_is_a_deterministic_ring(void) {
     assert(eidolon_epr_trace_record(&trace, trace.count - 1U)->tick ==
            (EidolonEprTick)(EIDOLON_EPR_TRACE_CAPACITY + 1U));
     assert(eidolon_epr_trace_record(&trace, trace.count) == NULL);
+    assert(eidolon_epr_trace_record(&trace, 0U)->version == EIDOLON_EPR_TRACE_VERSION);
 }
 
 static void test_synthetic_adapter_is_bounded_and_deterministic(void) {
@@ -661,7 +1079,8 @@ static void test_synthetic_adapter_restarts_monotonically(void) {
     assert(eidolon_performance_fixture_restart(&fixture, &runtime, 5020U));
     for (uint64_t now_ms = 5020U; now_ms <= 10020U; now_ms += 20U) {
         if (!eidolon_performance_fixture_update(&fixture, &runtime, now_ms)) {
-            fprintf(stderr, "fixture replay failed at driver=%llu tick=%lld revision=%llu stage=%u\n",
+            fprintf(stderr,
+                    "fixture replay failed at driver=%llu tick=%lld revision=%llu stage=%u\n",
                     (unsigned long long)now_ms, (long long)runtime.last_tick,
                     (unsigned long long)runtime.intent.revision, fixture.stage);
             assert(false);
@@ -677,8 +1096,12 @@ static void test_synthetic_adapter_restarts_monotonically(void) {
 int main(void) {
     test_realization_profile_bounds_are_transactional();
     test_intent_validation();
+    test_task_target_validation();
     test_temporal_transaction();
     test_resource_order_independence();
+    test_resource_masks_map_to_humanoid_channels();
+    test_realization_programs_reference_semantic_motion();
+    test_right_arm_task_targets_are_owned_versioned_and_transactional();
     test_calibrated_targets_drive_posture_and_missing_anchor_degrades_locally();
     test_partial_anchor_reports_only_degraded_resources();
     test_calibrated_contrast_peak_drives_right_arm();
@@ -686,6 +1109,7 @@ int main(void) {
     test_revised_interruption_does_not_retime_settle();
     test_completed_gesture_tombstone_prevents_replay_until_evidence_leaves();
     test_complete_scenario_and_determinism();
+    test_runtime_motion_catalog_is_transactional_and_degrades_locally();
     test_stale_and_solve_failure_are_transactional();
     test_optional_capabilities_degrade_locally();
     test_gaze_is_eye_first_head_follow();

@@ -140,11 +140,13 @@ static void fake_destroy_target(void *context, EidolonPresentationTarget target)
 }
 
 static bool fake_set_target_alpha_mask(void *context, EidolonPresentationTarget target,
-                                       uint64_t generation, const uint8_t *pixels, size_t pitch,
+                                       uint64_t generation, uint32_t mask_width,
+                                       uint32_t mask_height, const uint8_t *pixels, size_t pitch,
                                        uint8_t pixel_stride, uint8_t alpha_offset) {
     FakePresentation *fake = context;
     assert(target.value != 0U && generation != 0U && pixels != NULL);
-    assert(pitch >= 256U && pixel_stride == 1U && alpha_offset == 0U);
+    assert(mask_width == 16U && mask_height == 32U && pitch >= mask_width && pixel_stride == 1U &&
+           alpha_offset == 0U);
     ++fake->target_alpha_mask_count;
     return true;
 }
@@ -171,8 +173,8 @@ static bool fake_commit_scene(void *context, const EidolonPresentationSceneCommi
 }
 
 int main(void) {
-    EidolonPresentationSelection selection = eidolon_presentation_select(
-        EIDOLON_PRESENTATION_PREFERENCE_NATIVE, true, true, true);
+    EidolonPresentationSelection selection =
+        eidolon_presentation_select(EIDOLON_PRESENTATION_PREFERENCE_NATIVE, true, true, true);
     assert(selection.use_native && !selection.fallback);
     assert(selection.reason == EIDOLON_PRESENTATION_SELECTION_NATIVE_SELECTED);
     selection =
@@ -440,15 +442,15 @@ int main(void) {
     assert(eidolon_presentation_begin_target_update(
         presentation, body_layer, 256U, 512U, EIDOLON_PRESENTATION_ALPHA_STRAIGHT, 1U, &target));
     assert(target.redraw_required && fake.target_create_count == 1U);
-    static const uint8_t alpha_mask[256U * 512U] = {0U};
-    assert(eidolon_presentation_set_target_alpha_mask(presentation, &target, alpha_mask, 256U, 1U,
-                                                      0U));
+    static const uint8_t alpha_mask[16U * 32U] = {0U};
+    assert(eidolon_presentation_set_target_alpha_mask(presentation, &target, 16U, 32U, alpha_mask,
+                                                      16U, 1U, 0U));
     assert(fake.target_alpha_mask_count == 1U);
     const EidolonPresentationTarget first_target = target.target;
     assert(eidolon_presentation_finish_target_update(presentation, &target, true));
     assert(fake.target_submit_count == 1U);
-    assert(!eidolon_presentation_set_target_alpha_mask(presentation, &target, alpha_mask, 256U, 1U,
-                                                       0U));
+    assert(!eidolon_presentation_set_target_alpha_mask(presentation, &target, 16U, 32U, alpha_mask,
+                                                       16U, 1U, 0U));
     assert(eidolon_presentation_begin_target_update(
         presentation, body_layer, 256U, 512U, EIDOLON_PRESENTATION_ALPHA_STRAIGHT, 1U, &target));
     assert(!target.redraw_required && target.target.value == first_target.value);

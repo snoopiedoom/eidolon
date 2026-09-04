@@ -5,9 +5,18 @@
 #include "platform/ipc.h"
 #include "settings_ui.h"
 #include "state.h"
+#include "vrma_review_harness.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct CalibrationCameraInput {
+    bool rotating;
+    bool rolling;
+} CalibrationCameraInput;
+
+static bool handle_calibration_camera_event(EidolonApp *app, const SDL_Event *event,
+                                            CalibrationCameraInput *input);
 
 static bool wait_for_pose_frame(EidolonApp *app, uint64_t previous_revision) {
     const uint64_t started = SDL_GetTicks();
@@ -80,13 +89,15 @@ static bool is_snapshot_command(int argc, char **argv) {
            strcmp(argv[1], "--snapshot-resolution") == 0 ||
            strcmp(argv[1], "--snapshot-performance") == 0 ||
            strcmp(argv[1], "--vrm-runtime-check") == 0 ||
+           strcmp(argv[1], "--vrm-animation-runtime-check") == 0 ||
            strcmp(argv[1], "--snapshot-sessions") == 0 || strcmp(argv[1], "--snapshot-face") == 0 ||
            strcmp(argv[1], "--snapshot-settings") == 0 ||
            strcmp(argv[1], "--snapshot-portrait-motion") == 0;
 }
 
 static bool is_authoring_command(int argc, char **argv) {
-    return argc >= 2 && (strcmp(argv[1], "--review-performance") == 0 ||
+    return argc >= 2 && (strcmp(argv[1], "--review-vrm-animation") == 0 ||
+                         strcmp(argv[1], "--review-performance") == 0 ||
                          strcmp(argv[1], "--calibrate-vrm") == 0);
 }
 
@@ -99,16 +110,17 @@ static void log_usage(void) {
                  "[--snapshot-sessions <output.png>] "
                  "[--snapshot-portrait-motion <expression> <elapsed-ms> <output.png>] "
                  "[--snapshot-pose <index> <output.png>] "
-                  "[--snapshot-resolution <side> <output.png>] "
-                  "[--snapshot-performance <logical-ms> <output.png>] "
-                  "[--calibrate-vrm <model.vrm>] "
-                  "[--review-performance <model.vrm>] "
-                  "[--vrm-runtime-check <model.vrm>] [--hook <state>]");
+                 "[--snapshot-resolution <side> <output.png>] "
+                 "[--snapshot-performance <logical-ms> <output.png>] "
+                 "[--calibrate-vrm <model.vrm>] "
+                 "[--review-performance <model.vrm>] "
+                 "[--review-vrm-animation <model.vrm> <motion.vrma> [selection-output]] "
+                 "[--vrm-runtime-check <model.vrm>] "
+                 "[--vrm-animation-runtime-check <model.vrm> <motion.vrma>] [--hook <state>]");
 }
 
 static bool performance_trace_acceptance_clean(const EidolonPerformanceRuntime *runtime,
-                                               uint64_t minimum_sequence,
-                                               bool require_no_drops) {
+                                               uint64_t minimum_sequence, bool require_no_drops) {
     bool projection_committed = false;
     if (runtime == NULL) {
         return SDL_SetError("EPR acceptance trace is unavailable");
@@ -118,8 +130,7 @@ static bool performance_trace_acceptance_clean(const EidolonPerformanceRuntime *
                             (unsigned long long)runtime->trace.dropped);
     }
     for (size_t index = 0U; index < runtime->trace.count; ++index) {
-        const EidolonEprTraceRecord *record =
-            eidolon_epr_trace_record(&runtime->trace, index);
+        const EidolonEprTraceRecord *record = eidolon_epr_trace_record(&runtime->trace, index);
         if (record == NULL || record->sequence < minimum_sequence) {
             continue;
         }
@@ -137,6 +148,166 @@ static bool performance_trace_acceptance_clean(const EidolonPerformanceRuntime *
     }
     if (!projection_committed) {
         return SDL_SetError("EPR acceptance trace contains no committed projection");
+    }
+    return true;
+}
+
+static uint32_t required_vrma_review_chains(void) {
+    return EIDOLON_VRMA_CHAIN_ROOT | EIDOLON_VRMA_CHAIN_TORSO | EIDOLON_VRMA_CHAIN_HEAD |
+           EIDOLON_VRMA_CHAIN_LEFT_ARM | EIDOLON_VRMA_CHAIN_RIGHT_ARM |
+           EIDOLON_VRMA_CHAIN_LEFT_LEG | EIDOLON_VRMA_CHAIN_RIGHT_LEG;
+}
+
+static bool prepare_vrm_animation(EidolonApp *app, const char *motion_path, uint64_t now_ms,
+                                  EidolonVrmPlaybackReport *playback) {
+    EidolonVrmMeasurements measurements;
+    EidolonVrmCalibration empty_calibration;
+    if (app == NULL || motion_path == NULL || motion_path[0] == '\0' || playback == NULL) {
+        return SDL_SetError("VRM animation preparation received invalid input");
+    }
+    if (!eidolon_app_set_render_mode(app, EIDOLON_RENDER_MODE_MODEL_3D) || app->model == NULL ||
+        !eidolon_model_vrm_measurements(app->model, &measurements)) {
+        return SDL_SetError("VRM animation could not activate the requested body");
+    }
+    eidolon_vrm_calibration_init(&empty_calibration, measurements.anatomy_fingerprint);
+    if (!eidolon_model_set_vrm_calibration(app->model, &empty_calibration)) {
+        return false;
+    }
+    if (!eidolon_model_vrm_animation_load(app->model, motion_path, motion_path, true, now_ms) ||
+        !eidolon_model_vrm_animation_report(app->model, playback)) {
+        return false;
+    }
+    const uint32_t required_chains = required_vrma_review_chains();
+    if (playback->duration_seconds <= 0.0F ||
+        (playback->coverage.varying_chain_mask & required_chains) != required_chains) {
+        return SDL_SetError(
+            "VRMA fixture lacks varying full-body coverage: got 0x%02x, need 0x%02x",
+            (unsigned int)playback->coverage.varying_chain_mask, (unsigned int)required_chains);
+    }
+    return true;
+}
+
+static bool run_vrm_animation_runtime_check(EidolonApp *app, const char *motion_path) {
+    const uint64_t duration_ms = 5000U;
+    const uint64_t tick_ms = 20U;
+    const uint64_t expected_samples = duration_ms / tick_ms + 1U;
+    EidolonVrmPlaybackReport playback;
+    EidolonVrmRuntimeReport initial_runtime;
+    EidolonVrmRuntimeReport runtime;
+
+    if (!prepare_vrm_animation(app, motion_path, 0U, &playback)) {
+        return false;
+    }
+
+    (void)eidolon_model_vrm_runtime_report(app->model, &initial_runtime);
+    SDL_ClearError();
+    const uint64_t previous_transform = eidolon_model_presented_transform_revision(app->model);
+    for (uint64_t tick = 0U; tick <= duration_ms; tick += tick_ms) {
+        if (!eidolon_model_update_motion(app->model, tick)) {
+            return false;
+        }
+        if (tick == 0U || tick == duration_ms) {
+            eidolon_model_update(app->model, tick);
+            if (!eidolon_draw_frame(app)) {
+                return SDL_SetError("VRM animation runtime check could not draw tick %llu",
+                                    (unsigned long long)tick);
+            }
+        }
+    }
+
+    (void)eidolon_model_vrm_runtime_report(app->model, &runtime);
+    SDL_ClearError();
+    if (!eidolon_model_vrm_animation_report(app->model, &playback)) {
+        return SDL_SetError("VRM animation runtime check lost playback diagnostics");
+    }
+    if (!runtime.geometry_ready || !runtime.textures_ready || !runtime.skinning_ready ||
+        !runtime.shaders_ready || !runtime.animation_ready || !runtime.hidden_frame_ready) {
+        return SDL_SetError("VRM animation runtime incomplete geometry=%s textures=%s "
+                            "skinning=%s shaders=%s animation=%s hidden-frame=%s",
+                            runtime.geometry_ready ? "ready" : "failed",
+                            runtime.textures_ready ? "ready" : "failed",
+                            runtime.skinning_ready ? "ready" : "failed",
+                            runtime.shaders_ready ? "ready" : "failed",
+                            runtime.animation_ready ? "ready" : "failed",
+                            runtime.hidden_frame_ready ? "ready" : "failed");
+    }
+    if (playback.state != EIDOLON_VRM_PLAYBACK_PLAYING ||
+        playback.sample_revision < expected_samples ||
+        playback.published_revision != playback.sample_revision ||
+        runtime.playback_revision != playback.published_revision ||
+        runtime.base_revision < initial_runtime.base_revision + expected_samples ||
+        runtime.frame_sequence <= initial_runtime.frame_sequence ||
+        eidolon_model_presented_transform_revision(app->model) <= previous_transform) {
+        return SDL_SetError("VRM animation transaction did not publish every sample/frame "
+                            "samples=%llu published=%llu base=%llu->%llu frame=%llu->%llu",
+                            (unsigned long long)playback.sample_revision,
+                            (unsigned long long)playback.published_revision,
+                            (unsigned long long)initial_runtime.base_revision,
+                            (unsigned long long)runtime.base_revision,
+                            (unsigned long long)initial_runtime.frame_sequence,
+                            (unsigned long long)runtime.frame_sequence);
+    }
+    SDL_Log("vrm-animation-runtime-check passed body=%s duration=%.3fs tracks=%zu "
+            "varying=%zu chains=0x%02x samples=%llu base=revision:%llu "
+            "hidden-gpu-frame=sequence:%llu sidecar=disabled",
+            eidolon_model_body_name(app->model), playback.duration_seconds,
+            playback.coverage.rotation_track_count, playback.coverage.varying_rotation_track_count,
+            (unsigned int)playback.coverage.varying_chain_mask,
+            (unsigned long long)playback.sample_revision, (unsigned long long)runtime.base_revision,
+            (unsigned long long)runtime.frame_sequence);
+    return true;
+}
+
+static bool run_vrm_animation_review(EidolonApp *app, const char *motion_path) {
+    EidolonVrmPlaybackReport playback;
+    CalibrationCameraInput camera_input = {0};
+    const uint64_t started_ms = SDL_GetTicks();
+    bool completed_loop = false;
+    bool running = true;
+    if (!prepare_vrm_animation(app, motion_path, started_ms, &playback) ||
+        (app->window != NULL && !SDL_ShowWindow(app->window))) {
+        return false;
+    }
+    const uint64_t loop_duration_ms = (uint64_t)SDL_ceilf(playback.duration_seconds * 1000.0F);
+    SDL_Log("VRMA review active body=%s duration=%.3fs tracks=%zu varying=%zu chains=0x%02x; "
+            "middle-drag rotates, Shift+middle rolls, wheel resizes, double-middle resets; "
+            "close or press Escape after at least one full loop",
+            eidolon_model_body_name(app->model), playback.duration_seconds,
+            playback.coverage.rotation_track_count, playback.coverage.varying_rotation_track_count,
+            (unsigned int)playback.coverage.varying_chain_mask);
+    while (running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (handle_calibration_camera_event(app, &event, &camera_input)) {
+                continue;
+            }
+            if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                running = false;
+            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+                       event.key.key == SDLK_ESCAPE) {
+                running = false;
+            }
+        }
+        eidolon_app_pump_presentation_events(app);
+        running = running && app->running;
+        const uint64_t now_ms = SDL_GetTicks();
+        eidolon_model_update(app->model, now_ms);
+        if (!eidolon_model_vrm_animation_report(app->model, &playback) ||
+            playback.state == EIDOLON_VRM_PLAYBACK_FAILED) {
+            return SDL_SetError("VRMA review playback failed: %s", playback.failure);
+        }
+        if (running && !eidolon_draw_frame(app)) {
+            return SDL_SetError("VRMA review could not present a native frame");
+        }
+        if (!completed_loop && now_ms - started_ms >= loop_duration_ms) {
+            completed_loop = true;
+            SDL_Log("VRMA review completed one full loop; close when inspection is finished");
+        }
+        SDL_Delay(8U);
+    }
+    SDL_CaptureMouse(false);
+    if (!completed_loop) {
+        return SDL_SetError("VRMA review closed before one complete animation loop");
     }
     return true;
 }
@@ -183,8 +354,8 @@ static bool run_performance_review(EidolonApp *app) {
             next_tick += 20U;
         }
         if (!pass_complete && next_tick > duration_ms) {
-            if (!performance_trace_acceptance_clean(&app->performance_runtime,
-                                                    cycle_trace_sequence, false)) {
+            if (!performance_trace_acceptance_clean(&app->performance_runtime, cycle_trace_sequence,
+                                                    false)) {
                 return false;
             }
             pass_complete = true;
@@ -213,11 +384,6 @@ static bool run_performance_review(EidolonApp *app) {
     }
     return true;
 }
-
-typedef struct CalibrationCameraInput {
-    bool rotating;
-    bool rolling;
-} CalibrationCameraInput;
 
 static bool handle_calibration_camera_event(EidolonApp *app, const SDL_Event *event,
                                             CalibrationCameraInput *input) {
@@ -258,12 +424,10 @@ static bool handle_calibration_camera_event(EidolonApp *app, const SDL_Event *ev
             return false;
         }
         if (input->rolling) {
-            eidolon_app_set_model_rotation(app, app->model_yaw_degrees,
-                                           app->model_pitch_degrees,
+            eidolon_app_set_model_rotation(app, app->model_yaw_degrees, app->model_pitch_degrees,
                                            app->model_roll_degrees + event->motion.xrel * 0.35F);
         } else {
-            eidolon_app_set_model_rotation(app,
-                                           app->model_yaw_degrees + event->motion.xrel * 0.35F,
+            eidolon_app_set_model_rotation(app, app->model_yaw_degrees + event->motion.xrel * 0.35F,
                                            app->model_pitch_degrees + event->motion.yrel * 0.35F,
                                            app->model_roll_degrees);
         }
@@ -309,9 +473,8 @@ static bool run_vrm_calibration(EidolonApp *app, const char *sidecar_path) {
             if (handle_calibration_camera_event(app, &event, &camera_input)) {
                 continue;
             }
-            if (event.type == SDL_EVENT_QUIT ||
-                (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-                 SDL_GetWindowFromEvent(&event) == app->window)) {
+            if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                                                 SDL_GetWindowFromEvent(&event) == app->window)) {
                 running = false;
             } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
                        SDL_GetWindowFromEvent(&event) == app->window) {
@@ -378,17 +541,25 @@ int main(int argc, char **argv) {
     }
     if (argc == 3 &&
         (strcmp(argv[1], "--vrm-runtime-check") == 0 ||
-         strcmp(argv[1], "--review-performance") == 0 ||
-         strcmp(argv[1], "--calibrate-vrm") == 0) &&
+         strcmp(argv[1], "--review-performance") == 0 || strcmp(argv[1], "--calibrate-vrm") == 0) &&
         SDL_setenv_unsafe("EIDOLON_VRM_PATH", argv[2], 1) != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not configure VRM runtime path");
         return 1;
     }
+    const bool vrm_animation_review =
+        (argc == 4 || argc == 5) && strcmp(argv[1], "--review-vrm-animation") == 0;
+    if (((argc == 4 && strcmp(argv[1], "--vrm-animation-runtime-check") == 0) ||
+         vrm_animation_review) &&
+        SDL_setenv_unsafe("EIDOLON_VRM_PATH", argv[2], 1) != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not configure VRM animation body path");
+        return 1;
+    }
     EidolonApp app;
     eidolon_log_write("renderer", "%s process starting",
-                      snapshot_mode ? "snapshot"
-                                    : authoring_mode ? "authoring" : "interactive");
-    const EidolonAppMode app_mode = snapshot_mode   ? EIDOLON_APP_SNAPSHOT
+                      snapshot_mode    ? "snapshot"
+                      : authoring_mode ? "authoring"
+                                       : "interactive");
+    const EidolonAppMode app_mode = snapshot_mode    ? EIDOLON_APP_SNAPSHOT
                                     : authoring_mode ? EIDOLON_APP_AUTHORING
                                                      : EIDOLON_APP_INTERACTIVE;
     if (!eidolon_app_init(&app, app_mode)) {
@@ -556,8 +727,8 @@ int main(int argc, char **argv) {
         ready = ready && advanced && wait_for_pose_frame(&app, previous_revision) &&
                 eidolon_model_vrm_runtime_report(app.model, &report) &&
                 performance_trace_acceptance_clean(&app.performance_runtime, 1U, true);
-        if (ready && (!app.performance_runtime.has_tick ||
-                      app.performance_runtime.last_tick != 5000)) {
+        if (ready &&
+            (!app.performance_runtime.has_tick || app.performance_runtime.last_tick != 5000)) {
             ready = SDL_SetError("EPR runtime check did not reach the five-second endpoint");
         }
         if (ready && report.projection_revision != app.performance_runtime.control.revision) {
@@ -581,6 +752,32 @@ int main(int argc, char **argv) {
         }
         eidolon_app_destroy(&app);
         return ready ? 0 : 1;
+    }
+
+    if (argc == 4 && strcmp(argv[1], "--vrm-animation-runtime-check") == 0) {
+        const bool ready = run_vrm_animation_runtime_check(&app, argv[3]);
+        if (!ready) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "vrm-animation-runtime-check failed: %s",
+                         SDL_GetError());
+        }
+        eidolon_app_destroy(&app);
+        return ready ? 0 : 1;
+    }
+
+    if (vrm_animation_review) {
+        bool reviewed;
+        if (argc == 5) {
+            EidolonVrmPlaybackReport playback;
+            reviewed = prepare_vrm_animation(&app, argv[3], SDL_GetTicks(), &playback) &&
+                       eidolon_vrma_review_harness_run(&app, &playback, argv[4]);
+        } else {
+            reviewed = run_vrm_animation_review(&app, argv[3]);
+        }
+        if (!reviewed) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VRMA review failed: %s", SDL_GetError());
+        }
+        eidolon_app_destroy(&app);
+        return reviewed ? 0 : 1;
     }
 
     if (argc == 3 && strcmp(argv[1], "--review-performance") == 0) {

@@ -29,10 +29,8 @@ static void cross3(const float left[3], const float right[3], float result[3]) {
 }
 
 static bool quaternion_normalize(float quaternion[4]) {
-    const float length = SDL_sqrtf(quaternion[0] * quaternion[0] +
-                                   quaternion[1] * quaternion[1] +
-                                   quaternion[2] * quaternion[2] +
-                                   quaternion[3] * quaternion[3]);
+    const float length = SDL_sqrtf(quaternion[0] * quaternion[0] + quaternion[1] * quaternion[1] +
+                                   quaternion[2] * quaternion[2] + quaternion[3] * quaternion[3]);
     if (!isfinite(length) || length <= VRM_PROJECTION_EPSILON) {
         return false;
     }
@@ -50,6 +48,22 @@ static void quaternion_multiply(const float left[4], const float right[4], float
         left[3] * right[3] - left[0] * right[0] - left[1] * right[1] - left[2] * right[2],
     };
     memcpy(result, product, sizeof(product));
+}
+
+static bool quaternion_mix(const float from[4], const float to[4], float weight, float result[4]) {
+    float dot = 0.0F;
+    float sign;
+    if (!isfinite(weight) || weight < 0.0F || weight > 1.0F) {
+        return false;
+    }
+    for (size_t component = 0U; component < 4U; ++component) {
+        dot += from[component] * to[component];
+    }
+    sign = dot < 0.0F ? -1.0F : 1.0F;
+    for (size_t component = 0U; component < 4U; ++component) {
+        result[component] = from[component] + (to[component] * sign - from[component]) * weight;
+    }
+    return quaternion_normalize(result);
 }
 
 static void quaternion_inverse(const float quaternion[4], float inverse[4]) {
@@ -221,15 +235,148 @@ static bool apply_right_arm(EidolonMotionRig *rig, const EidolonVrmProjection *p
     subtract3(hand_position, lower_position, current_direction);
     subtract3(control->right_hand_position, lower_position, desired_direction);
     if (!rotate_node_toward(rig, lower, current_direction, desired_direction) ||
-        !apply_corrected_euler(projection, &rig->nodes[(size_t)hand],
-                               EIDOLON_VRM_BONE_RIGHT_HAND, control->right_wrist_euler[0],
-                               control->right_wrist_euler[1], control->right_wrist_euler[2])) {
+        !apply_corrected_euler(projection, &rig->nodes[(size_t)hand], EIDOLON_VRM_BONE_RIGHT_HAND,
+                               control->right_wrist_euler[0], control->right_wrist_euler[1],
+                               control->right_wrist_euler[2])) {
         return false;
     }
     return eidolon_motion_rebuild_world(rig);
 }
 
+static const EidolonVrmHumanBone
+    RIGHT_ARM_CONTINUITY_BONES[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT] = {
+        EIDOLON_VRM_BONE_RIGHT_SHOULDER,
+        EIDOLON_VRM_BONE_RIGHT_UPPER_ARM,
+        EIDOLON_VRM_BONE_RIGHT_LOWER_ARM,
+        EIDOLON_VRM_BONE_RIGHT_HAND,
+};
+
+static bool
+prepare_right_arm_continuity(const EidolonVrmProjection *projection,
+                             const EidolonMotionRig *live_rig,
+                             const EidolonCanonicalControl *control,
+                             float rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4],
+                             uint64_t *continuity_id, bool *has_continuity) {
+    const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
+    memset(rotations, 0, sizeof(float) * EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT * 4U);
+    for (size_t index = 0U; index < EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT; ++index) {
+        rotations[index][3] = 1.0F;
+    }
+    *continuity_id = 0U;
+    *has_continuity = false;
+    if ((control->procedural_resource_mask & right_arm) == 0U ||
+        control->right_arm_continuity_weight <= VRM_PROJECTION_EPSILON) {
+        return true;
+    }
+    if (control->right_arm_continuity_id == 0U) {
+        return false;
+    }
+    if (projection->has_right_arm_continuity &&
+        projection->right_arm_continuity_id == control->right_arm_continuity_id) {
+        memcpy(rotations, projection->right_arm_continuity_rotations,
+               sizeof(projection->right_arm_continuity_rotations));
+    } else {
+        for (size_t index = 0U; index < EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT; ++index) {
+            const int node = projection->nodes[(size_t)RIGHT_ARM_CONTINUITY_BONES[index]];
+            if (node < 0) {
+                continue;
+            }
+            memcpy(rotations[index], live_rig->nodes[(size_t)node].rotation,
+                   sizeof(rotations[index]));
+            if (!quaternion_normalize(rotations[index])) {
+                return false;
+            }
+        }
+    }
+    *continuity_id = control->right_arm_continuity_id;
+    *has_continuity = true;
+    return true;
+}
+
+static bool
+apply_right_arm_continuity(EidolonMotionRig *rig, const EidolonVrmProjection *projection,
+                           const float rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4],
+                           bool has_continuity, float weight) {
+    if (weight <= VRM_PROJECTION_EPSILON) {
+        return true;
+    }
+    if (!has_continuity) {
+        return false;
+    }
+    for (size_t index = 0U; index < EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT; ++index) {
+        const int node = projection->nodes[(size_t)RIGHT_ARM_CONTINUITY_BONES[index]];
+        float blended[4];
+        if (node < 0) {
+            continue;
+        }
+        if (!quaternion_mix(rig->nodes[(size_t)node].rotation, rotations[index], weight, blended)) {
+            return false;
+        }
+        memcpy(rig->nodes[(size_t)node].rotation, blended, sizeof(blended));
+    }
+    return eidolon_motion_rebuild_world(rig);
+}
+
+static bool apply_weighted_right_arm(EidolonMotionRig *rig, const EidolonVrmProjection *projection,
+                                     const EidolonCanonicalControl *control, float weight) {
+    static const EidolonVrmHumanBone bones[] = {
+        EIDOLON_VRM_BONE_RIGHT_UPPER_ARM,
+        EIDOLON_VRM_BONE_RIGHT_LOWER_ARM,
+        EIDOLON_VRM_BONE_RIGHT_HAND,
+    };
+    float source[SDL_arraysize(bones)][4];
+    if (weight <= VRM_PROJECTION_EPSILON) {
+        return true;
+    }
+    for (size_t index = 0U; index < SDL_arraysize(bones); ++index) {
+        const int node = projection->nodes[(size_t)bones[index]];
+        memcpy(source[index], rig->nodes[(size_t)node].rotation, sizeof(source[index]));
+    }
+    if (!apply_right_arm(rig, projection, control)) {
+        return false;
+    }
+    if (weight >= 1.0F - VRM_PROJECTION_EPSILON) {
+        return true;
+    }
+    for (size_t index = 0U; index < SDL_arraysize(bones); ++index) {
+        const int node = projection->nodes[(size_t)bones[index]];
+        float blended[4];
+        if (!quaternion_mix(source[index], rig->nodes[(size_t)node].rotation, weight, blended)) {
+            return false;
+        }
+        memcpy(rig->nodes[(size_t)node].rotation, blended, sizeof(blended));
+    }
+    return eidolon_motion_rebuild_world(rig);
+}
+
+static void
+commit_right_arm_continuity(EidolonVrmProjection *projection,
+                            const float rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4],
+                            uint64_t continuity_id, bool has_continuity) {
+    projection->has_right_arm_continuity = has_continuity;
+    projection->right_arm_continuity_id = has_continuity ? continuity_id : 0U;
+    if (has_continuity) {
+        memcpy(projection->right_arm_continuity_rotations, rotations,
+               sizeof(projection->right_arm_continuity_rotations));
+    } else {
+        memset(projection->right_arm_continuity_rotations, 0,
+               sizeof(projection->right_arm_continuity_rotations));
+    }
+}
+
+static void clear_right_arm_continuity(EidolonVrmProjection *projection) {
+    float rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4] = {{0}};
+    commit_right_arm_continuity(projection, rotations, 0U, false);
+}
+
+static uint32_t procedural_resource_mask(void) {
+    return (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD) | (UINT32_C(1) << EIDOLON_EPR_RESOURCE_EYES) |
+           (UINT32_C(1) << EIDOLON_EPR_RESOURCE_FACE_EXPRESSION) |
+           (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN);
+}
+
 static bool control_finite(const EidolonCanonicalControl *control) {
+    const uint32_t right_arm = UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN;
     const float scalars[] = {
         control->torso_pitch,
         control->torso_yaw,
@@ -242,11 +389,14 @@ static bool control_finite(const EidolonCanonicalControl *control) {
         control->eye_weight,
         control->head_gaze_weight,
         control->focused_expression_weight,
+        control->head_gaze_pitch,
+        control->head_gaze_yaw,
+        control->right_arm_ik_weight,
+        control->right_arm_continuity_weight,
     };
     const float *vectors[] = {
-        control->gaze_target,        control->right_hand_target,
-        control->right_elbow_pole,   control->right_elbow_position,
-        control->right_hand_position, control->right_wrist_euler,
+        control->gaze_target,          control->right_hand_target,   control->right_elbow_pole,
+        control->right_elbow_position, control->right_hand_position, control->right_wrist_euler,
         control->right_arm_velocity,
     };
     for (size_t index = 0U; index < SDL_arraysize(scalars); ++index) {
@@ -260,6 +410,17 @@ static bool control_finite(const EidolonCanonicalControl *control) {
                 return false;
             }
         }
+    }
+    if ((control->procedural_resource_mask & ~procedural_resource_mask()) != 0U ||
+        control->right_arm_ik_weight < 0.0F || control->right_arm_ik_weight > 1.0F ||
+        control->right_arm_continuity_weight < 0.0F ||
+        control->right_arm_continuity_weight > 1.0F ||
+        ((control->procedural_resource_mask & right_arm) == 0U &&
+         (control->right_arm_ik_weight != 0.0F || control->right_arm_continuity_weight != 0.0F ||
+          control->right_arm_continuity_id != 0U)) ||
+        ((control->right_arm_continuity_weight > 0.0F) !=
+         (control->right_arm_continuity_id != 0U))) {
+        return false;
     }
     for (size_t anchor = 0U; anchor < EIDOLON_EPR_POSE_ANCHOR_COUNT; ++anchor) {
         for (size_t resource = 0U; resource < EIDOLON_EPR_RESOURCE_COUNT; ++resource) {
@@ -445,40 +606,80 @@ static bool apply_calibration_residuals(EidolonMotionRig *rig,
     return eidolon_motion_rebuild_world(rig);
 }
 
-static bool apply_control(const EidolonVrmProjection *projection, EidolonMotionRig *rig,
-                          const EidolonCanonicalControl *control, float *expression_weight) {
+static bool apply_eye_gaze(const EidolonVrmProjection *projection, EidolonMotionRig *rig,
+                           const EidolonCanonicalControl *control) {
+    const int left_eye = projection->nodes[EIDOLON_VRM_BONE_LEFT_EYE];
+    const int right_eye = projection->nodes[EIDOLON_VRM_BONE_RIGHT_EYE];
+    if (!projection->look_at_executable || left_eye < 0 || right_eye < 0 ||
+        control->eye_weight <= 0.0F) {
+        return true;
+    }
+    return apply_corrected_euler(projection, &rig->nodes[(size_t)left_eye],
+                                 EIDOLON_VRM_BONE_LEFT_EYE, control->eye_pitch, control->eye_yaw,
+                                 0.0F) &&
+           apply_corrected_euler(projection, &rig->nodes[(size_t)right_eye],
+                                 EIDOLON_VRM_BONE_RIGHT_EYE, control->eye_pitch, control->eye_yaw,
+                                 0.0F);
+}
+
+static float expression_weight(const EidolonVrmProjection *projection,
+                               const EidolonCanonicalControl *control) {
+    float weight = projection->expression_executable
+                       ? SDL_clamp(control->focused_expression_weight, 0.0F, 1.0F)
+                       : 0.0F;
+    if (projection->expression_is_binary) {
+        weight = weight > 0.5F ? 1.0F : 0.0F;
+    }
+    return weight;
+}
+
+static bool apply_legacy_control(const EidolonVrmProjection *projection, EidolonMotionRig *rig,
+                                 const EidolonCanonicalControl *control,
+                                 float *projected_expression_weight) {
     const EidolonVrmHumanBone torso_bone = chest_bone(projection);
     const int torso = projection->nodes[(size_t)torso_bone];
     const int head = projection->nodes[EIDOLON_VRM_BONE_HEAD];
-    const int left_eye = projection->nodes[EIDOLON_VRM_BONE_LEFT_EYE];
-    const int right_eye = projection->nodes[EIDOLON_VRM_BONE_RIGHT_EYE];
     if (!apply_corrected_euler(projection, &rig->nodes[(size_t)torso], torso_bone,
-                               control->torso_pitch, control->torso_yaw,
-                               control->torso_roll) ||
+                               control->torso_pitch, control->torso_yaw, control->torso_roll) ||
         !apply_corrected_euler(projection, &rig->nodes[(size_t)head], EIDOLON_VRM_BONE_HEAD,
-                               control->head_pitch, control->head_yaw, control->head_roll)) {
+                               control->head_pitch, control->head_yaw, control->head_roll) ||
+        !apply_eye_gaze(projection, rig, control) || !eidolon_motion_rebuild_world(rig) ||
+        !apply_right_arm(rig, projection, control)) {
         return false;
     }
-    if (projection->look_at_executable && left_eye >= 0 && right_eye >= 0 &&
-        control->eye_weight > 0.0F) {
-        if (!apply_corrected_euler(projection, &rig->nodes[(size_t)left_eye],
-                                   EIDOLON_VRM_BONE_LEFT_EYE, control->eye_pitch,
-                                   control->eye_yaw, 0.0F) ||
-            !apply_corrected_euler(projection, &rig->nodes[(size_t)right_eye],
-                                   EIDOLON_VRM_BONE_RIGHT_EYE, control->eye_pitch,
-                                   control->eye_yaw, 0.0F)) {
-            return false;
-        }
-    }
-    if (!eidolon_motion_rebuild_world(rig) || !apply_right_arm(rig, projection, control)) {
+    *projected_expression_weight = expression_weight(projection, control);
+    return true;
+}
+
+static bool apply_procedural_control(
+    const EidolonVrmProjection *projection, EidolonMotionRig *rig,
+    const EidolonCanonicalControl *control,
+    const float continuity_rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4],
+    bool has_continuity, float *projected_expression_weight) {
+    const uint32_t mask = control->procedural_resource_mask;
+    const int head = projection->nodes[EIDOLON_VRM_BONE_HEAD];
+    if ((mask & (UINT32_C(1) << EIDOLON_EPR_RESOURCE_HEAD)) != 0U &&
+        !apply_corrected_euler(projection, &rig->nodes[(size_t)head], EIDOLON_VRM_BONE_HEAD,
+                               control->head_gaze_pitch, control->head_gaze_yaw, 0.0F)) {
         return false;
     }
-    *expression_weight = projection->expression_executable
-                             ? SDL_clamp(control->focused_expression_weight, 0.0F, 1.0F)
-                             : 0.0F;
-    if (projection->expression_is_binary) {
-        *expression_weight = *expression_weight > 0.5F ? 1.0F : 0.0F;
+    if ((mask & (UINT32_C(1) << EIDOLON_EPR_RESOURCE_EYES)) != 0U &&
+        !apply_eye_gaze(projection, rig, control)) {
+        return false;
     }
+    if (!eidolon_motion_rebuild_world(rig)) {
+        return false;
+    }
+    if ((mask & (UINT32_C(1) << EIDOLON_EPR_RESOURCE_RIGHT_ARM_CHAIN)) != 0U &&
+        (!apply_right_arm_continuity(rig, projection, continuity_rotations, has_continuity,
+                                     control->right_arm_continuity_weight) ||
+         !apply_weighted_right_arm(rig, projection, control, control->right_arm_ik_weight))) {
+        return false;
+    }
+    *projected_expression_weight =
+        (mask & (UINT32_C(1) << EIDOLON_EPR_RESOURCE_FACE_EXPRESSION)) != 0U
+            ? expression_weight(projection, control)
+            : 0.0F;
     return true;
 }
 
@@ -488,8 +689,7 @@ static void mark_owned_node(EidolonVrmProjection *projection, int node) {
     }
 }
 
-static bool initialize_bind_frames(EidolonVrmProjection *projection,
-                                   const EidolonMotionRig *rig) {
+static bool initialize_bind_frames(EidolonVrmProjection *projection, const EidolonMotionRig *rig) {
     copy_local_pose(&projection->scratch, rig);
     for (size_t index = 0U; index < projection->node_count; ++index) {
         EidolonMotionNode *node = &projection->scratch.nodes[index];
@@ -508,8 +708,7 @@ static bool initialize_bind_frames(EidolonVrmProjection *projection,
             projection->inverse_bind_world_rotations[bone][3] = 1.0F;
             continue;
         }
-        if (!node_world_rotation(&projection->scratch, node,
-                                 projection->bind_world_rotations[bone],
+        if (!node_world_rotation(&projection->scratch, node, projection->bind_world_rotations[bone],
                                  projection->node_count + 1U)) {
             return false;
         }
@@ -529,8 +728,7 @@ bool eidolon_vrm_projection_init(EidolonVrmProjection *projection, const Eidolon
     }
     memset(projection, 0, sizeof(*projection));
     memcpy(projection->nodes, body->node_by_bone, sizeof(projection->nodes));
-    projection->look_at_executable =
-        body->look_at.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
+    projection->look_at_executable = body->look_at.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
     projection->expression_executable =
         body->relaxed_expression.state == EIDOLON_VRM_CAPABILITY_EXECUTABLE;
     projection->expression_is_binary = body->relaxed_expression.is_binary;
@@ -558,8 +756,7 @@ bool eidolon_vrm_projection_init(EidolonVrmProjection *projection, const Eidolon
     if (projection->base_translations == NULL || projection->base_rotations == NULL ||
         projection->base_scales == NULL || projection->owned_nodes == NULL ||
         projection->residual_owned_nodes == NULL ||
-        projection->candidate_residual_owned_nodes == NULL ||
-        scratch_nodes == NULL) {
+        projection->candidate_residual_owned_nodes == NULL || scratch_nodes == NULL) {
         SDL_free(scratch_nodes);
         eidolon_vrm_projection_destroy(projection);
         return false;
@@ -597,7 +794,8 @@ bool eidolon_vrm_projection_capture_base(EidolonVrmProjection *projection,
                                          const EidolonMotionRig *rig) {
     if (projection == NULL || rig == NULL || rig->node_count != projection->node_count ||
         projection->base_translations == NULL || projection->base_rotations == NULL ||
-        projection->base_scales == NULL || !pose_finite(rig)) {
+        projection->base_scales == NULL || projection->base_revision == UINT64_MAX ||
+        !pose_finite(rig)) {
         return false;
     }
     for (size_t index = 0U; index < rig->node_count; ++index) {
@@ -608,7 +806,194 @@ bool eidolon_vrm_projection_capture_base(EidolonVrmProjection *projection,
         memcpy(projection->base_scales[index], rig->nodes[index].scale,
                sizeof(projection->base_scales[index]));
     }
+    projection->base_revision += 1U;
+    projection->has_motion_frame = false;
+    clear_right_arm_continuity(projection);
     return true;
+}
+
+bool eidolon_vrm_projection_publish_base(EidolonVrmProjection *projection,
+                                         EidolonMotionRig *live_rig,
+                                         const EidolonMotionRig *candidate) {
+    if (projection == NULL || live_rig == NULL || candidate == NULL || !projection->ready ||
+        live_rig->nodes == NULL || candidate->nodes == NULL ||
+        live_rig->node_count != projection->node_count ||
+        candidate->node_count != projection->node_count || !pose_finite(candidate) ||
+        projection->base_revision == UINT64_MAX) {
+        return false;
+    }
+    for (size_t index = 0U; index < candidate->node_count; ++index) {
+        memcpy(projection->base_translations[index], candidate->nodes[index].translation,
+               sizeof(projection->base_translations[index]));
+        memcpy(projection->base_rotations[index], candidate->nodes[index].rotation,
+               sizeof(projection->base_rotations[index]));
+        memcpy(projection->base_scales[index], candidate->nodes[index].scale,
+               sizeof(projection->base_scales[index]));
+    }
+    copy_local_pose(live_rig, candidate);
+    for (size_t index = 0U; index < candidate->node_count; ++index) {
+        memcpy(live_rig->nodes[index].world, candidate->nodes[index].world,
+               sizeof(live_rig->nodes[index].world));
+        live_rig->nodes[index].world_state = candidate->nodes[index].world_state;
+    }
+    projection->base_revision += 1U;
+    projection->has_motion_frame = false;
+    clear_right_arm_continuity(projection);
+    return true;
+}
+
+bool eidolon_vrm_projection_publish_base_calibrated(EidolonVrmProjection *projection,
+                                                    EidolonMotionRig *live_rig,
+                                                    const EidolonMotionRig *candidate,
+                                                    const EidolonCanonicalControl *control,
+                                                    const EidolonVrmCalibration *calibration) {
+    float expression_weight = 0.0F;
+    if (projection == NULL || live_rig == NULL || candidate == NULL || control == NULL ||
+        !projection->ready || live_rig->nodes == NULL || candidate->nodes == NULL ||
+        live_rig->node_count != projection->node_count ||
+        candidate->node_count != projection->node_count || !pose_finite(candidate) ||
+        projection->base_revision == UINT64_MAX || !control->valid ||
+        control->version != EIDOLON_EPR_CONTROL_VERSION || control->revision == 0U ||
+        !control_finite(control) || control->revision < projection->control_revision) {
+        return false;
+    }
+    if (!prepare_residual_ownership(projection, control, calibration)) {
+        return false;
+    }
+    copy_local_pose(&projection->scratch, candidate);
+    if (!eidolon_motion_rebuild_world(&projection->scratch) ||
+        !apply_legacy_control(projection, &projection->scratch, control, &expression_weight) ||
+        !apply_calibration_residuals(&projection->scratch, projection, control, calibration) ||
+        !pose_finite(&projection->scratch)) {
+        return false;
+    }
+    for (size_t index = 0U; index < candidate->node_count; ++index) {
+        memcpy(projection->base_translations[index], candidate->nodes[index].translation,
+               sizeof(projection->base_translations[index]));
+        memcpy(projection->base_rotations[index], candidate->nodes[index].rotation,
+               sizeof(projection->base_rotations[index]));
+        memcpy(projection->base_scales[index], candidate->nodes[index].scale,
+               sizeof(projection->base_scales[index]));
+    }
+    copy_local_pose(live_rig, &projection->scratch);
+    for (size_t index = 0U; index < candidate->node_count; ++index) {
+        memcpy(live_rig->nodes[index].world, projection->scratch.nodes[index].world,
+               sizeof(live_rig->nodes[index].world));
+        live_rig->nodes[index].world_state = projection->scratch.nodes[index].world_state;
+    }
+    projection->base_revision += 1U;
+    projection->focused_expression_weight = expression_weight;
+    projection->control_revision = control->revision;
+    projection->projected_base_revision = projection->base_revision;
+    memcpy(projection->residual_owned_nodes, projection->candidate_residual_owned_nodes,
+           projection->node_count * sizeof(*projection->residual_owned_nodes));
+    projection->has_motion_frame = false;
+    clear_right_arm_continuity(projection);
+    return true;
+}
+
+static bool publish_motion_frame_calibrated(EidolonVrmProjection *projection,
+                                            EidolonVrmRetargeter *normalized_projector,
+                                            EidolonMotionRig *live_rig,
+                                            const EidolonMotionRig *candidate_base,
+                                            const EidolonEprMotionFrame *frame,
+                                            const EidolonCanonicalControl *control,
+                                            const EidolonVrmCalibration *calibration) {
+    float expression_weight = 0.0F;
+    float continuity_rotations[EIDOLON_VRM_PROJECTION_RIGHT_ARM_BONE_COUNT][4];
+    uint64_t continuity_id = 0U;
+    bool has_continuity = false;
+    const bool advances_base = candidate_base != NULL;
+    if (projection == NULL || normalized_projector == NULL || live_rig == NULL || frame == NULL ||
+        control == NULL || !projection->ready || live_rig->nodes == NULL ||
+        live_rig->node_count != projection->node_count || !pose_finite(live_rig) ||
+        (advances_base &&
+         (candidate_base->nodes == NULL || candidate_base->node_count != projection->node_count ||
+          !pose_finite(candidate_base) || projection->base_revision == UINT64_MAX)) ||
+        frame->version != EIDOLON_EPR_MOTION_FRAME_VERSION || frame->execution_count == 0U ||
+        frame->execution_count > EIDOLON_EPR_PROGRAM_CAPACITY || frame->plan_generation == 0U ||
+        frame->plan_generation != control->plan_generation || frame->tick != control->tick ||
+        !eidolon_humanoid_pose_validate(&frame->pose) ||
+        (frame->pose.rotation_mask == 0U && !frame->pose.has_hips_translation) || !control->valid ||
+        control->version != EIDOLON_EPR_CONTROL_VERSION || control->revision == 0U ||
+        !control_finite(control) || control->revision < projection->control_revision ||
+        (projection->has_motion_frame &&
+         (frame->plan_generation < projection->motion_plan_generation ||
+          (frame->plan_generation == projection->motion_plan_generation &&
+           frame->tick < projection->motion_tick)))) {
+        return false;
+    }
+    if (!advances_base && control->revision == projection->control_revision &&
+        projection->has_motion_frame &&
+        frame->plan_generation == projection->motion_plan_generation &&
+        frame->tick == projection->motion_tick &&
+        projection->projected_base_revision == projection->base_revision) {
+        return false;
+    }
+    if (!prepare_residual_ownership(projection, control, calibration) ||
+        !prepare_right_arm_continuity(projection, live_rig, control, continuity_rotations,
+                                      &continuity_id, &has_continuity)) {
+        return false;
+    }
+    if (advances_base) {
+        copy_local_pose(&projection->scratch, candidate_base);
+    } else {
+        stage_base_pose(projection, live_rig);
+    }
+    if (!eidolon_motion_rebuild_world(&projection->scratch) ||
+        !eidolon_vrm_retargeter_apply_normalized(normalized_projector, &frame->pose,
+                                                 EIDOLON_VRM_ROOT_MOTION_IN_PLACE,
+                                                 &projection->scratch, NULL, 0U) ||
+        !apply_calibration_residuals(&projection->scratch, projection, control, calibration) ||
+        !apply_procedural_control(projection, &projection->scratch, control, continuity_rotations,
+                                  has_continuity, &expression_weight) ||
+        !pose_finite(&projection->scratch)) {
+        return false;
+    }
+    if (advances_base) {
+        for (size_t index = 0U; index < candidate_base->node_count; ++index) {
+            memcpy(projection->base_translations[index], candidate_base->nodes[index].translation,
+                   sizeof(projection->base_translations[index]));
+            memcpy(projection->base_rotations[index], candidate_base->nodes[index].rotation,
+                   sizeof(projection->base_rotations[index]));
+            memcpy(projection->base_scales[index], candidate_base->nodes[index].scale,
+                   sizeof(projection->base_scales[index]));
+        }
+        projection->base_revision += 1U;
+    }
+    copy_local_pose(live_rig, &projection->scratch);
+    for (size_t index = 0U; index < live_rig->node_count; ++index) {
+        memcpy(live_rig->nodes[index].world, projection->scratch.nodes[index].world,
+               sizeof(live_rig->nodes[index].world));
+        live_rig->nodes[index].world_state = projection->scratch.nodes[index].world_state;
+    }
+    commit_right_arm_continuity(projection, continuity_rotations, continuity_id, has_continuity);
+    projection->focused_expression_weight = expression_weight;
+    projection->control_revision = control->revision;
+    projection->projected_base_revision = projection->base_revision;
+    projection->motion_plan_generation = frame->plan_generation;
+    projection->motion_tick = frame->tick;
+    projection->has_motion_frame = true;
+    memcpy(projection->residual_owned_nodes, projection->candidate_residual_owned_nodes,
+           projection->node_count * sizeof(*projection->residual_owned_nodes));
+    return true;
+}
+
+bool eidolon_vrm_projection_apply_motion_frame_calibrated(
+    EidolonVrmProjection *projection, EidolonVrmRetargeter *normalized_projector,
+    EidolonMotionRig *live_rig, const EidolonEprMotionFrame *frame,
+    const EidolonCanonicalControl *control, const EidolonVrmCalibration *calibration) {
+    return publish_motion_frame_calibrated(projection, normalized_projector, live_rig, NULL, frame,
+                                           control, calibration);
+}
+
+bool eidolon_vrm_projection_publish_base_motion_frame_calibrated(
+    EidolonVrmProjection *projection, EidolonVrmRetargeter *normalized_projector,
+    EidolonMotionRig *live_rig, const EidolonMotionRig *candidate_base,
+    const EidolonEprMotionFrame *frame, const EidolonCanonicalControl *control,
+    const EidolonVrmCalibration *calibration) {
+    return publish_motion_frame_calibrated(projection, normalized_projector, live_rig,
+                                           candidate_base, frame, control, calibration);
 }
 
 bool eidolon_vrm_projection_apply(EidolonVrmProjection *projection, EidolonMotionRig *rig,
@@ -623,8 +1008,11 @@ bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
     float expression_weight = 0.0F;
     if (projection == NULL || rig == NULL || control == NULL || !projection->ready ||
         !control->valid || control->version != EIDOLON_EPR_CONTROL_VERSION ||
-        !control_finite(control) || rig->node_count != projection->node_count ||
-        control->revision <= projection->control_revision) {
+        control->revision == 0U || !control_finite(control) ||
+        rig->node_count != projection->node_count ||
+        control->revision < projection->control_revision ||
+        (control->revision == projection->control_revision &&
+         projection->projected_base_revision == projection->base_revision)) {
         return false;
     }
     if (!prepare_residual_ownership(projection, control, calibration)) {
@@ -632,7 +1020,7 @@ bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
     }
     stage_base_pose(projection, rig);
     if (!eidolon_motion_rebuild_world(&projection->scratch) ||
-        !apply_control(projection, &projection->scratch, control, &expression_weight) ||
+        !apply_legacy_control(projection, &projection->scratch, control, &expression_weight) ||
         !apply_calibration_residuals(&projection->scratch, projection, control, calibration) ||
         !pose_finite(&projection->scratch)) {
         return false;
@@ -645,8 +1033,11 @@ bool eidolon_vrm_projection_apply_calibrated(EidolonVrmProjection *projection,
     }
     projection->focused_expression_weight = expression_weight;
     projection->control_revision = control->revision;
+    projection->projected_base_revision = projection->base_revision;
     memcpy(projection->residual_owned_nodes, projection->candidate_residual_owned_nodes,
            projection->node_count * sizeof(*projection->residual_owned_nodes));
+    projection->has_motion_frame = false;
+    clear_right_arm_continuity(projection);
     return true;
 }
 

@@ -7,7 +7,9 @@
 #include "motion.h"
 #include "pose.h"
 #include "presentation.h"
+#include "semantic_motion_pack.h"
 #include "vrm_calibration.h"
+#include "vrm_playback.h"
 
 #define EIDOLON_MODEL_RENDER_RESOLUTION_MIN 512
 #define EIDOLON_MODEL_RENDER_RESOLUTION_DEFAULT 1024
@@ -20,30 +22,33 @@ typedef struct EidolonVrmRuntimeReport {
     size_t texture_count;
     size_t joint_count;
     uint64_t projection_revision;
+    uint64_t base_revision;
+    uint64_t playback_revision;
     uint64_t frame_sequence;
     bool geometry_ready;
     bool textures_ready;
     bool skinning_ready;
     bool shaders_ready;
     bool projection_ready;
+    bool animation_ready;
     bool hidden_frame_ready;
 } EidolonVrmRuntimeReport;
 
 EidolonModelRenderer *eidolon_model_create(SDL_Renderer *renderer,
                                            EidolonPresentation *presentation,
-                                           const char *model_path,
-                                           const char *shader_directory,
+                                           const char *model_path, const char *shader_directory,
                                            EidolonNeutralPose neutral_pose,
                                            EidolonIdleTuning idle_tuning);
 void eidolon_model_update(EidolonModelRenderer *model, uint64_t now_ms);
+bool eidolon_model_update_motion(EidolonModelRenderer *model, uint64_t now_ms);
 void eidolon_model_request_redraw(EidolonModelRenderer *model);
 bool eidolon_model_ready(const EidolonModelRenderer *model);
 uint64_t eidolon_model_content_revision(const EidolonModelRenderer *model);
-bool eidolon_model_render_presentation_target(
-    EidolonModelRenderer *model, EidolonPresentation *presentation,
-    const EidolonPresentationTargetUpdate *update);
-bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model,
-                                     const uint8_t **pixels, size_t *pitch);
+bool eidolon_model_render_presentation_target(EidolonModelRenderer *model,
+                                              EidolonPresentation *presentation,
+                                              const EidolonPresentationTargetUpdate *update);
+bool eidolon_model_target_alpha_mask(const EidolonModelRenderer *model, const uint8_t **pixels,
+                                     uint32_t *width, uint32_t *height, size_t *pitch);
 void eidolon_model_set_rotation(EidolonModelRenderer *model, float yaw_radians, float pitch_radians,
                                 float roll_radians);
 void eidolon_model_set_neutral_pose(EidolonModelRenderer *model, float arm_lower_radians,
@@ -63,8 +68,28 @@ bool eidolon_model_apply_control(EidolonModelRenderer *model,
 bool eidolon_model_apply_control_calibrated(EidolonModelRenderer *model,
                                             const EidolonCanonicalControl *control,
                                             const EidolonVrmCalibration *calibration);
+bool eidolon_model_apply_performance(EidolonModelRenderer *model,
+                                     const EidolonCanonicalControl *control,
+                                     const EidolonEprMotionFrame *motion_frame);
+bool eidolon_model_epr_motion_load(EidolonModelRenderer *model,
+                                   EidolonEprMotionGeneratorId generator, const char *path,
+                                   uint64_t source_identity, bool loop);
+bool eidolon_model_epr_motion_pack_load(EidolonModelRenderer *model,
+                                        const EidolonSemanticMotionAsset *assets, size_t count);
+bool eidolon_model_epr_motion_catalog(const EidolonModelRenderer *model,
+                                      EidolonEprMotionCatalog *catalog);
 bool eidolon_model_vrm_runtime_report(const EidolonModelRenderer *model,
                                       EidolonVrmRuntimeReport *report);
+bool eidolon_model_vrm_animation_load(EidolonModelRenderer *model, const char *path,
+                                      const char *identity, bool loop, uint64_t now_ms);
+bool eidolon_model_vrm_animation_play(EidolonModelRenderer *model, uint64_t now_ms);
+bool eidolon_model_vrm_animation_pause(EidolonModelRenderer *model, uint64_t now_ms);
+bool eidolon_model_vrm_animation_seek(EidolonModelRenderer *model, float seconds, uint64_t now_ms);
+bool eidolon_model_vrm_animation_set_loop(EidolonModelRenderer *model, bool loop);
+bool eidolon_model_vrm_animation_set_rate(EidolonModelRenderer *model, float playback_rate,
+                                          uint64_t now_ms);
+bool eidolon_model_vrm_animation_report(const EidolonModelRenderer *model,
+                                        EidolonVrmPlaybackReport *report);
 uint64_t eidolon_model_vrm_projection_revision(const EidolonModelRenderer *model);
 const char *eidolon_model_body_name(const EidolonModelRenderer *model);
 bool eidolon_model_set_render_resolution(EidolonModelRenderer *model, int side);
